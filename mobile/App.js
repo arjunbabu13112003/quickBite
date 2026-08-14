@@ -708,6 +708,42 @@ export default function App() {
   const [isStore99ModalOpen, setIsStore99ModalOpen] = useState(false);
   const [backendCoupons, setBackendCoupons] = useState([]);
 
+  // Replace Cart Mismatch Modal State
+  const [showReplaceCartModal, setShowReplaceCartModal] = useState(false);
+  const [pendingCartAction, setPendingCartAction] = useState(null);
+
+  const handleAddCartItem = (newHotelId, newRestaurantName, addAction) => {
+    const firstItem = cartItems.length > 0 ? cartItems[0] : null;
+    if (firstItem) {
+      const activeHotelId = firstItem.hotelId;
+      const activeRestName = firstItem.restaurantName;
+      
+      const isIdMismatch = activeHotelId && newHotelId && Number(activeHotelId) !== Number(newHotelId);
+      const isNameMismatch = activeRestName && newRestaurantName && activeRestName !== newRestaurantName;
+      
+      if (isIdMismatch || isNameMismatch) {
+        setPendingCartAction(() => addAction);
+        setShowReplaceCartModal(true);
+        return;
+      }
+    }
+    addAction();
+  };
+
+  const handleClearCartAndAdd = () => {
+    setCartItems([]);
+    if (pendingCartAction) {
+      pendingCartAction();
+    }
+    setShowReplaceCartModal(false);
+    setPendingCartAction(null);
+  };
+
+  const handleCancelReplace = () => {
+    setShowReplaceCartModal(false);
+    setPendingCartAction(null);
+  };
+
   const fetchBackendOffers = async () => {
     const hotelId = cartItems.length > 0 ? cartItems[0].hotelId : null;
     if (!hotelId || !currentUser?.token) return;
@@ -1695,7 +1731,12 @@ export default function App() {
   // Item Customization Modal
   const openCustomizer = (item, restaurant) => {
     setViewingProduct(null);
-    setCustomizingItem({ ...item, restaurantName: restaurant ? restaurant.name : 'QuickBite' });
+    const resolvedHotelId = item.hotelId || (restaurant ? restaurant.id : null);
+    setCustomizingItem({
+      ...item,
+      hotelId: resolvedHotelId,
+      restaurantName: restaurant ? restaurant.name : 'QuickBite'
+    });
     setItemQuantity(1);
 
     const nameLower = (item?.name || '').toLowerCase();
@@ -1727,71 +1768,84 @@ export default function App() {
     const unitPrice = getBasePrice(customizingItem, itemSpice) + addonsTotal;
     const addonNames = itemAddons.map(a => a.name).sort().join(',');
 
-    setCartItems(prev => {
-      const existingIndex = prev.findIndex(i =>
-        i.itemId === customizingItem.id &&
-        i.spice === itemSpice &&
-        (i.addons || []).sort().join(',') === addonNames
-      );
+    const action = () => {
+      setCartItems(prev => {
+        const existingIndex = prev.findIndex(i =>
+          i.itemId === customizingItem.id &&
+          i.spice === itemSpice &&
+          (i.addons || []).sort().join(',') === addonNames
+        );
 
-      if (existingIndex > -1) {
-        const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + itemQuantity
+        if (existingIndex > -1) {
+          const updated = [...prev];
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            quantity: updated[existingIndex].quantity + itemQuantity
+          };
+          return updated;
+        }
+
+        const cartItem = {
+          cartItemId: `${customizingItem.id}-${Date.now()}`,
+          itemId: customizingItem.id,
+          name: customizingItem.name,
+          restaurantName: customizingItem.restaurantName,
+          hotelId: customizingItem.hotelId,
+          price: unitPrice,
+          image: customizingItem.image,
+          quantity: itemQuantity,
+          spice: itemSpice,
+          addons: itemAddons.map(a => a.name),
+          is99StoreItem: customizingItem.is99StoreItem || false,
+          isVeg: customizingItem.isVeg || false
         };
-        return updated;
-      }
+        return [...prev, cartItem];
+      });
 
-      const cartItem = {
-        cartItemId: `${customizingItem.id}-${Date.now()}`,
-        itemId: customizingItem.id,
-        name: customizingItem.name,
-        restaurantName: customizingItem.restaurantName,
-        price: unitPrice,
-        image: customizingItem.image,
-        quantity: itemQuantity,
-        spice: itemSpice,
-        addons: itemAddons.map(a => a.name),
-        is99StoreItem: customizingItem.is99StoreItem || false,
-        isVeg: customizingItem.isVeg || false
-      };
-      return [...prev, cartItem];
-    });
+      triggerAddToCartAnimation(customizingItem.name);
+      setCustomizingItem(null);
+    };
 
-    triggerAddToCartAnimation(customizingItem.name);
-    setCustomizingItem(null);
+    handleAddCartItem(customizingItem.hotelId, customizingItem.restaurantName, action);
   };
 
   // Quick Add Item directly to cart with animation
   const quickAddToCart = (item, restaurant) => {
-    setCartItems(prev => {
-      const existingIndex = prev.findIndex(i => i.itemId === item.id && (!i.addons || i.addons.length === 0));
-      if (existingIndex > -1) {
-        const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + 1
+    const itemHotelId = item.hotelId || (restaurant ? restaurant.id : null);
+    const itemRestName = restaurant ? restaurant.name : (item.restaurant ? item.restaurant.name : 'QuickBite');
+
+    const action = () => {
+      setCartItems(prev => {
+        const existingIndex = prev.findIndex(i => i.itemId === item.id && (!i.addons || i.addons.length === 0));
+        if (existingIndex > -1) {
+          const updated = [...prev];
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            quantity: updated[existingIndex].quantity + 1
+          };
+          return updated;
+        }
+
+        const newCartItem = {
+          cartItemId: `${item.id}-${Date.now()}`,
+          itemId: item.id,
+          name: item.name,
+          restaurantName: itemRestName,
+          hotelId: itemHotelId,
+          price: item.price,
+          image: item.image,
+          quantity: 1,
+          spice: 'Medium',
+          addons: [],
+          is99StoreItem: item.is99StoreItem || false
         };
-        return updated;
-      }
+        return [...prev, newCartItem];
+      });
 
-      const newCartItem = {
-        cartItemId: `${item.id}-${Date.now()}`,
-        itemId: item.id,
-        name: item.name,
-        restaurantName: restaurant ? restaurant.name : 'QuickBite',
-        price: item.price,
-        image: item.image,
-        quantity: 1,
-        spice: 'Medium',
-        addons: [],
-        is99StoreItem: item.is99StoreItem || false
-      };
-      return [...prev, newCartItem];
-    });
+      triggerAddToCartAnimation(item.name);
+    };
 
-    triggerAddToCartAnimation(item.name);
+    handleAddCartItem(itemHotelId, itemRestName, action);
   };
 
   const getGroupedCartItems = (items) => {
@@ -3791,6 +3845,117 @@ export default function App() {
                 </View>
               );
             })()}
+          </Modal>
+
+          {/* REPLACE CART CONFIRMATION MODAL */}
+          <Modal
+            visible={showReplaceCartModal}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+            onRequestClose={handleCancelReplace}
+          >
+            <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', padding: 24 }]}>
+              <View style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 24,
+                padding: 24,
+                width: '100%',
+                maxWidth: 320,
+                alignItems: 'center',
+                elevation: 10,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.2,
+                shadowRadius: 8
+              }}>
+                {/* Red Shopping Bag Icon in Light Pink Circle */}
+                <View style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 28,
+                  backgroundColor: '#FEE2E2',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 16
+                }}>
+                  <ShoppingBag size={24} color="#EF4444" />
+                </View>
+
+                {/* Title */}
+                <Text style={{
+                  fontSize: 20,
+                  fontWeight: '900',
+                  color: '#111827',
+                  marginBottom: 8,
+                  textAlign: 'center'
+                }}>
+                  Replace cart?
+                </Text>
+
+                {/* Subtitle */}
+                <Text style={{
+                  fontSize: 14,
+                  color: '#6B7280',
+                  textAlign: 'center',
+                  marginBottom: 24,
+                  lineHeight: 20
+                }}>
+                  Your cart contains items from another restaurant. Adding this item will clear your existing cart.
+                </Text>
+
+                {/* Action Buttons Row */}
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  width: '100%'
+                }}>
+                  {/* Cancel Button */}
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      borderWidth: 1,
+                      borderColor: '#E5E7EB',
+                      borderRadius: 14,
+                      paddingVertical: 12,
+                      marginRight: 10,
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onPress={handleCancelReplace}
+                  >
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: '750',
+                      color: '#4B5563'
+                    }}>
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Clear Cart & Add Button */}
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      backgroundColor: '#EF4444',
+                      borderRadius: 14,
+                      paddingVertical: 12,
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onPress={handleClearCartAndAdd}
+                  >
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: '800',
+                      color: '#FFFFFF'
+                    }}>
+                      Clear Cart & Add
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
           </Modal>
 
           {/* ITEM CUSTOMIZER MODAL */}
