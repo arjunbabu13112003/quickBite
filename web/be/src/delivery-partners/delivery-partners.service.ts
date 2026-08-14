@@ -113,6 +113,22 @@ export class DeliveryPartnersService {
     return await this.partnerRepository.save(profile);
   }
 
+  async updateLocation(
+    userId: number,
+    latitude: number,
+    longitude: number,
+  ): Promise<{ success: boolean }> {
+    const profile = await this.partnerRepository.findOne({ where: { userId } });
+    if (!profile) {
+      throw new NotFoundException('Delivery partner profile not found');
+    }
+    profile.currentLatitude = latitude;
+    profile.currentLongitude = longitude;
+    profile.locationUpdatedAt = new Date();
+    await this.partnerRepository.save(profile);
+    return { success: true };
+  }
+
   async verifyPartner(
     partnerId: number,
     isVerified: boolean,

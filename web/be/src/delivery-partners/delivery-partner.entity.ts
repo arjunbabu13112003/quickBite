@@ -43,6 +43,15 @@ export class DeliveryPartner {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  currentLatitude?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  currentLongitude?: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  locationUpdatedAt?: Date;
+
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;

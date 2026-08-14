@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Food } from './food.entity';
 import { Hotel } from '../hotels/hotel.entity';
 import { Category } from '../categories/category.entity';
@@ -21,6 +21,7 @@ export class FoodsService {
     private readonly hotelRepository: Repository<Hotel>,
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(hotelId: number, createFoodDto: CreateFoodDto): Promise<Food> {
@@ -146,7 +147,31 @@ export class FoodsService {
       .orderBy('food.displayOrder', 'ASC')
       .addOrderBy('food.id', 'ASC');
 
-    return await queryBuilder.getMany();
+    const foods = await queryBuilder.getMany();
+
+    const reviewsStats = await this.dataSource.query(`
+      SELECT "foodId", AVG(rating) as average, COUNT(id) as count
+      FROM food_reviews
+      WHERE "isActive" = true
+      GROUP BY "foodId"
+    `);
+
+    const statsMap = new Map<number, { average: number; count: number }>();
+    reviewsStats.forEach((row: any) => {
+      statsMap.set(Number(row.foodId), {
+        average: parseFloat(parseFloat(row.average).toFixed(1)),
+        count: parseInt(row.count, 10)
+      });
+    });
+
+    return foods.map((food) => {
+      const stats = statsMap.get(food.id);
+      return {
+        ...food,
+        averageRating: stats ? stats.average : 0,
+        ratingCount: stats ? stats.count : 0,
+      };
+    }) as any;
   }
 
   async findOne(id: number): Promise<Food> {

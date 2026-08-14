@@ -16,6 +16,7 @@ import { UpdateDeliveryPartnerStatusDto } from './dto/update-delivery-partner-st
 import { VerifyDeliveryPartnerDto } from './dto/verify-delivery-partner.dto';
 import { AssignDeliveryPartnerDto } from './dto/assign-delivery-partner.dto';
 import { UpdateDeliveryOrderStatusDto } from './dto/update-delivery-order-status.dto';
+import { UpdateLocationDto } from './dto/update-location.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { JwtAuthGuard } from '../users/jwt-auth.guard';
 import { RolesGuard } from '../users/roles.guard';
@@ -103,6 +104,12 @@ export class DeliveryPartnersController {
   @Patch('delivery-partners/me/status')
   updateStatus(@Body() dto: UpdateDeliveryPartnerStatusDto, @Request() req) {
     return this.partnersService.updateStatus(req.user.userId, dto);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Patch('delivery-partners/me/location')
+  updateLocation(@Body() dto: UpdateLocationDto, @Request() req) {
+    return this.partnersService.updateLocation(req.user.userId, dto.latitude, dto.longitude);
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)

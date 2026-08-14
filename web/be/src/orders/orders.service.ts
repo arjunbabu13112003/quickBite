@@ -451,6 +451,13 @@ export class OrdersService {
                   phoneNumber: activeAssignment.deliveryPartner.phoneNumber,
                   vehicleType: activeAssignment.deliveryPartner.vehicleType,
                   vehicleNumber: activeAssignment.deliveryPartner.vehicleNumber,
+                  currentLatitude: activeAssignment.deliveryPartner.currentLatitude
+                    ? parseFloat(activeAssignment.deliveryPartner.currentLatitude.toString())
+                    : null,
+                  currentLongitude: activeAssignment.deliveryPartner.currentLongitude
+                    ? parseFloat(activeAssignment.deliveryPartner.currentLongitude.toString())
+                    : null,
+                  locationUpdatedAt: activeAssignment.deliveryPartner.locationUpdatedAt || null,
                   user: activeAssignment.deliveryPartner.user
                     ? { name: activeAssignment.deliveryPartner.user.name }
                     : null,
