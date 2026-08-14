@@ -18,12 +18,12 @@ export class Offer {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
-  hotelId: number;
+  @Column({ nullable: true })
+  hotelId: number | null;
 
-  @ManyToOne(() => Hotel, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Hotel, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'hotelId' })
-  hotel: Hotel;
+  hotel: Hotel | null;
 
   @Column({ type: 'varchar', length: 255 })
   name: string;

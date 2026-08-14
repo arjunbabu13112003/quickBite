@@ -48,13 +48,21 @@ export class OffersController {
   @Roles(UserRole.HOTEL_ADMIN)
   @Post()
   async create(@Body() createOfferDto: CreateOfferDto, @Request() req) {
-    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    let hotelId: number | null = null;
+    if (req.user.role === UserRole.SUPER_ADMIN) {
+      hotelId = createOfferDto['hotelId'] !== undefined ? createOfferDto['hotelId'] : null;
+    } else {
+      hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    }
     return this.offersService.createOffer(hotelId, createOfferDto);
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
   @Get('hotel/me')
   async findAll(@Request() req) {
+    if (req.user.role === UserRole.SUPER_ADMIN) {
+      return this.offersService.getOffersForHotel(null);
+    }
     const hotelId = await this.getHotelIdForAdmin(req.user.userId);
     return this.offersService.getOffersForHotel(hotelId);
   }
@@ -62,6 +70,9 @@ export class OffersController {
   @Roles(UserRole.HOTEL_ADMIN)
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    if (req.user.role === UserRole.SUPER_ADMIN) {
+      return this.offersService.getOfferById(id, null);
+    }
     const hotelId = await this.getHotelIdForAdmin(req.user.userId);
     return this.offersService.getOfferById(id, hotelId);
   }
@@ -73,13 +84,21 @@ export class OffersController {
     @Body() updateOfferDto: UpdateOfferDto,
     @Request() req,
   ) {
-    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    let hotelId: number | null = null;
+    if (req.user.role === UserRole.SUPER_ADMIN) {
+      hotelId = updateOfferDto['hotelId'] !== undefined ? updateOfferDto['hotelId'] : null;
+    } else {
+      hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    }
     return this.offersService.updateOffer(id, hotelId, updateOfferDto);
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    if (req.user.role === UserRole.SUPER_ADMIN) {
+      return this.offersService.deleteOffer(id, null);
+    }
     const hotelId = await this.getHotelIdForAdmin(req.user.userId);
     return this.offersService.deleteOffer(id, hotelId);
   }
@@ -87,6 +106,9 @@ export class OffersController {
   @Roles(UserRole.HOTEL_ADMIN)
   @Post('hotel/me/:id/duplicate')
   async duplicate(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    if (req.user.role === UserRole.SUPER_ADMIN) {
+      return this.offersService.duplicateOffer(id, null);
+    }
     const hotelId = await this.getHotelIdForAdmin(req.user.userId);
     return this.offersService.duplicateOffer(id, hotelId);
   }

@@ -32,20 +32,22 @@ export class OffersService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async createOffer(hotelId: number, dto: CreateOfferDto): Promise<Offer> {
+  async createOffer(hotelId: number | null, dto: CreateOfferDto): Promise<Offer> {
     // 1. Verify hotel exists
-    const hotel = await this.hotelRepository.findOne({ where: { id: hotelId } });
-    if (!hotel) {
-      throw new NotFoundException(`Hotel with ID ${hotelId} not found`);
+    if (hotelId !== null) {
+      const hotel = await this.hotelRepository.findOne({ where: { id: hotelId } });
+      if (!hotel) {
+        throw new NotFoundException(`Hotel with ID ${hotelId} not found`);
+      }
     }
 
     // 2. Check unique code per hotel
     const normalizedCode = dto.code.trim().toUpperCase();
     const existing = await this.offerRepository.findOne({
-      where: { code: normalizedCode, hotelId },
+      where: { code: normalizedCode, hotelId: hotelId ?? null },
     });
     if (existing) {
-      throw new ConflictException(`Promo code "${normalizedCode}" already exists for this restaurant.`);
+      throw new ConflictException(`Promo code "${normalizedCode}" already exists.`);
     }
 
     // 3. Validate dates
@@ -86,9 +88,9 @@ export class OffersService {
     return await this.offerRepository.save(offer);
   }
 
-  async updateOffer(id: number, hotelId: number, dto: UpdateOfferDto): Promise<Offer> {
+  async updateOffer(id: number, hotelId: number | null, dto: UpdateOfferDto): Promise<Offer> {
     const offer = await this.offerRepository.findOne({
-      where: { id, hotelId },
+      where: { id, hotelId: hotelId ?? null },
       relations: ['applicableCategories', 'applicableFoods'],
     });
     if (!offer) {
@@ -98,7 +100,7 @@ export class OffersService {
     if (dto.code) {
       const normalizedCode = dto.code.trim().toUpperCase();
       const existing = await this.offerRepository.findOne({
-        where: { code: normalizedCode, hotelId },
+        where: { code: normalizedCode, hotelId: hotelId ?? null },
       });
       if (existing && existing.id !== id) {
         throw new ConflictException(`Promo code "${normalizedCode}" is already in use by another campaign.`);
@@ -140,8 +142,8 @@ export class OffersService {
     return await this.offerRepository.save(offer);
   }
 
-  async deleteOffer(id: number, hotelId: number): Promise<any> {
-    const offer = await this.offerRepository.findOne({ where: { id, hotelId } });
+  async deleteOffer(id: number, hotelId: number | null): Promise<any> {
+    const offer = await this.offerRepository.findOne({ where: { id, hotelId: hotelId ?? null } });
     if (!offer) {
       throw new NotFoundException('Offer not found');
     }
@@ -151,17 +153,17 @@ export class OffersService {
     return { success: true, message: 'Offer deleted successfully' };
   }
 
-  async getOffersForHotel(hotelId: number): Promise<Offer[]> {
+  async getOffersForHotel(hotelId: number | null): Promise<Offer[]> {
     return await this.offerRepository.find({
-      where: { hotelId },
+      where: { hotelId: hotelId ?? null },
       relations: ['applicableCategories', 'applicableFoods'],
       order: { createdAt: 'DESC' },
     });
   }
 
-  async getOfferById(id: number, hotelId: number): Promise<Offer> {
+  async getOfferById(id: number, hotelId: number | null): Promise<Offer> {
     const offer = await this.offerRepository.findOne({
-      where: { id, hotelId },
+      where: { id, hotelId: hotelId ?? null },
       relations: ['applicableCategories', 'applicableFoods'],
     });
     if (!offer) {
@@ -170,9 +172,9 @@ export class OffersService {
     return offer;
   }
 
-  async duplicateOffer(id: number, hotelId: number): Promise<Offer> {
+  async duplicateOffer(id: number, hotelId: number | null): Promise<Offer> {
     const original = await this.offerRepository.findOne({
-      where: { id, hotelId },
+      where: { id, hotelId: hotelId ?? null },
       relations: ['applicableCategories', 'applicableFoods'],
     });
     if (!original) {
@@ -208,10 +210,12 @@ export class OffersService {
     subtotal: number,
     deliveryFee: number,
   ): Promise<{ isValid: boolean; message?: string; offer?: Offer; discountAmount: number; finalDeliveryFee: number }> {
-    const offer = await this.offerRepository.findOne({
-      where: { code: code.trim().toUpperCase(), hotelId },
-      relations: ['applicableCategories', 'applicableFoods'],
-    });
+    const offer = await this.offerRepository.createQueryBuilder('offer')
+      .leftJoinAndSelect('offer.applicableCategories', 'category')
+      .leftJoinAndSelect('offer.applicableFoods', 'food')
+      .where('offer.code = :code', { code: code.trim().toUpperCase() })
+      .andWhere('(offer.hotelId = :hotelId OR offer.hotelId IS NULL)', { hotelId })
+      .getOne();
 
     if (!offer) {
       return { isValid: false, message: '❌ Invalid Promo Code.', discountAmount: 0, finalDeliveryFee: deliveryFee };
@@ -311,10 +315,11 @@ export class OffersService {
     if (existing) return;
 
     // pessimistic lock to prevent concurrent double-booking of counts
-    const offer = await manager.findOne(Offer, {
-      where: { code: order.couponCode, hotelId: order.hotelId },
-      lock: { mode: 'pessimistic_write' },
-    });
+    const offer = await manager.createQueryBuilder(Offer, 'offer')
+      .setLock('pessimistic_write')
+      .where('offer.code = :code', { code: order.couponCode })
+      .andWhere('(offer.hotelId = :hotelId OR offer.hotelId IS NULL)', { hotelId: order.hotelId })
+      .getOne();
 
     if (!offer) return;
 
@@ -335,7 +340,7 @@ export class OffersService {
 
   async getOffersForCustomer(hotelId: number, now: Date): Promise<Offer[]> {
     return await this.offerRepository.createQueryBuilder('offer')
-      .where('offer.hotelId = :hotelId', { hotelId })
+      .where('(offer.hotelId = :hotelId OR offer.hotelId IS NULL)', { hotelId })
       .andWhere('offer.isActive = true')
       .andWhere('offer.startAt <= :now', { now })
       .andWhere('offer.endAt >= :now', { now })
