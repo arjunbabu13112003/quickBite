@@ -18,7 +18,8 @@ import {
   Platform,
   ActivityIndicator,
   Animated,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
+  Linking
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
@@ -732,6 +733,9 @@ export default function App() {
 
   const handleClearCartAndAdd = () => {
     setCartItems([]);
+    setAppliedPromo(null);
+    setPromoInput('');
+    setPromoError('');
     if (pendingCartAction) {
       pendingCartAction();
     }
@@ -854,6 +858,7 @@ export default function App() {
   const [checkoutLoadingText, setCheckoutLoadingText] = useState('');
   const [lastPlacedOrder, setLastPlacedOrder] = useState(null);
   const [activeOrderDetail, setActiveOrderDetail] = useState(null);
+  const [paymentFailedModal, setPaymentFailedModal] = useState({ visible: false, title: 'Payment Failed', message: '' });
 
   const mapStatusToStep = (status) => {
     switch (status?.toLowerCase()) {
@@ -1253,12 +1258,15 @@ export default function App() {
   };
 
   const calculateAverageRating = (item) => {
-    if (!item) return '4.9';
+    if (!item) return '0.0';
     if (viewingProduct && item.id === viewingProduct.id && ratingSummary?.averageRating !== undefined && ratingSummary?.averageRating !== null) {
       return Number(ratingSummary.averageRating).toFixed(1);
     }
+    if (item.averageRating !== undefined && item.averageRating !== null) {
+      return Number(item.averageRating).toFixed(1);
+    }
     const reviews = getDishReviews(item);
-    if (!reviews || reviews.length === 0) return '4.9';
+    if (!reviews || reviews.length === 0) return '0.0';
     const total = reviews.reduce((sum, r) => sum + r.rating, 0);
     return (total / reviews.length).toFixed(1);
   };
@@ -1995,6 +2003,69 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!currentUser?.token) return;
+    if (cartItems.length === 0) {
+      if (appliedPromo) {
+        setAppliedPromo(null);
+      }
+      return;
+    }
+
+    if (appliedPromo) {
+      const revalidatePromo = async () => {
+        try {
+          const backendUrl = await getActiveBackend();
+          const hotelId = cartItems[0].hotelId;
+          const validationPayload = {
+            code: appliedPromo.code,
+            hotelId: Number(hotelId),
+            items: cartItems.map(i => ({
+              foodId: Number(i.itemId),
+              quantity: Number(i.quantity),
+              finalUnitPrice: Number(i.price),
+            })),
+            subtotal: Number(subtotal),
+            deliveryFee: Number(rawDeliveryFee),
+          };
+
+          const res = await fetch(`${backendUrl}/offers/validate`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${currentUser?.token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(validationPayload)
+          });
+
+          if (res.ok) {
+            const validation = await res.json();
+            if (!validation.isValid) {
+              setAppliedPromo(null);
+              triggerToastNotification('⚠️ Applied coupon is no longer valid for this cart');
+            } else {
+              setAppliedPromo(prev => {
+                if (!prev) return null;
+                return {
+                  ...prev,
+                  discountAmount: Number(validation.discountAmount),
+                  finalDeliveryFee: Number(validation.finalDeliveryFee)
+                };
+              });
+            }
+          } else {
+            setAppliedPromo(null);
+            triggerToastNotification('⚠️ Applied coupon is no longer valid for this cart');
+          }
+        } catch (err) {
+          console.error('Error revalidating applied promo:', err);
+        }
+      };
+
+      revalidatePromo();
+    }
+  }, [cartItems, currentUser?.token]);
+
   const handlePlaceOrder = async () => {
     if (cartItems.length === 0) return;
     if (!selectedAddress) {
@@ -2204,19 +2275,20 @@ export default function App() {
             useNativeDriver: true
           }).start();
         } catch (e) {
-          Alert.alert('Payment Verification Failed', e.message || 'We could not verify your payment. Please contact support.');
+          console.error('Payment verification error:', e);
+          setPaymentFailedModal({ visible: true, title: 'Payment Failed', message: "We couldn't verify your payment. Please contact support if the amount was deducted." });
         } finally {
           setIsProcessingCheckout(false);
         }
       }).catch((error) => {
         console.warn('Razorpay checkout error:', error);
-        Alert.alert('Payment Failed', error.description || 'Payment was not completed. Please try again.');
+        setPaymentFailedModal({ visible: true, title: 'Payment Failed', message: "We couldn't complete your payment. Please try again or choose another payment method." });
         setIsProcessingCheckout(false);
       });
 
     } catch (err) {
       console.error('handlePlaceOrder error:', err);
-      Alert.alert('Order Placement Failed', err.message || 'Could not place order. Please try again.');
+      setPaymentFailedModal({ visible: true, title: 'Order Failed', message: "We couldn't place your order. Please check your connection and try again." });
       setIsProcessingCheckout(false);
     }
   };
@@ -3510,10 +3582,14 @@ export default function App() {
                               </Text>
 
                               <View style={styles.rdFoodMetaRow}>
-                                <Star size={10} color="#F59E0B" fill="#F59E0B" style={{ marginRight: 2 }} />
-                                <Text style={[styles.rdFoodMetaText, { color: D.textSub }]}>
-                                  {calculateAverageRating(item)}
-                                </Text>
+                                {item.averageRating > 0 ? (
+                                  <>
+                                    <Star size={10} color="#F59E0B" fill="#F59E0B" style={{ marginRight: 2 }} />
+                                    <Text style={[styles.rdFoodMetaText, { color: D.textSub }]}>{Number(item.averageRating).toFixed(1)}</Text>
+                                  </>
+                                ) : (
+                                  <Text style={[styles.rdFoodMetaText, { color: D.textSub }]}>New</Text>
+                                )}
                               </View>
 
                               {/* Price + Add Button Row */}
@@ -4579,15 +4655,16 @@ export default function App() {
           {/* CHECKOUT & PAYMENT MODAL */}
           <Modal visible={isCheckoutOpen} animationType="slide" statusBarTranslucent onRequestClose={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setIsCartOpen(true); } }}>
             <SafeAreaView style={{ flex: 1, backgroundColor: D.bg }}>
-              <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-                
+              <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <View style={{ flex: 1, flexDirection: 'column' }}>
+
                 {/* HEADER */}
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   paddingHorizontal: 20,
-                  paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 12 : 12,
+                  paddingTop: 8,
                   paddingBottom: 12,
                   backgroundColor: D.card,
                   borderBottomWidth: 1,
@@ -4613,8 +4690,10 @@ export default function App() {
 
                 {/* MAIN CONTENT */}
                 <ScrollView 
-                  contentContainerStyle={{ padding: 16, paddingBottom: 100 }} 
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }} 
                   showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
                 >
                   
                   {/* DELIVERY ADDRESS SECTION */}
@@ -4710,8 +4789,8 @@ export default function App() {
                                 Qty: {item.quantity} • Rs. {item.price} each
                               </Text>
                             </View>
-                            <Text style={{ fontSize: 14, fontWeight: '700', color: D.text, marginLeft: 12 }}>
-                              Rs. {item.totalPrice}
+                            <Text style={{ fontSize: 14, fontWeight: '700', color: D.text, marginLeft: 12, flexShrink: 0 }}>
+                              Rs. {Math.round(Number(item.price) * Number(item.quantity))}
                             </Text>
                           </View>
                           {item.customizations && item.customizations.length > 0 && (
@@ -4910,8 +4989,117 @@ export default function App() {
                   </TouchableOpacity>
                 </View>
 
+                </View>
               </KeyboardAvoidingView>
             </SafeAreaView>
+          </Modal>
+
+          {/* PAYMENT FAILED MODAL */}
+          <Modal
+            visible={paymentFailedModal.visible}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+            onRequestClose={() => setPaymentFailedModal(prev => ({ ...prev, visible: false }))}
+          >
+            <View style={{
+              flex: 1,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              paddingHorizontal: 28,
+            }}>
+              <View style={{
+                backgroundColor: D.card,
+                borderRadius: 24,
+                padding: 28,
+                width: '100%',
+                maxWidth: 360,
+                alignItems: 'center',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.18,
+                shadowRadius: 24,
+                elevation: 16,
+                borderWidth: 1,
+                borderColor: D.cardBorder,
+              }}>
+
+                {/* Red Fail Icon */}
+                <View style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: 36,
+                  backgroundColor: '#FEE2E2',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 20,
+                }}>
+                  <View style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 26,
+                    backgroundColor: '#EF4444',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <Text style={{ fontSize: 26, color: '#ffffff', fontWeight: '900', lineHeight: 30 }}>✕</Text>
+                  </View>
+                </View>
+
+                {/* Title */}
+                <Text style={{
+                  fontSize: 20,
+                  fontWeight: '800',
+                  color: D.heading,
+                  marginBottom: 10,
+                  textAlign: 'center',
+                }}>
+                  {paymentFailedModal.title}
+                </Text>
+
+                {/* Message */}
+                <Text style={{
+                  fontSize: 14,
+                  color: D.textSub,
+                  textAlign: 'center',
+                  lineHeight: 22,
+                  marginBottom: 28,
+                  paddingHorizontal: 4,
+                }}>
+                  {paymentFailedModal.message}
+                </Text>
+
+                {/* Try Again Button */}
+                <TouchableOpacity
+                  onPress={() => setPaymentFailedModal(prev => ({ ...prev, visible: false }))}
+                  style={{
+                    backgroundColor: '#059669',
+                    borderRadius: 14,
+                    paddingVertical: 14,
+                    width: '100%',
+                    alignItems: 'center',
+                    marginBottom: 12,
+                    shadowColor: '#059669',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.2,
+                    shadowRadius: 8,
+                    elevation: 4,
+                  }}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: '#ffffff' }}>Try Again</Text>
+                </TouchableOpacity>
+
+                {/* Cancel Button */}
+                <TouchableOpacity
+                  onPress={() => setPaymentFailedModal(prev => ({ ...prev, visible: false }))}
+                  style={{ paddingVertical: 10, paddingHorizontal: 20 }}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: D.textSub }}>Cancel</Text>
+                </TouchableOpacity>
+
+              </View>
+            </View>
           </Modal>
 
           {/* ADDRESS MANAGER MODAL WITH LIVE GPS DETECTOR */}
@@ -5291,6 +5479,131 @@ export default function App() {
                         >
                           <Phone size={18} color="#ffffff" />
                         </TouchableOpacity>
+                      </View>
+                    )}
+
+                    {/* ── LIVE TRACKING CARD (only when out_for_delivery) ── */}
+                    {activeOrderDetail?.orderStatus === 'out_for_delivery' && (
+                      <View style={{
+                        backgroundColor: darkMode ? '#0D2B1F' : '#F0FDF4',
+                        borderWidth: 1,
+                        borderColor: darkMode ? '#065F46' : '#6EE7B7',
+                        borderRadius: 16,
+                        padding: 16,
+                        marginTop: 12,
+                        marginBottom: 4,
+                      }}>
+                        {/* Header row */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                          {/* Animated live pulse */}
+                          <View style={{
+                            width: 10, height: 10, borderRadius: 5,
+                            backgroundColor: '#10B981',
+                            marginRight: 8,
+                          }} />
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: '#059669', letterSpacing: 0.5 }}>
+                            LIVE TRACKING
+                          </Text>
+                        </View>
+
+                        {(() => {
+                          const partner = activeOrderDetail?.activeAssignment?.deliveryPartner;
+                          const riderLat = partner?.currentLatitude;
+                          const riderLng = partner?.currentLongitude;
+                          const updatedAt = partner?.locationUpdatedAt;
+                          const custLat = activeOrderDetail?.deliveryAddress?.latitude;
+                          const custLng = activeOrderDetail?.deliveryAddress?.longitude;
+
+                          const openMaps = () => {
+                            if (riderLat && riderLng) {
+                              const label = encodeURIComponent('Delivery Partner');
+                              const url = Platform.OS === 'ios'
+                                ? `maps://?q=${label}&ll=${riderLat},${riderLng}`
+                                : `geo:${riderLat},${riderLng}?q=${riderLat},${riderLng}(${label})`;
+                              Linking.openURL(url).catch(() =>
+                                Linking.openURL(`https://www.google.com/maps?q=${riderLat},${riderLng}`)
+                              );
+                            }
+                          };
+
+                          return (
+                            <View>
+                              {riderLat && riderLng ? (
+                                <View>
+                                  {/* Rider location row */}
+                                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
+                                    <View style={{
+                                      width: 32, height: 32, borderRadius: 16,
+                                      backgroundColor: '#059669',
+                                      alignItems: 'center', justifyContent: 'center',
+                                      marginRight: 10, marginTop: 2,
+                                    }}>
+                                      <Text style={{ fontSize: 14 }}>🛵</Text>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={{ fontSize: 13, fontWeight: '700', color: D.text }}>
+                                        {partner?.user?.name || 'Delivery Partner'}
+                                      </Text>
+                                      <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }}>
+                                        Lat: {riderLat.toFixed(5)}, Lng: {riderLng.toFixed(5)}
+                                      </Text>
+                                      {updatedAt && (
+                                        <Text style={{ fontSize: 10, color: D.textSub, marginTop: 1 }}>
+                                          Updated: {new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                        </Text>
+                                      )}
+                                    </View>
+                                  </View>
+
+                                  {/* Customer destination row */}
+                                  {custLat && custLng && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 }}>
+                                      <View style={{
+                                        width: 32, height: 32, borderRadius: 16,
+                                        backgroundColor: darkMode ? '#374151' : '#E5E7EB',
+                                        alignItems: 'center', justifyContent: 'center',
+                                        marginRight: 10, marginTop: 2,
+                                      }}>
+                                        <Text style={{ fontSize: 14 }}>📍</Text>
+                                      </View>
+                                      <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: '700', color: D.text }}>Your Location</Text>
+                                        <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }}>
+                                          {activeOrderDetail.deliveryAddress.addressLine1}, {activeOrderDetail.deliveryAddress.city}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                  )}
+
+                                  {/* Open in Maps button */}
+                                  <TouchableOpacity
+                                    onPress={openMaps}
+                                    style={{
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      backgroundColor: '#059669',
+                                      borderRadius: 12,
+                                      paddingVertical: 11,
+                                      paddingHorizontal: 16,
+                                    }}
+                                  >
+                                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#ffffff', marginRight: 6 }}>📍</Text>
+                                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#ffffff' }}>Open Rider Location in Maps</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              ) : (
+                                // No coordinates yet
+                                <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4 }}>
+                                  <ActivityIndicator size="small" color="#059669" style={{ marginRight: 10 }} />
+                                  <Text style={{ fontSize: 13, color: D.textSub, flex: 1 }}>
+                                    Waiting for delivery partner location…
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          );
+                        })()}
                       </View>
                     )}
 
