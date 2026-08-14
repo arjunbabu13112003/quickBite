@@ -1,5 +1,5 @@
 // QuickBite Mobile App - Guaranteed HD Food Avatars & Fallback Badges Fix Reload
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   StyleSheet,
@@ -66,7 +66,10 @@ import {
   Moon,
   Sun,
   Zap,
-  Mic
+  Mic,
+  EllipsisVertical,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react-native';
 
 import {
@@ -90,7 +93,7 @@ const getExpoHostIp = () => {
   } catch (e) {
     console.warn('Expo hostUri detection:', e);
   }
-  return '192.168.1.42';
+  return '192.168.220.93';
 };
 
 const { width, height } = Dimensions.get('window');
@@ -99,18 +102,15 @@ const BOTTOM_INSET = Platform.OS === 'android' ? 24 : 34;
 
 // Helper to generate realistic ingredients for any dish
 const getDishIngredients = (item) => {
-  if (item.ingredients) return item.ingredients;
-  const name = item.name.toLowerCase();
-  if (name.includes('biryani')) return ['Aromatic Kaima Rice', 'Tender Marinated Meat', 'Pure Desi Ghee', 'Fried Shallots & Cashews', 'Cardamom & Cloves', 'Fresh Mint Leaves'];
-  if (name.includes('pizza')) return ['Hand-tossed Sourdough Base', '100% Mozzarella Cheese', 'San Marzano Tomato Sauce', 'Extra Virgin Olive Oil', 'Fresh Basil Leaves'];
-  if (name.includes('burger')) return ['Toasted Brioche Bun', 'Smashed Beef/Chicken Patty', 'Aged Yellow Cheddar', 'Caramelized Onions', 'Secret House Sauce'];
-  if (name.includes('sushi') || name.includes('sashimi')) return ['Norwegian Prime Salmon', 'Sushi Rice', 'Nori Seaweed', 'Pickled Ginger', 'Wasabi & Soy Sauce'];
-  if (name.includes('salad') || name.includes('bowl')) return ['Tri-Color Quinoa', 'Haas Avocado', 'Edamame Beans', 'Kale & Baby Spinach', 'Lemon Tahini Dressing'];
-  if (name.includes('taco') || name.includes('burrito')) return ['Warm Corn Tortilla', 'Braised Meat', 'Melted Jack Cheese', 'House Guacamole', 'Fresh Cilantro'];
-  if (name.includes('shawarma') || name.includes('kebab')) return ['Fire-grilled Meat', 'Garlic Toum Dip', 'Pickled Turnip', 'Warm Pita Bread'];
-  if (name.includes('noodle') || name.includes('rice') || name.includes('momo')) return ['Wok Tossed Grains', 'Fresh Garlic & Ginger', 'Dark Soy Sauce', 'Spring Onions', 'Chili Flakes'];
-  if (name.includes('cake') || name.includes('waffle') || name.includes('shake')) return ['Belgian Cocoa', 'Fresh Cream & Butter', 'Natural Vanilla Extract', 'Pure Cane Sugar'];
-  return ['Fresh Local Ingredients', 'Authentic Herbs & Spices', 'Pure Cooking Oil', 'Chef Signature Sauce'];
+  if (!item) return [];
+  if (item.ingredientsList && item.ingredientsList.length > 0) return item.ingredientsList;
+  if (item.ingredients) {
+    if (Array.isArray(item.ingredients)) return item.ingredients;
+    if (typeof item.ingredients === 'string') {
+      return item.ingredients.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
 };
 
 // Helper to generate realistic customer reviews for any dish
@@ -270,6 +270,21 @@ const getBasePrice = (item, spiceLevel) => {
   return base;
 };
 
+const resolveProductImage = (imgStr, activeBackend) => {
+  const host = activeBackend || 'http://192.168.220.93:5000';
+  if (!imgStr) return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
+  
+  let resolved = imgStr;
+  if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
+    // Replace localhost or 127.0.0.1 (with or without port) with the host IP
+    resolved = resolved.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/gi, host);
+    return resolved;
+  }
+  
+  // If relative path, prepend host path
+  return `${host}/uploads/foods/${resolved}`;
+};
+
 export default function App() {
   const bottomInset = initialWindowMetrics?.insets?.bottom || (Platform.OS === 'android' ? 24 : 34);
 
@@ -293,6 +308,152 @@ export default function App() {
 
   // App Data & Filter States
   const [restaurants, setRestaurants] = useState(INITIAL_RESTAURANTS);
+
+  // Helper to dynamically detect active backend endpoint
+  const getActiveBackend = async () => {
+    const endpoints = [
+      `http://${getExpoHostIp()}:5000`,
+      'http://127.0.0.1:5000',
+      'http://localhost:5000',
+      'http://10.0.2.2:5000'
+    ];
+    for (const url of endpoints) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
+        const res = await fetch(`${url}/hotels`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) return url;
+      } catch (e) {}
+    }
+    return 'http://127.0.0.1:5000'; // fallback
+  };
+
+  // Dynamic restaurant category classifier based on food items / categories sold
+  const mapBackendRestaurantCategory = (dbCategories, dbFoods) => {
+    const catNames = (dbCategories || []).map(c => c.name.toLowerCase());
+    const foodNames = (dbFoods || []).map(f => f.name.toLowerCase());
+    
+    if (catNames.some(n => n.includes('burger')) || foodNames.some(n => n.includes('burger'))) {
+      return 'burger';
+    }
+    if (catNames.some(n => n.includes('pizza')) || foodNames.some(n => n.includes('pizza'))) {
+      return 'pizza';
+    }
+    if (catNames.some(n => n.includes('biryani') || n.includes('indian')) || foodNames.some(n => n.includes('biryani'))) {
+      return 'indian';
+    }
+    if (catNames.some(n => n.includes('shawarma') || n.includes('kebab')) || foodNames.some(n => n.includes('shawarma'))) {
+      return 'middle_eastern';
+    }
+    if (catNames.some(n => n.includes('seafood') || n.includes('fish')) || foodNames.some(n => n.includes('seafood') || n.includes('fish'))) {
+      return 'seafood';
+    }
+    if (catNames.some(n => n.includes('healthy') || n.includes('salad')) || foodNames.some(n => n.includes('salad'))) {
+      return 'healthy';
+    }
+    if (catNames.some(n => n.includes('dessert') || n.includes('ice cream') || n.includes('sweet')) || foodNames.some(n => n.includes('dessert') || n.includes('ice cream'))) {
+      return 'desserts';
+    }
+    return 'indian'; // fallback default
+  };
+
+  // Fetch backend data and map it into the UI's expected shape
+  const fetchBackendData = async () => {
+    try {
+      const backendUrl = await getActiveBackend();
+      const res = await fetch(`${backendUrl}/hotels`);
+      if (!res.ok) throw new Error('Failed to fetch hotels');
+      const fetchedHotels = await res.json();
+      
+      const mappedRestaurants = [];
+      for (const hotel of fetchedHotels) {
+        try {
+          const foodsRes = await fetch(`${backendUrl}/hotels/${hotel.id}/foods?activeOnly=true`);
+          if (foodsRes.ok) {
+            const foods = await foodsRes.json();
+            
+            const categoriesMap = new Map();
+            foods.forEach(f => {
+              if (f.category) {
+                categoriesMap.set(f.category.id, f.category);
+              }
+            });
+            const categories = Array.from(categoriesMap.values());
+            
+            const resolveImage = (imgStr) => {
+              if (!imgStr) return null;
+              if (imgStr.startsWith('http://') || imgStr.startsWith('https://')) {
+                if (imgStr.includes('localhost:') || imgStr.includes('127.0.0.1:')) {
+                  return imgStr.replace(/http:\/\/(localhost|127\.0\.0\.1):5000/g, backendUrl);
+                }
+                return imgStr;
+              }
+              return `${backendUrl}/uploads/foods/${imgStr}`;
+            };
+
+            const mappedRest = {
+              id: hotel.id,
+              name: hotel.name,
+              category: mapBackendRestaurantCategory(categories, foods),
+              rating: 4.8,
+              reviewsCount: 150,
+              deliveryTime: `${hotel.deliveryTimeMin || 20}-${hotel.deliveryTimeMax || 35} min`,
+              deliveryFee: Number(hotel.deliveryFee) || 0,
+              minOrder: Number(hotel.minimumOrderAmount) || 0,
+              priceTier: hotel.deliveryFee > 40 ? '₹₹₹' : '₹₹',
+              isTopRated: hotel.featured || false,
+              isVeg: hotel.isPureVeg || false,
+              offerText: hotel.featured ? 'Featured Deal' : '',
+              image: resolveImage(hotel.image) || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80',
+              coverImage: resolveImage(hotel.image) || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80',
+              address: hotel.address,
+              description: hotel.description || '',
+              menu: foods.map(f => ({
+                id: f.id,
+                itemId: f.id,
+                name: f.name,
+                categoryName: f.category?.name || 'Specials',
+                price: Number(f.price),
+                description: f.description || '',
+                image: resolveImage(f.image) || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+                isVeg: f.isVeg || false,
+                isPopular: f.isBestseller || false
+              }))
+            };
+            mappedRestaurants.push(mappedRest);
+          }
+        } catch (e) {
+          console.warn(`Error fetching foods for hotel ${hotel.id}:`, e);
+        }
+      }
+      
+      if (mappedRestaurants.length > 0) {
+        setRestaurants(mappedRestaurants);
+      }
+    } catch (error) {
+      console.warn('Error fetching backend data:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchBackendData();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'home') {
+      fetchBackendData();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (selectedRestaurant) {
+      const updated = restaurants.find(r => r.id === selectedRestaurant.id);
+      if (updated) {
+        setSelectedRestaurant(updated);
+      }
+    }
+  }, [restaurants]);
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' or 'offers'
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
 
@@ -367,6 +528,64 @@ export default function App() {
   const [restaurantOffers, setRestaurantOffers] = useState([]);
   const [loadingRestaurantOffers, setLoadingRestaurantOffers] = useState(false);
 
+  // Restaurant Modal Redesign — scroll animation & filter states
+  const restScrollY = useRef(new Animated.Value(0)).current;
+  const [menuSearchQuery, setMenuSearchQuery] = useState('');
+  const [pureVegFilter, setPureVegFilter] = useState(false);
+  const [recommendedCollapsed, setRecommendedCollapsed] = useState(false);
+  const [searchSectionY, setSearchSectionY] = useState(0);
+  const [isRestStickyActive, setIsRestStickyActive] = useState(false);
+  const lastStickyState = useRef(false);
+
+  // Reset restaurant modal state when restaurant changes
+  useEffect(() => {
+    if (selectedRestaurant) {
+      restScrollY.setValue(0);
+      setMenuSearchQuery('');
+      setPureVegFilter(false);
+      setRecommendedCollapsed(false);
+      setIsRestStickyActive(false);
+      lastStickyState.current = false;
+      setSearchSectionY(0);
+    }
+  }, [selectedRestaurant?.id]);
+
+  // Animated interpolations for header center title
+  const restTitleOpacity = restScrollY.interpolate({
+    inputRange: [60, 140],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const restTitleTranslateY = restScrollY.interpolate({
+    inputRange: [60, 140],
+    outputRange: [5, 0],
+    extrapolate: 'clamp',
+  });
+
+  // Filtered restaurant menu
+  const filteredRestMenu = useMemo(() => {
+    if (!selectedRestaurant?.menu) return [];
+    let items = [...selectedRestaurant.menu];
+    if (pureVegFilter) items = items.filter(i => i.isVeg === true);
+    if (menuSearchQuery.trim()) {
+      const q = menuSearchQuery.trim().toLowerCase();
+      items = items.filter(i => i.name.toLowerCase().includes(q));
+    }
+    return items;
+  }, [selectedRestaurant?.menu, pureVegFilter, menuSearchQuery]);
+
+  // Scroll handler for restaurant modal
+  const handleRestScroll = useCallback((event) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const headerHeight = 56; // fixed header height
+    const shouldStick = searchSectionY > 0 && y >= (searchSectionY - headerHeight);
+    if (shouldStick !== lastStickyState.current) {
+      lastStickyState.current = shouldStick;
+      setIsRestStickyActive(shouldStick);
+    }
+  }, [searchSectionY]);
+
+
   useEffect(() => {
     setRestaurantOffers([]);
     if (!selectedRestaurant || !selectedRestaurant.id) {
@@ -406,6 +625,72 @@ export default function App() {
   const [viewingProduct, setViewingProduct] = useState(null);
   const [productRestaurant, setProductRestaurant] = useState(null);
   const [selectedCategoryModal, setSelectedCategoryModal] = useState(null);
+
+  // Food details reviews & summary states
+  const [backendReviews, setBackendReviews] = useState([]);
+  const [ratingSummary, setRatingSummary] = useState(null);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [detailedFoodItem, setDetailedFoodItem] = useState(null);
+  const [resolvedBackendUrl, setResolvedBackendUrl] = useState(`http://${getExpoHostIp()}:5000`);
+
+  // Initialize resolved backend url on mount
+  useEffect(() => {
+    const initBackend = async () => {
+      const active = await getActiveBackend();
+      setResolvedBackendUrl(active);
+    };
+    initBackend();
+  }, []);
+
+  // Fetch product detailed details, reviews, and summary from backend
+  useEffect(() => {
+    if (!viewingProduct || !viewingProduct.id) {
+      setBackendReviews([]);
+      setRatingSummary(null);
+      setDetailedFoodItem(null);
+      setActiveImageIndex(0);
+      return;
+    }
+    let active = true;
+    const loadProductData = async () => {
+      setLoadingReviews(true);
+      try {
+        const baseUrl = await getActiveBackend();
+        setResolvedBackendUrl(baseUrl);
+        
+        // Fetch full food details (including images list and ingredients list)
+        const foodRes = await fetch(`${baseUrl}/foods/${viewingProduct.id}`);
+        if (foodRes.ok && active) {
+          const foodData = await foodRes.json();
+          setDetailedFoodItem(foodData);
+        }
+
+        // Fetch reviews
+        const revRes = await fetch(`${baseUrl}/foods/${viewingProduct.id}/reviews`);
+        if (revRes.ok && active) {
+          const revData = await revRes.json();
+          setBackendReviews(revData);
+        }
+        // Fetch rating summary
+        const sumRes = await fetch(`${baseUrl}/foods/${viewingProduct.id}/rating-summary`);
+        if (sumRes.ok && active) {
+          const sumData = await sumRes.json();
+          setRatingSummary(sumData);
+        }
+      } catch (err) {
+        console.warn('Error loading product data from backend:', err);
+      } finally {
+        if (active) {
+          setLoadingReviews(false);
+        }
+      }
+    };
+    loadProductData();
+    return () => {
+      active = false;
+    };
+  }, [viewingProduct?.id]);
 
   // Item Customization Modal State
   const [customizingItem, setCustomizingItem] = useState(null);
@@ -919,6 +1204,9 @@ export default function App() {
   // Helper to get reviews for an item (user submitted + default reviews)
   const getDishReviews = (item) => {
     if (!item) return [];
+    if (viewingProduct && item.id === viewingProduct.id) {
+      return backendReviews || [];
+    }
     const custom = productReviews[item.id] || [];
     const defaults = [
       { id: `def-1-${item.id}`, name: 'Anjali Ramesh', rating: 5, date: '2 days ago', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80', comment: `Best ${item.name} in town! Super fresh and arrived piping hot.` },
@@ -930,32 +1218,74 @@ export default function App() {
 
   const calculateAverageRating = (item) => {
     if (!item) return '4.9';
+    if (viewingProduct && item.id === viewingProduct.id && ratingSummary?.averageRating !== undefined && ratingSummary?.averageRating !== null) {
+      return Number(ratingSummary.averageRating).toFixed(1);
+    }
     const reviews = getDishReviews(item);
     if (!reviews || reviews.length === 0) return '4.9';
     const total = reviews.reduce((sum, r) => sum + r.rating, 0);
     return (total / reviews.length).toFixed(1);
   };
 
-  const handleAddDishReview = (itemId) => {
+  const handleAddDishReview = async (itemId) => {
     if (!userReviewComment.trim()) {
       Alert.alert('Write a Review', 'Please enter your review comment before posting.');
       return;
     }
-    const newRev = {
-      id: `rev-${Date.now()}`,
-      name: currentUser ? currentUser.name : 'QuickBite Foodie',
-      rating: userRatingScore,
-      date: Date.now(), // timestamp integer for getTimeAgo
-      avatar: currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
-      comment: userReviewComment.trim()
-    };
-    setProductReviews(prev => ({
-      ...prev,
-      [itemId]: [newRev, ...(prev[itemId] || [])]
-    }));
-    setUserReviewComment('');
-    setUserRatingScore(2); // reset to 2 stars
-    triggerToastNotification('⭐ Review & Rating Published!');
+    try {
+      const baseUrl = await getActiveBackend();
+      const token = currentUser?.token;
+      const res = await fetch(`${baseUrl}/foods/${itemId}/reviews`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({
+          rating: userRatingScore,
+          review: userReviewComment.trim()
+        })
+      });
+
+      if (res.ok) {
+        setUserReviewComment('');
+        setUserRatingScore(5); // reset to 5 stars
+        triggerToastNotification('⭐ Review & Rating Published!');
+        
+        // Refresh reviews and summary
+        const revRes = await fetch(`${baseUrl}/foods/${itemId}/reviews`);
+        if (revRes.ok) {
+          const revData = await revRes.json();
+          setBackendReviews(revData);
+        }
+        const sumRes = await fetch(`${baseUrl}/foods/${itemId}/rating-summary`);
+        if (sumRes.ok) {
+          const sumData = await sumRes.json();
+          setRatingSummary(sumData);
+        }
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        Alert.alert('Review Status', errorData.message || 'Failed to submit review. Try again.');
+      }
+    } catch (err) {
+      console.warn('Error posting review:', err);
+      // Fallback local update if offline/backend fails
+      const newRev = {
+        id: `rev-${Date.now()}`,
+        name: currentUser ? currentUser.name : 'QuickBite Foodie',
+        rating: userRatingScore,
+        date: Date.now(),
+        avatar: currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+        comment: userReviewComment.trim()
+      };
+      setProductReviews(prev => ({
+        ...prev,
+        [itemId]: [newRev, ...(prev[itemId] || [])]
+      }));
+      setUserReviewComment('');
+      setUserRatingScore(5);
+      triggerToastNotification('⭐ Review & Rating Published (offline)!');
+    }
   };
 
   // Reusable Toast Banner Renderer
@@ -967,6 +1297,57 @@ export default function App() {
       <Text style={styles.toastBannerText}>{toastMessage}</Text>
     </Animated.View>
   );
+
+  const renderSearchAndFilters = () => {
+    return (
+      <View style={{ backgroundColor: D.card, paddingHorizontal: 16, paddingVertical: 10 }}>
+        <View style={[styles.rdSearchBarContainer, { backgroundColor: D.chipBg, borderColor: D.cardBorder }]}>
+          <Search size={18} color={D.textSub} style={{ marginRight: 8 }} />
+          <TextInput
+            placeholder="Search for dishes"
+            placeholderTextColor={D.textSub}
+            value={menuSearchQuery}
+            onChangeText={setMenuSearchQuery}
+            style={[styles.rdSearchInput, { color: D.text }]}
+          />
+          <Mic size={18} color={D.accent} />
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ flexDirection: 'row', gap: 8, paddingTop: 8 }}
+        >
+          <TouchableOpacity
+            onPress={() => setPureVegFilter(!pureVegFilter)}
+            style={[
+              styles.rdFilterChip,
+              { backgroundColor: D.chipBg, borderColor: D.cardBorder },
+              pureVegFilter && { backgroundColor: '#ECFDF5', borderColor: '#10B981' }
+            ]}
+          >
+            <View style={{ width: 10, height: 10, borderWidth: 1, borderColor: '#10B981', justifyContent: 'center', alignItems: 'center', marginRight: 4 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' }} />
+            </View>
+            <Text style={[styles.rdFilterChipText, { color: D.textSub }, pureVegFilter && { color: '#059669', fontWeight: '700' }]}>Pure Veg</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.rdFilterChip, { backgroundColor: D.chipBg, borderColor: D.cardBorder }]}
+          >
+            <Heart size={10} color={D.accent} fill={D.accent} style={{ marginRight: 4 }} />
+            <Text style={[styles.rdFilterChipText, { color: D.textSub }]}>EatRight</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.rdFilterChip, { backgroundColor: D.chipBg, borderColor: D.cardBorder }]}
+          >
+            <Text style={[styles.rdFilterChipText, { color: D.textSub }]}>Ratings 4.0+</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  };
 
   // Swiggy Green Floating Bottom Cart Bar Component (Updates Live on item add)
   const renderFloatingCartBar = (bottomOffset = 68, disableHide = false) => {
@@ -2870,42 +3251,81 @@ export default function App() {
             {selectedRestaurant && (
               <View style={{ flex: 1, backgroundColor: D.modalBg }}>
                 {renderToastBanner()}
-                <View style={[styles.modalHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 4 : 8 }]}>
+                
+                {/* ─── FIXED TOP HEADER ─── */}
+                <View style={[styles.rdFixedHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder, height: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 56 : 64, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }]}>
                   <TouchableOpacity onPress={() => setSelectedRestaurant(null)} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
                     <ArrowLeft size={20} color={D.text} />
                   </TouchableOpacity>
-                  <Text style={[styles.modalHeaderTitle, { color: D.text }]} numberOfLines={1}>{selectedRestaurant.name}</Text>
+                  
+                  {/* Smooth animated fade-in hotel title */}
+                  <Animated.View style={{ opacity: restTitleOpacity, transform: [{ translateY: restTitleTranslateY }], flex: 1, alignItems: 'center' }}>
+                    <Text style={[styles.rdHeaderTitleText, { color: D.text }]} numberOfLines={1}>
+                      {selectedRestaurant.name}
+                    </Text>
+                  </Animated.View>
 
-                  {/* FEATURE 1: Sticky Top Cart Icon inside Restaurant View */}
-                  <TouchableOpacity
-                    style={[styles.cartIconBtnModal, { backgroundColor: D.chipBg }]}
-                    onPress={() => setIsCartOpen(true)}
-                  >
-                    <ShoppingBag size={20} color={D.text} />
-                    {cartItems.length > 0 && (
-                      <Animated.View style={[styles.cartBadge, { transform: [{ scale: cartAnim }] }]}>
-                        <Text style={styles.cartBadgeText}>{cartItems.length}</Text>
-                      </Animated.View>
-                    )}
+                  <TouchableOpacity style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
+                    <EllipsisVertical size={20} color={D.text} />
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 90 }}>
-                  <Image source={{ uri: selectedRestaurant.coverImage || selectedRestaurant.image }} style={styles.coverImg} />
+                {/* ─── STICKY SEARCH + FILTERS CONTAINER ─── */}
+                {isRestStickyActive && (
+                  <View style={[styles.rdStickyContainer, { top: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 56 : 64, borderBottomColor: D.navBorder }]}>
+                    {renderSearchAndFilters()}
+                  </View>
+                )}
 
-                  <View style={styles.restDetailBody}>
-                    <Text style={[styles.restDetailTitle, { color: D.text, fontSize: 18 }]} numberOfLines={1}>{selectedRestaurant.name}</Text>
-                    <Text style={[styles.restDetailAddress, { color: D.textSub }]}>{selectedRestaurant.address}</Text>
-                    <Text style={[styles.restDetailDesc, { color: D.textSub }]}>{selectedRestaurant.description}</Text>
-                    {/* Offers Row Inside Card */}
+                {/* ─── SCROLLABLE CONTENT ─── */}
+                <Animated.ScrollView
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 120 }}
+                  onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { y: restScrollY } } }],
+                    { useNativeDriver: false, listener: handleRestScroll }
+                  )}
+                  scrollEventThrottle={16}
+                >
+                  {/* Restaurant Details Card */}
+                  <View style={[styles.rdRestaurantCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        {selectedRestaurant.isTopRated && (
+                          <View style={styles.rdTopLabelRow}>
+                            <ShieldCheck size={14} color="#EF4444" />
+                            <Text style={styles.rdTopLabelText}>Midnight Certified</Text>
+                          </View>
+                        )}
+                        <Text style={[styles.rdRestaurantName, { color: D.text }]} numberOfLines={2}>
+                          {selectedRestaurant.name}
+                        </Text>
+                        <Text style={[styles.rdRestaurantMeta, { color: D.textSub }]}>
+                          {selectedRestaurant.deliveryTime || '20-30 min'} • {selectedRestaurant.address || 'Local Area'} ˅
+                        </Text>
+                        <Text style={[styles.rdRestaurantDesc, { color: D.textSub }]} numberOfLines={2}>
+                          {selectedRestaurant.description}
+                        </Text>
+                      </View>
+
+                      {/* Rating Badge Box */}
+                      <View style={[styles.rdRatingBox, { borderColor: D.cardBorder }]}>
+                        <View style={styles.rdRatingBadge}>
+                          <Text style={styles.rdRatingBadgeText}>{selectedRestaurant.rating || '4.0'}</Text>
+                          <Star size={11} color="#FFFFFF" fill="#FFFFFF" style={{ marginLeft: 2 }} />
+                        </View>
+                        <Text style={[styles.rdRatingCountText, { color: D.textSub }]}>
+                          {selectedRestaurant.reviewsCount || '100'}+ ratings
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Offers Section */}
                     {(() => {
                       if (loadingRestaurantOffers) {
                         return (
-                          <View>
-                            <View style={{ height: 1, backgroundColor: D.divider, marginVertical: 14 }} />
-                            <View style={{ paddingVertical: 4, alignItems: 'center' }}>
-                              <ActivityIndicator size="small" color="#EA580C" />
-                            </View>
+                          <View style={{ marginTop: 12, paddingVertical: 8, alignItems: 'center' }}>
+                            <ActivityIndicator size="small" color="#EA580C" />
                           </View>
                         );
                       }
@@ -2927,7 +3347,7 @@ export default function App() {
                           offers.push({
                             title: title,
                             subtitle: `USE ${o.code}`,
-                            iconType: 'percent'
+                            iconType: 'tag'
                           });
                         });
                       }
@@ -2935,268 +3355,442 @@ export default function App() {
                       if (offers.length === 0) return null;
 
                       return (
-                        <View>
-                          <View style={{ height: 1, backgroundColor: D.divider, marginVertical: 14 }} />
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                        <View style={{ marginTop: 12 }}>
+                          <View style={{ height: 1, backgroundColor: D.divider, marginBottom: 12 }} />
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                             {offers.map((off, idx) => (
                               <View
                                 key={`offer-${idx}`}
-                                style={{
-                                  flex: 1,
-                                  minWidth: 140,
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  padding: 10,
-                                  borderRadius: 12,
-                                  backgroundColor: D.chipBg,
-                                  borderWidth: 1,
-                                  borderColor: D.cardBorder,
-                                }}
+                                style={[styles.rdOfferCard, { backgroundColor: D.chipBg, borderColor: D.cardBorder }]}
                               >
-                                <View style={{ marginRight: 8 }}>
-                                  {off.iconType === 'tag' ? (
-                                    <Tag size={14} color="#FF5252" />
-                                  ) : (
-                                    <Percent size={14} color="#FF5252" />
-                                  )}
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                  <Text style={{ fontSize: 11, fontWeight: '700', color: D.text }} numberOfLines={1}>
+                                <Tag size={12} color="#FF5252" style={{ marginRight: 6 }} />
+                                <View>
+                                  <Text style={[styles.rdOfferTitle, { color: D.text }]} numberOfLines={1}>
                                     {off.title}
                                   </Text>
-                                  <Text style={{ fontSize: 9, fontWeight: '800', color: D.textSub, marginTop: 2 }}>
+                                  <Text style={[styles.rdOfferSubtitle, { color: D.textSub }]} numberOfLines={1}>
                                     {off.subtitle}
                                   </Text>
                                 </View>
                               </View>
                             ))}
-                          </View>
+                          </ScrollView>
                         </View>
                       );
                     })()}
+                  </View>
 
-                    <View style={[styles.divider, { backgroundColor: D.divider }]} />
+                  {/* Normal Scroll Flow Search + Filters Section */}
+                  <View
+                    onLayout={(e) => setSearchSectionY(e.nativeEvent.layout.y)}
+                    style={{ opacity: isRestStickyActive ? 0 : 1 }}
+                  >
+                    {renderSearchAndFilters()}
+                  </View>
 
-                    <Text style={[styles.menuHeading, { color: D.heading }]}>Menu Specials</Text>
-                    {selectedRestaurant.menu && selectedRestaurant.menu.map(item => (
-                      <TouchableOpacity
-                        key={item.id}
-                        style={[styles.menuItemCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
-                        onPress={() => openProductDetails(item, selectedRestaurant)}
-                      >
-                        <View style={{ flex: 1, paddingRight: 12 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <Text style={[styles.itemName, { color: D.heading }]}>{item.name}</Text>
-                          </View>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                            <Text style={styles.itemPrice}>₹{item.price}</Text>
-                            <View style={styles.itemRatingChip}>
-                              <Star size={10} color="#B45309" fill="#B45309" />
-                              <Text style={styles.itemRatingText}>{calculateAverageRating(item)}</Text>
-                            </View>
-                          </View>
-                          <Text style={[styles.itemDesc, { color: D.textSub }]} numberOfLines={2}>{item.description}</Text>
-                        </View>
+                  {/* Recommended Headers Specials Section */}
+                  <View style={[styles.rdMenuHeadingRow, { borderBottomColor: D.divider }]}>
+                    <Text style={[styles.rdMenuHeadingText, { color: D.text }]}>
+                      Recommended ({filteredRestMenu.length})
+                    </Text>
+                    <TouchableOpacity onPress={() => setRecommendedCollapsed(!recommendedCollapsed)}>
+                      {recommendedCollapsed ? (
+                        <ChevronDown size={20} color={D.text} />
+                      ) : (
+                        <ChevronUp size={20} color={D.text} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
 
-                        <View style={{ alignItems: 'center' }}>
-                          <View style={{ position: 'relative' }}>
-                            <Image source={{ uri: item.image }} style={styles.itemThumb} />
-                            <TouchableOpacity
-                              style={[styles.favFloatingBtn, { top: 4, right: 4, width: 26, height: 26, backgroundColor: 'rgba(0,0,0,0.5)' }]}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                toggleFavorite(`product-${item.id}`);
-                              }}
-                            >
-                              <Heart
-                                size={14}
-                                color={favorites.includes(`product-${item.id}`) ? '#FF5252' : '#ffffff'}
-                                fill={favorites.includes(`product-${item.id}`) ? '#FF5252' : 'transparent'}
-                              />
-                            </TouchableOpacity>
-                          </View>
-                          {(() => {
-                            const inCart = cartItems.some(c => c.id === item.id);
-                            return (
+                  {/* Two-Column Food Card Grid */}
+                  {!recommendedCollapsed && (
+                    <View style={styles.rdFoodGrid}>
+                      {filteredRestMenu.map(item => {
+                        const inCart = cartItems.some(c => c.id === item.id || c.itemId === item.id);
+                        return (
+                          <TouchableOpacity
+                            key={item.id}
+                            style={[styles.rdFoodCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
+                            activeOpacity={0.9}
+                            onPress={() => openProductDetails(item, selectedRestaurant)}
+                          >
+                            {/* Card Image Area */}
+                            <View style={styles.rdFoodImageContainer}>
+                              <Image source={{ uri: item.image }} style={styles.rdFoodImage} />
+                              
+                              {/* Favorite Heart Icon */}
                               <TouchableOpacity
-                                style={[styles.addBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
+                                style={styles.rdFoodFavBtn}
                                 onPress={(e) => {
                                   e.stopPropagation();
-                                  openCustomizer(item, selectedRestaurant);
+                                  toggleFavorite(`product-${item.id}`);
                                 }}
                               >
-                                <Text style={[styles.addBtnText, inCart && { color: '#ffffff' }]}>{inCart ? 'ADDED ✓' : 'ADD +'}</Text>
+                                <Heart
+                                  size={13}
+                                  color={favorites.includes(`product-${item.id}`) ? '#FF5252' : '#ffffff'}
+                                  fill={favorites.includes(`product-${item.id}`) ? '#FF5252' : 'transparent'}
+                                />
                               </TouchableOpacity>
-                            );
-                          })()}
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-                {renderFloatingCartBar(70, true)}
+
+                              {/* Veg / Non-veg label tag */}
+                              {item.isVeg !== undefined && (
+                                <View style={[styles.rdVegBadge, { backgroundColor: item.isVeg ? '#10B981' : '#EF4444' }]}>
+                                  <Text style={styles.rdVegBadgeText}>{item.isVeg ? 'VEG' : 'NON-VEG'}</Text>
+                                </View>
+                              )}
+
+                              {/* Bestseller badge if applicable */}
+                              {item.isPopular && (
+                                <View style={styles.rdBestsellerBadge}>
+                                  <Star size={8} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 2 }} />
+                                  <Text style={styles.rdBestsellerText}>Bestseller</Text>
+                                </View>
+                              )}
+                            </View>
+
+                            {/* Card Content Area */}
+                            <View style={styles.rdFoodCardBody}>
+                              <Text style={[styles.rdFoodName, { color: D.text }]} numberOfLines={2}>
+                                {item.name}
+                              </Text>
+
+                              <View style={styles.rdFoodMetaRow}>
+                                <Star size={10} color="#F59E0B" fill="#F59E0B" style={{ marginRight: 2 }} />
+                                <Text style={[styles.rdFoodMetaText, { color: D.textSub }]}>
+                                  {calculateAverageRating(item)}
+                                </Text>
+                              </View>
+
+                              {/* Price + Add Button Row */}
+                              <View style={styles.rdFoodFooterRow}>
+                                <Text style={[styles.rdFoodPrice, { color: D.text }]}>₹{item.price}</Text>
+                                <TouchableOpacity
+                                  style={[styles.rdAddBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    openCustomizer(item, selectedRestaurant);
+                                  }}
+                                >
+                                  <Text style={[styles.rdAddBtnText, inCart && { color: '#ffffff' }]}>
+                                    {inCart ? 'ADDED' : 'ADD'}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </Animated.ScrollView>
+
+                {/* Floating View Cart bar */}
+                {renderFloatingCartBar(Math.max(12, bottomInset) + 12, true)}
               </View>
             )}
           </Modal>
 
           {/* FOOD PRODUCT DETAILS MODAL (FEATURE 1: STICKY TOP CART ICON) */}
           <Modal visible={!!viewingProduct} animationType="slide" statusBarTranslucent onRequestClose={() => setViewingProduct(null)}>
-            {viewingProduct && (
-              <View style={{ flex: 1, backgroundColor: D.modalBg, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }}>
-                {renderToastBanner()}
-                <View style={[styles.modalHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder }]}>
-                  <TouchableOpacity onPress={() => setViewingProduct(null)} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
-                    <ArrowLeft size={20} color={D.text} />
-                  </TouchableOpacity>
-                  <Text style={[styles.modalHeaderTitle, { color: D.heading }]} numberOfLines={1}>{viewingProduct.name}</Text>
+            {viewingProduct && (() => {
+              const displayReviewDate = (rev) => {
+                if (rev.createdAt) {
+                  return getTimeAgo(new Date(rev.createdAt).getTime());
+                }
+                return typeof rev.date === 'string' ? rev.date : getTimeAgo(rev.date || Date.now());
+              };
 
-                  {/* FEATURE 1: Sticky Top Cart Icon inside Product View */}
-                  <TouchableOpacity
-                    style={[styles.cartIconBtnModal, { backgroundColor: D.chipBg }]}
-                    onPress={() => setIsCartOpen(true)}
-                  >
-                    <ShoppingBag size={20} color={D.text} />
-                    {cartItems.length > 0 && (
-                      <Animated.View style={[styles.cartBadge, { transform: [{ scale: cartAnim }] }]}>
-                        <Text style={styles.cartBadgeText}>{cartItems.length}</Text>
-                      </Animated.View>
-                    )}
-                  </TouchableOpacity>
-                </View>
+              const currentProduct = detailedFoodItem || viewingProduct;
+              const nameLower = (currentProduct.name || '').toLowerCase();
+              const isCustomizable = (currentProduct.customizationGroups && currentProduct.customizationGroups.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani');
 
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-                  <View style={{ position: 'relative' }}>
-                    <Image source={{ uri: viewingProduct.image }} style={styles.productDetailHeroImg} />
-                    <View style={[styles.vegBadgeTag, { backgroundColor: viewingProduct.isVeg ? '#ECFDF5' : '#FEF2F2' }]}>
-                      <Text style={{ color: viewingProduct.isVeg ? '#059669' : '#EF4444', fontSize: 12, fontWeight: '700' }}>
-                        {viewingProduct.isVeg ? '🌱 Pure Veg' : '🍖 Non-Veg'}
-                      </Text>
-                    </View>
+              return (
+                <View style={{ flex: 1, backgroundColor: D.modalBg, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }}>
+                  {renderToastBanner()}
+                  
+                  {/* ─── FIXED TOP HEADER ─── */}
+                  <View style={[styles.modalHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder }]}>
+                    <TouchableOpacity onPress={() => setViewingProduct(null)} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
+                      <ArrowLeft size={20} color={D.text} />
+                    </TouchableOpacity>
+                    
+                    <Text style={[styles.modalHeaderTitle, { color: D.text, flex: 1, textAlign: 'center' }]} numberOfLines={1}>
+                      {currentProduct.name}
+                    </Text>
 
+                    {/* Top Right Cart Icon with Dynamic Count Badge */}
                     <TouchableOpacity
-                      style={[styles.favFloatingBtn, { top: 14, right: 14, width: 36, height: 36 }]}
-                      onPress={() => toggleFavorite(`product-${viewingProduct.id}`)}
+                      style={[styles.cartIconBtnModal, { backgroundColor: D.chipBg }]}
+                      onPress={() => setIsCartOpen(true)}
                     >
-                      <Heart
-                        size={20}
-                        color={favorites.includes(`product-${viewingProduct.id}`) ? '#FF5252' : '#ffffff'}
-                        fill={favorites.includes(`product-${viewingProduct.id}`) ? '#FF5252' : 'transparent'}
-                      />
+                      <ShoppingBag size={20} color={D.text} />
+                      {cartItems.length > 0 && (
+                        <Animated.View style={[styles.cartBadge, { transform: [{ scale: cartAnim }] }]}>
+                          <Text style={styles.cartBadgeText}>{cartItems.length}</Text>
+                        </Animated.View>
+                      )}
                     </TouchableOpacity>
                   </View>
 
-                  <View style={styles.productBody}>
-                    <Text style={[styles.productTitle, { color: D.heading }]}>{viewingProduct.name}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                      <Text style={styles.productPriceText}>₹{viewingProduct.price}</Text>
-                      <View style={styles.itemRatingChip}>
-                        <Star size={12} color="#B45309" fill="#B45309" />
-                        <Text style={styles.itemRatingText}>{calculateAverageRating(viewingProduct)} / 5.0</Text>
-                      </View>
-                    </View>
-                    {productRestaurant && (
-                      <Text style={[styles.productRestName, { color: D.textSub }]}>by {productRestaurant.name}</Text>
-                    )}
-                    <Text style={[styles.productDescText, { color: D.textSub }]}>{viewingProduct.description}</Text>
+                  {/* ─── SCROLLABLE CONTENT ─── */}
+                  <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+                    
+                    {/* Food Image Carousel Card */}
+                    {(() => {
+                      const rawImages = (currentProduct.images && currentProduct.images.length > 0)
+                        ? currentProduct.images.filter(img => typeof img === 'string' && img.trim().length > 0)
+                        : (currentProduct.image ? [currentProduct.image] : []);
+                      const images = rawImages.length > 0
+                        ? rawImages.map(img => resolveProductImage(img, resolvedBackendUrl))
+                        : ['https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'];
+                      
+                      return (
+                        <View style={[styles.rdFoodDetailsImageWrapper, { backgroundColor: D.card }]}>
+                          <FlatList
+                            data={images}
+                            horizontal
+                            pagingEnabled
+                            scrollEnabled={true}
+                            nestedScrollEnabled={true}
+                            snapToInterval={width - 32}
+                            snapToAlignment="center"
+                            decelerationRate="fast"
+                            showsHorizontalScrollIndicator={false}
+                            keyExtractor={(item, index) => index.toString()}
+                            style={{ width: width - 32, height: 220, padding: 0, margin: 0 }}
+                            contentContainerStyle={{ height: 220, padding: 0, margin: 0 }}
+                            onMomentumScrollEnd={(e) => {
+                              const index = Math.round(e.nativeEvent.contentOffset.x / (width - 32));
+                              setActiveImageIndex(index);
+                            }}
+                            renderItem={({ item }) => (
+                              <Image source={{ uri: item }} style={[styles.rdFoodDetailsHeroImg, { padding: 0, margin: 0 }]} />
+                            )}
+                          />
 
-                    <View style={[styles.divider, { backgroundColor: D.divider }]} />
+                          {/* Veg/Non-Veg badge on top-left of image card */}
+                          <View style={[
+                            styles.rdCardVegBadge, 
+                            { 
+                              position: 'absolute',
+                              top: 12, 
+                              left: 12, 
+                              backgroundColor: '#FFFFFF', 
+                              borderRadius: 14, 
+                              paddingHorizontal: 10, 
+                              paddingVertical: 5,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              elevation: 2,
+                              shadowColor: '#000',
+                              shadowOpacity: 0.1,
+                              shadowRadius: 2,
+                              shadowOffset: { width: 0, height: 1 },
+                              zIndex: 10
+                            }
+                          ]}>
+                            <Text style={{ 
+                              fontSize: 11, 
+                              fontWeight: '700', 
+                              color: currentProduct.isVeg ? '#10B981' : '#EF4444' 
+                            }}>
+                              {currentProduct.isVeg ? '🌱 Pure Veg' : '🍖 Non-Veg'}
+                            </Text>
+                          </View>
 
-                    {/* Ingredients Section */}
-                    <Text style={[styles.detailSectionHeading, { color: D.heading }]}>🌿 Ingredients & Recipe Components</Text>
-                    <View style={styles.ingredientsGrid}>
-                      {getDishIngredients(viewingProduct).map((ing, idx) => (
-                        <View key={idx} style={[styles.ingredientChip, { backgroundColor: D.chipBg, borderColor: D.cardBorder }]}>
-                          <Check size={12} color="#10B981" />
-                          <Text style={[styles.ingredientChipText, { color: D.text }]}>{ing}</Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    <View style={[styles.divider, { backgroundColor: D.divider }]} />
-
-                    {/* Customer Reviews & Star Ratings */}
-                    <View style={styles.reviewsHeaderRow}>
-                      <Text style={[styles.detailSectionHeading, { color: D.heading }]}>⭐ Customer Reviews & Ratings</Text>
-                      <View style={styles.ratingBadgeLarge}>
-                        <Star size={14} color="#ffffff" fill="#ffffff" />
-                        <Text style={styles.ratingBadgeLargeText}>{calculateAverageRating(viewingProduct)} / 5.0</Text>
-                      </View>
-                    </View>
-
-                    {/* Interactive Add Review Form */}
-                    <View style={[styles.addReviewCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
-                      <Text style={[styles.addReviewTitle, { color: D.heading }]}>Rate & Write a Review</Text>
-
-                      <View style={styles.starSelectionRow}>
-                        {[1, 2, 3, 4, 5].map(starNum => (
+                          {/* Favorite button on top-right of image card */}
                           <TouchableOpacity
-                            key={starNum}
-                            onPress={() => setUserRatingScore(starNum)}
-                            style={{ paddingRight: 6 }}
+                            style={styles.rdFoodDetailsFavBtn}
+                            onPress={() => toggleFavorite(`product-${currentProduct.id}`)}
                           >
-                            <Star
-                              size={24}
-                              color={starNum <= userRatingScore ? '#F59E0B' : (darkMode ? '#475569' : '#D1D5DB')}
-                              fill={starNum <= userRatingScore ? '#F59E0B' : 'transparent'}
+                            <Heart
+                              size={18}
+                              color={favorites.includes(`product-${currentProduct.id}`) ? '#FF5252' : '#ffffff'}
+                              fill={favorites.includes(`product-${currentProduct.id}`) ? '#FF5252' : 'transparent'}
                             />
                           </TouchableOpacity>
-                        ))}
-                        <Text style={[styles.starScoreText, { color: D.textSub }]}>{userRatingScore} / 5 Stars</Text>
-                      </View>
 
-                      <TextInput
-                        style={[styles.reviewTextInput, { backgroundColor: D.inputBg, borderColor: D.inputBorder, color: D.text }]}
-                        placeholder="Share your feedback on taste, freshness & portion size..."
-                        placeholderTextColor={darkMode ? '#64748B' : '#9CA3AF'}
-                        multiline
-                        numberOfLines={3}
-                        value={userReviewComment}
-                        onChangeText={setUserReviewComment}
-                      />
-
-                      <TouchableOpacity
-                        style={styles.submitReviewBtn}
-                        onPress={() => handleAddDishReview(viewingProduct.id)}
-                      >
-                        <Text style={styles.submitReviewBtnText}>Post Rating & Review</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <Text style={[styles.detailSectionHeading, { color: D.heading, marginTop: 16 }]}>
-                      Customer Reviews ({getDishReviews(viewingProduct).length})
-                    </Text>
-
-                    {getDishReviews(viewingProduct).map(rev => (
-                      <View key={rev.id} style={[styles.reviewCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
-                        <View style={styles.reviewHeaderRow}>
-                          <Image source={{ uri: rev.avatar }} style={styles.reviewAvatar} />
-                          <View style={{ flex: 1, marginLeft: 10 }}>
-                            <Text style={[styles.reviewAuthor, { color: D.text }]}>{rev.name}</Text>
-                            <Text style={[styles.reviewDate, { color: D.textSub }]}>{getTimeAgo(rev.date)}</Text>
-                          </View>
-                          <View style={styles.starsRow}>
-                            {[...Array(rev.rating)].map((_, i) => (
-                              <Star key={i} size={12} color="#F59E0B" fill="#F59E0B" />
-                            ))}
-                          </View>
+                          {/* Carousel Pagination Dots (Only if multiple images exist) */}
+                          {images.length > 1 && (
+                            <View style={styles.rdCarouselDotsContainer}>
+                              <View style={{
+                                flexDirection: 'row',
+                                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                                borderRadius: 12,
+                                paddingHorizontal: 8,
+                                paddingVertical: 4,
+                                alignItems: 'center'
+                              }}>
+                                {images.map((_, idx) => (
+                                  <View
+                                    key={idx}
+                                    style={[
+                                      styles.rdCarouselDot,
+                                      activeImageIndex === idx && styles.rdCarouselDotActive
+                                    ]}
+                                  />
+                                ))}
+                              </View>
+                            </View>
+                          )}
                         </View>
-                        <Text style={[styles.reviewComment, { color: D.textSub }]}>{rev.comment}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </ScrollView>
+                      );
+                    })()}
 
-                {/* Bottom Add to Cart Button */}
-                <View style={[styles.productBottomBar, { backgroundColor: D.headerBg, borderTopColor: D.navBorder }]}>
-                  <TouchableOpacity
-                    style={styles.primaryBtn}
-                    onPress={() => openCustomizer(viewingProduct, productRestaurant)}
-                  >
-                    <Text style={styles.primaryBtnText}>Customize & Add to Cart • ₹{viewingProduct.price}</Text>
-                  </TouchableOpacity>
+                    <View style={styles.productBody}>
+                      {/* Food Title */}
+                      <Text style={[styles.productTitle, { color: D.text }]}>{currentProduct.name}</Text>
+                      
+                      {/* Price and Rating Row */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                        <Text style={[styles.productPriceText, { color: D.accent }]}>₹{currentProduct.price}</Text>
+                        <View style={[styles.itemRatingChip, { marginLeft: 12 }]}>
+                          <Star size={12} color="#B45309" fill="#B45309" />
+                          <Text style={styles.itemRatingText}>{calculateAverageRating(currentProduct)} / 5.0</Text>
+                        </View>
+                      </View>
+
+                      {/* Restaurant Name */}
+                      {productRestaurant && (
+                        <Text style={[styles.productRestName, { color: D.textSub, marginTop: 6 }]}>by {productRestaurant.name}</Text>
+                      )}
+
+                      <Text style={[styles.productDescText, { color: D.textSub, marginTop: 10 }]}>{currentProduct.description}</Text>
+
+                      <View style={[styles.divider, { backgroundColor: D.divider }]} />
+
+                      {/* Ingredients Section (hidden if empty) */}
+                      {(() => {
+                        const ingredients = getDishIngredients(currentProduct);
+                        if (!ingredients || ingredients.length === 0) return null;
+                        
+                        return (
+                          <View>
+                            <Text style={[styles.detailSectionHeading, { color: D.text }]}>🌿 Ingredients & Recipe Components</Text>
+                            <View style={styles.ingredientsGrid}>
+                              {ingredients.map((ing, idx) => (
+                                <View key={idx} style={[styles.ingredientChip, { backgroundColor: D.chipBg, borderColor: D.cardBorder }]}>
+                                  <Check size={12} color="#10B981" />
+                                  <Text style={[styles.ingredientChipText, { color: D.text }]}>{ing}</Text>
+                                </View>
+                              ))}
+                            </View>
+                            <View style={[styles.divider, { backgroundColor: D.divider }]} />
+                          </View>
+                        );
+                      })()}
+
+                      {/* Customer Reviews Header */}
+                      <View style={styles.reviewsHeaderRow}>
+                        <Text style={[styles.detailSectionHeading, { color: D.text }]}>⭐ Customer Reviews & Ratings</Text>
+                        <View style={styles.ratingBadgeLarge}>
+                          <Star size={14} color="#ffffff" fill="#ffffff" />
+                          <Text style={styles.ratingBadgeLargeText}>{calculateAverageRating(currentProduct)} / 5.0</Text>
+                        </View>
+                      </View>
+
+                      {/* Rate & Write a Review Card */}
+                      <View style={[styles.addReviewCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
+                        <Text style={[styles.addReviewTitle, { color: D.text }]}>Rate & Write a Review</Text>
+
+                        <View style={styles.starSelectionRow}>
+                          {[1, 2, 3, 4, 5].map(starNum => (
+                            <TouchableOpacity
+                              key={starNum}
+                              onPress={() => setUserRatingScore(starNum)}
+                              style={{ paddingRight: 8 }}
+                            >
+                              <Star
+                                size={24}
+                                color={starNum <= userRatingScore ? '#F59E0B' : (darkMode ? '#475569' : '#D1D5DB')}
+                                fill={starNum <= userRatingScore ? '#F59E0B' : 'transparent'}
+                              />
+                            </TouchableOpacity>
+                          ))}
+                          <Text style={[styles.starScoreText, { color: D.textSub }]}>{userRatingScore} / 5 Stars</Text>
+                        </View>
+
+                        <TextInput
+                          style={[styles.reviewTextInput, { backgroundColor: D.inputBg, borderColor: D.inputBorder, color: D.text }]}
+                          placeholder="Share your feedback on taste, freshness & portion size..."
+                          placeholderTextColor={darkMode ? '#64748B' : '#9CA3AF'}
+                          multiline
+                          numberOfLines={3}
+                          value={userReviewComment}
+                          onChangeText={setUserReviewComment}
+                        />
+
+                        <TouchableOpacity
+                          style={styles.submitReviewBtn}
+                          onPress={() => handleAddDishReview(currentProduct.id)}
+                        >
+                          <Text style={styles.submitReviewBtnText}>Post Rating & Review</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Review List */}
+                      {(() => {
+                        const reviews = getDishReviews(currentProduct);
+                        if (reviews.length === 0) {
+                          return (
+                            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                              <Text style={{ color: D.textSub, fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
+                                No reviews yet. Add the first review on this product.
+                              </Text>
+                            </View>
+                          );
+                        }
+                        
+                        return (
+                          <View>
+                            <Text style={[styles.detailSectionHeading, { color: D.text, marginTop: 16 }]}>
+                              Customer Reviews ({reviews.length})
+                            </Text>
+
+                            {reviews.map(rev => {
+                              const authorName = rev.user?.name || rev.name || 'QuickBite Foodie';
+                              const authorAvatar = rev.user?.avatar || rev.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80';
+                              const commentText = rev.review || rev.comment;
+                              
+                              return (
+                                <View key={rev.id} style={[styles.reviewCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
+                                  <View style={styles.reviewHeaderRow}>
+                                    <Image source={{ uri: authorAvatar }} style={styles.reviewAvatar} />
+                                    <View style={{ flex: 1, marginLeft: 10 }}>
+                                      <Text style={[styles.reviewAuthor, { color: D.text }]}>{authorName}</Text>
+                                      <Text style={[styles.reviewDate, { color: D.textSub }]}>{displayReviewDate(rev)}</Text>
+                                    </View>
+                                    <View style={styles.starsRow}>
+                                      {[...Array(rev.rating)].map((_, i) => (
+                                        <Star key={i} size={12} color="#F59E0B" fill="#F59E0B" />
+                                      ))}
+                                    </View>
+                                  </View>
+                                  <Text style={[styles.reviewComment, { color: D.textSub }]}>{commentText}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        );
+                      })()}
+                    </View>
+                  </ScrollView>
+
+                  {/* Bottom Add to Cart Button */}
+                  <View style={[styles.rdFoodDetailsBottomBar, { backgroundColor: D.headerBg, borderTopColor: D.navBorder, paddingBottom: Math.max(12, bottomInset) }]}>
+                    <TouchableOpacity
+                      style={styles.rdFoodDetailsBottomBarBtn}
+                      onPress={() => openCustomizer(currentProduct, productRestaurant)}
+                    >
+                      <Text style={styles.rdFoodDetailsBottomBarBtnText}>
+                        {isCustomizable ? 'Customize & Add to Cart' : 'Add to Cart'} · ₹{currentProduct.price}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            })()}
           </Modal>
 
           {/* ITEM CUSTOMIZER MODAL */}
@@ -3293,15 +3887,35 @@ export default function App() {
           >
             <SafeAreaView style={{ flex: 1, backgroundColor: D.modalBg }}>
               <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-                <View style={[styles.modalHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder, paddingTop: Platform.OS === 'android' ? 12 : 8, paddingBottom: 10 }]}>
-                  <TouchableOpacity onPress={() => setIsCartOpen(false)} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
+                <View style={[styles.modalHeader, { 
+                  backgroundColor: D.headerBg, 
+                  borderBottomColor: D.navBorder, 
+                  paddingTop: Platform.OS === 'android' ? 12 : 8, 
+                  paddingBottom: 10,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'relative'
+                }]}>
+                  <TouchableOpacity 
+                    onPress={() => setIsCartOpen(false)} 
+                    style={[styles.closeCircleBtn, { 
+                      backgroundColor: D.chipBg,
+                      position: 'absolute',
+                      left: 16,
+                      zIndex: 10
+                    }]}
+                  >
                     <ArrowLeft size={20} color={D.text} />
                   </TouchableOpacity>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={[styles.modalHeaderTitle, { color: D.text, fontSize: 16 }]} numberOfLines={1}>
-                      My Cart
-                    </Text>
-                  </View>
+                  <Text style={{ 
+                    color: D.text, 
+                    fontSize: 18, 
+                    fontWeight: '800',
+                    textAlign: 'center'
+                  }}>
+                    My Cart
+                  </Text>
                 </View>
 
                 {cartItems.length === 0 ? (
@@ -3314,96 +3928,82 @@ export default function App() {
                   <View style={{ flex: 1, position: 'relative' }}>
                     <ScrollView
                       ref={cartScrollRef}
+                      style={{ flex: 1 }}
                       contentContainerStyle={{ padding: 14, paddingBottom: 110 }}
                       onScroll={handleCartScroll}
                       scrollEventThrottle={16}
+                      nestedScrollEnabled={true}
                     >
-                      {/* CART ITEMS LIST CONTAINER CARD */}
-                      <View style={[{ backgroundColor: D.card, borderColor: D.cardBorder, borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 12 }]}>
-                        {getGroupedCartItems(cartItems).map((item, idx, arr) => (
-                          <View
-                            key={item.cartItemId}
-                            style={{
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              paddingVertical: 12,
-                              borderBottomWidth: idx === arr.length - 1 ? 0 : 1,
-                              borderBottomColor: D.divider
-                            }}
-                          >
-                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 8 }}>
-                              <TouchableOpacity onPress={() => { openProductDetails({ id: item.itemId, ...item }, null); }}>
-                                <Image source={{ uri: item.image }} style={{ width: 48, height: 48, borderRadius: 8, marginRight: 10, backgroundColor: D.chipBg }} />
-                              </TouchableOpacity>
-                              <View style={{ flex: 1 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                  <View style={[styles.vegBadgeIcon, { borderColor: item.isVeg ? '#10B981' : '#EF4444', marginRight: 6 }]}>
-                                    <View style={[styles.vegBadgeDot, { backgroundColor: item.isVeg ? '#10B981' : '#EF4444' }]} />
-                                  </View>
-                                  <TouchableOpacity style={{ flex: 1 }} onPress={() => { openProductDetails({ id: item.itemId, ...item }, null); }}>
-                                    <Text style={[styles.cartItemTitle, { color: D.text, fontSize: 14, fontWeight: '700' }]} numberOfLines={1}>
-                                      {item.name}
-                                    </Text>
-                                  </TouchableOpacity>
-                                </View>
-                                {item.spice || (item.addons && item.addons.length > 0) ? (
-                                  <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }} numberOfLines={1}>
-                                    {[item.spice, ...(item.addons || [])].filter(Boolean).join(', ')}
-                                  </Text>
-                                ) : null}
-                              </View>
-                            </View>
+                      {/* CART ITEMS LIST */}
+                      {getGroupedCartItems(cartItems).map((item, idx) => (
+                        <View
+                          key={item.cartItemId}
+                          style={{
+                            backgroundColor: D.card,
+                            borderColor: D.cardBorder,
+                            borderWidth: 1,
+                            borderRadius: 16,
+                            padding: 12,
+                            marginBottom: 12,
+                            flexDirection: 'row',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <TouchableOpacity onPress={() => { openProductDetails({ id: item.itemId, ...item }, null); }}>
+                            <Image 
+                              source={{ uri: resolveProductImage(item.image, resolvedBackendUrl) }} 
+                              style={{ width: 80, height: 80, borderRadius: 16, marginRight: 12, backgroundColor: D.chipBg }} 
+                            />
+                          </TouchableOpacity>
+                          
+                          <View style={{ flex: 1 }}>
+                            <TouchableOpacity onPress={() => { openProductDetails({ id: item.itemId, ...item }, null); }}>
+                              <Text style={{ color: D.text, fontSize: 15, fontWeight: '700', marginBottom: 2 }} numberOfLines={1}>
+                                {item.name}
+                              </Text>
+                            </TouchableOpacity>
+                            
+                            {item.spice || (item.addons && item.addons.length > 0) ? (
+                              <Text style={{ fontSize: 12, color: D.textSub, marginBottom: 8 }} numberOfLines={1}>
+                                {[item.spice, ...(item.addons || [])].filter(Boolean).join(', ')}
+                              </Text>
+                            ) : (
+                              <Text style={{ fontSize: 12, color: D.textSub, marginBottom: 8 }}>Standard</Text>
+                            )}
 
-                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 16, fontWeight: '850', color: D.text }}>
+                                ₹{item.price * item.quantity}
+                              </Text>
+
                               {/* Quantity Pill */}
                               <View style={{
                                 flexDirection: 'row',
                                 alignItems: 'center',
-                                borderWidth: 1,
-                                borderColor: '#10B981',
-                                borderRadius: 8,
-                                backgroundColor: darkMode ? '#064E3B' : '#ECFDF5',
-                                paddingHorizontal: 8,
+                                backgroundColor: darkMode ? '#334155' : '#F3F4F6',
+                                borderRadius: 15,
+                                paddingHorizontal: 10,
                                 paddingVertical: 4
                               }}>
-                                <TouchableOpacity onPress={() => updateCartQuantity(item.cartItemId, -1)}>
+                                <TouchableOpacity onPress={() => updateCartQuantity(item.cartItemId, -1)} style={{ padding: 2 }}>
                                   {item.quantity === 1
                                     ? <Trash2 size={12} color="#EF4444" />
-                                    : <Minus size={12} color="#10B981" />
+                                    : <Minus size={12} color={darkMode ? '#D1D5DB' : '#374151'} />
                                   }
                                 </TouchableOpacity>
-                                <Text style={{ fontSize: 13, fontWeight: '900', color: '#10B981', marginHorizontal: 10 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '800', color: D.text, marginHorizontal: 8 }}>
                                   {item.quantity}
                                 </Text>
-                                <TouchableOpacity onPress={() => updateCartQuantity(item.cartItemId, 1)}>
-                                  <Plus size={12} color="#10B981" />
+                                <TouchableOpacity onPress={() => updateCartQuantity(item.cartItemId, 1)} style={{ padding: 2 }}>
+                                  <Plus size={12} color={darkMode ? '#D1D5DB' : '#374151'} />
                                 </TouchableOpacity>
                               </View>
-
-                              <Text style={{ fontSize: 14, fontWeight: '800', color: D.text, marginLeft: 14, minWidth: 42, textAlign: 'right' }}>
-                                ₹{item.price * item.quantity}
-                              </Text>
                             </View>
                           </View>
-                        ))}
+                        </View>
+                      ))}
 
-                        {/* Action Pills Row underneath items list */}
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: D.divider }}>
-                          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: D.chipBg, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8 }}>
-                            <Plus size={13} color={D.text} />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: D.text, marginLeft: 4 }}>Add Items</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: D.chipBg, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8 }}>
-                            <Text style={{ fontSize: 12, color: D.text }}>📝 Cooking requests</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: D.chipBg, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 }}>
-                            <Text style={{ fontSize: 12, color: D.text }}>🍴 Cutlery Needed</Text>
-                          </TouchableOpacity>
-                        </ScrollView>
-                      </View>
+                      {/* Action Pills removed */}
 
                       {/* SAVINGS CORNER CARD */}
                       <View style={[{ backgroundColor: D.card, borderColor: D.cardBorder, borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 12 }]}>
@@ -3566,35 +4166,52 @@ export default function App() {
                       </View>
 
                       {/* BILL SUMMARY CARD */}
-                      <View style={[styles.billCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
-                        <Text style={[styles.billTitle, { color: D.text }]}>Bill Summary</Text>
+                      <View style={[styles.billCard, { 
+                        backgroundColor: D.card, 
+                        borderColor: D.cardBorder, 
+                        borderRadius: 16, 
+                        padding: 16,
+                        marginVertical: 12
+                      }]}>
+                        <Text style={{ 
+                          fontSize: 18, 
+                          fontWeight: '800', 
+                          color: D.heading, 
+                          marginBottom: 12 
+                        }}>Summary</Text>
+                        
                         <View style={styles.billRow}>
-                          <Text style={[styles.billLabel, { color: D.textSub }]}>Item Total</Text>
-                          <Text style={[styles.billValue, { color: D.text }]}>₹{subtotal}</Text>
+                          <Text style={{ fontSize: 14, color: D.textSub }}>Subtotal</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '750', color: D.text }}>₹{subtotal}</Text>
                         </View>
 
                         {discountAmount > 0 && (
                           <View style={styles.billRow}>
-                            <Text style={styles.billLabelGreen}>Discount</Text>
-                            <Text style={styles.billValueGreen}>-₹{discountAmount}</Text>
+                            <Text style={{ fontSize: 14, color: '#059669', fontWeight: '600' }}>Discount</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '750', color: '#059669' }}>-₹{discountAmount}</Text>
                           </View>
                         )}
 
                         <View style={styles.billRow}>
-                          <Text style={[styles.billLabel, { color: D.textSub }]}>Delivery Fee</Text>
-                          <Text style={[styles.billValue, { color: D.text }]}>₹{finalDeliveryFee}</Text>
+                          <Text style={{ fontSize: 14, color: D.textSub }}>Delivery Fee</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '750', color: D.text }}>₹{finalDeliveryFee}</Text>
                         </View>
 
-                        <View style={[styles.divider, { backgroundColor: D.divider }]} />
+                        <View style={styles.billRow}>
+                          <Text style={{ fontSize: 14, color: D.textSub }}>Taxes & Fees</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '750', color: D.text }}>₹{taxesAndFees}</Text>
+                        </View>
+
+                        <View style={{ height: 1, backgroundColor: D.divider, marginVertical: 12 }} />
 
                         <View style={styles.billRow}>
-                          <Text style={[styles.billTotalLabel, { color: D.text }]}>Grand Total</Text>
-                          <Text style={styles.billTotalValue}>₹{grandTotal}</Text>
+                          <Text style={{ fontSize: 18, fontWeight: '800', color: D.text }}>Total</Text>
+                          <Text style={{ fontSize: 18, fontWeight: '800', color: D.text }}>₹{grandTotal}</Text>
                         </View>
                       </View>
                     </ScrollView>
 
-                    {/* STICKY BOTTOM PROCEED TO PAY BAR (EXACT DESIGN MATCHING SCREENSHOT) */}
+                    {/* STICKY BOTTOM BAR */}
                     <View style={{
                       position: 'absolute',
                       bottom: 0,
@@ -3617,24 +4234,26 @@ export default function App() {
                       <View>
                         <Text style={{ fontSize: 20, fontWeight: '900', color: D.text }}>₹{grandTotal}</Text>
                         <TouchableOpacity onPress={() => cartScrollRef.current?.scrollToEnd({ animated: true })}>
-                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#059669', marginTop: 1 }}>
-                            View Detailed Bill
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#FF5252', marginTop: 2 }}>
+                            View Detailed Bill ↓
                           </Text>
                         </TouchableOpacity>
                       </View>
 
                       <TouchableOpacity
                         style={{
-                          backgroundColor: '#059669',
+                          backgroundColor: '#FF5252',
                           paddingHorizontal: 28,
-                          paddingVertical: 18,
+                          paddingVertical: 16,
                           borderRadius: 16,
                           flexDirection: 'row',
-                          alignItems: 'center'
+                          alignItems: 'center',
+                          justifyContent: 'center'
                         }}
                         onPress={() => { setIsCartOpen(false); setIsCheckoutOpen(true); }}
                       >
-                        <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '800' }}>Proceed to Pay</Text>
+                        <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '800', marginRight: 8 }}>Place Order</Text>
+                        <Truck size={18} color="#ffffff" />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -6219,7 +6838,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'flex-end'
   },
   customizerCard: {
@@ -6699,5 +7318,333 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     fontSize: 14,
     fontWeight: '600'
+  },
+  // Redesigned Restaurant Details modal styles
+  rdFixedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    zIndex: 1000
+  },
+  rdHeaderTitleText: {
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center'
+  },
+  rdStickyContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 999,
+    borderBottomWidth: 1
+  },
+  rdSearchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    height: 44
+  },
+  rdSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 8,
+    marginRight: 8
+  },
+  rdFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
+  rdFilterChipText: {
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  rdRestaurantCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 }
+  },
+  rdTopLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6
+  },
+  rdTopLabelText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#EF4444',
+    marginLeft: 4,
+    textTransform: 'uppercase'
+  },
+  rdRestaurantName: {
+    fontSize: 20,
+    fontWeight: '900',
+    marginBottom: 6
+  },
+  rdRestaurantMeta: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 6
+  },
+  rdRestaurantDesc: {
+    fontSize: 12,
+    lineHeight: 16
+  },
+  rdRatingBox: {
+    alignItems: 'center',
+    padding: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    minWidth: 70
+  },
+  rdRatingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#10B981',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3
+  },
+  rdRatingBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF'
+  },
+  rdRatingCountText: {
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 4,
+    textAlign: 'center'
+  },
+  rdOfferCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: 160
+  },
+  rdOfferTitle: {
+    fontSize: 12,
+    fontWeight: '700'
+  },
+  rdOfferSubtitle: {
+    fontSize: 9,
+    fontWeight: '800',
+    marginTop: 1
+  },
+  rdMenuHeadingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1
+  },
+  rdMenuHeadingText: {
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  rdFoodGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16
+  },
+  rdFoodCard: {
+    width: '48%',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 }
+  },
+  rdFoodImageContainer: {
+    width: '100%',
+    height: 120,
+    position: 'relative'
+  },
+  rdFoodImage: {
+    width: '100%',
+    height: '100%'
+  },
+  rdFoodFavBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10
+  },
+  rdVegBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    zIndex: 10
+  },
+  rdVegBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#FFFFFF'
+  },
+  rdBestsellerBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#EA580C',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    zIndex: 10
+  },
+  rdBestsellerText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#FFFFFF'
+  },
+  rdFoodCardBody: {
+    padding: 10,
+    flex: 1,
+    justifyContent: 'space-between'
+  },
+  rdFoodName: {
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 16,
+    height: 32
+  },
+  rdFoodMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4
+  },
+  rdFoodMetaText: {
+    fontSize: 10,
+    fontWeight: '705'
+  },
+  rdFoodFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8
+  },
+  rdFoodPrice: {
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  rdAddBtn: {
+    borderWidth: 1,
+    borderColor: '#FF5252',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4
+  },
+  rdAddBtnText: {
+    color: '#FF5252',
+    fontSize: 10,
+    fontWeight: '800'
+  },
+  // Redesigned Food details modal styles
+  rdFoodDetailsImageWrapper: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    height: 220,
+    position: 'relative',
+    borderWidth: 0,
+    padding: 0
+  },
+  rdFoodDetailsHeroImg: {
+    width: width - 32,
+    height: 220,
+    resizeMode: 'cover',
+    borderRadius: 16
+  },
+  rdFoodDetailsFavBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10
+  },
+  rdCarouselDotsContainer: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10
+  },
+  rdCarouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    marginHorizontal: 3
+  },
+  rdCarouselDotActive: {
+    width: 14,
+    backgroundColor: '#FF5252'
+  },
+  rdFoodDetailsBottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    zIndex: 9999
+  },
+  rdFoodDetailsBottomBarBtn: {
+    backgroundColor: '#FF5252',
+    borderRadius: 14,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%'
+  },
+  rdFoodDetailsBottomBarBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800'
   }
 });
