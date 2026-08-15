@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './users/users.module';
@@ -72,4 +72,29 @@ import { AppController } from './app.controller';
     OffersModule,
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply((req, res, next) => {
+        const fs = require('fs');
+        const logPath = 'C:\\Users\\arjun\\.gemini\\antigravity-ide\\brain\\a0ff31c6-b252-4fa3-b2f6-08b2dcd8c6bf\\order_track_debug.log';
+        let logMsg = `[REQUEST] ${new Date().toISOString()} ${req.method} ${req.originalUrl}\n`;
+        logMsg += `Headers: ${JSON.stringify(req.headers)}\n`;
+        
+        let bodyData = '';
+        req.on('data', chunk => { bodyData += chunk; });
+        req.on('end', () => {
+          if (bodyData) {
+            logMsg += `Body: ${bodyData}\n`;
+          }
+        });
+
+        res.on('finish', () => {
+          logMsg += `[RESPONSE] Status: ${res.statusCode}\n\n`;
+          fs.appendFileSync(logPath, logMsg);
+        });
+        next();
+      })
+      .forRoutes('*');
+  }
+}

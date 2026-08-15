@@ -20,7 +20,8 @@ import {
   Animated,
   KeyboardAvoidingView,
   Linking,
-  NativeModules
+  NativeModules,
+  AppState
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
@@ -294,6 +295,8 @@ const resolveProductImage = (imgStr, activeBackend) => {
   return `${host}/uploads/foods/${resolved}`;
 };
 
+let cachedBackendUrl = null;
+
 export default function App() {
   const bottomInset = initialWindowMetrics?.insets?.bottom || (Platform.OS === 'android' ? 24 : 34);
 
@@ -339,11 +342,41 @@ export default function App() {
   // Dark Mode
   const [darkMode, setDarkMode] = useState(false);
 
+  // Active Multi-Order Live Tracking & Details State (Declared at top to avoid Temporal Dead Zone ReferenceError in useEffect hooks)
+  const [activeOrderDetail, setActiveOrderDetail] = useState(null);
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState(null);
+  const [myOrdersList, setMyOrdersList] = useState([]);
+  const [orderStepMap, setOrderStepMap] = useState({});
+
+  const mapStatusToStep = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'placed':
+        return 1;
+      case 'accepted':
+        return 2;
+      case 'preparing':
+        return 3;
+      case 'ready_for_pickup':
+      case 'picked_up':
+        return 3;
+      case 'out_for_delivery':
+        return 4;
+      case 'delivered':
+        return 5;
+      case 'cancelled':
+      case 'rejected':
+        return -1;
+      default:
+        return 1;
+    }
+  };
+
   // App Data & Filter States
   const [restaurants, setRestaurants] = useState(INITIAL_RESTAURANTS);
 
   // Helper to dynamically detect active backend endpoint
   const getActiveBackend = async () => {
+    if (cachedBackendUrl) return cachedBackendUrl;
     const endpoints = [
       `http://${getExpoHostIp()}:5000`,
       'http://127.0.0.1:5000',
@@ -356,7 +389,10 @@ export default function App() {
         const timeoutId = setTimeout(() => controller.abort(), 1200);
         const res = await fetch(`${url}/hotels`, { signal: controller.signal });
         clearTimeout(timeoutId);
-        if (res.ok) return url;
+        if (res.ok) {
+          cachedBackendUrl = url;
+          return url;
+        }
       } catch (e) {}
     }
     return 'http://127.0.0.1:5000'; // fallback
@@ -451,7 +487,8 @@ export default function App() {
                 description: f.description || '',
                 image: resolveImage(f.image) || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
                 isVeg: f.isVeg || false,
-                isPopular: f.isBestseller || false
+                isPopular: f.isBestseller || false,
+                hotelId: hotel.id
               }))
             };
             mappedRestaurants.push(mappedRest);
@@ -780,12 +817,47 @@ export default function App() {
     setPendingCartAction(null);
   };
 
+  const getCartHotelId = () => {
+    if (cartItems.length === 0) return null;
+    const item = cartItems[0];
+    let id = item.hotelId;
+    if (id) {
+      if (typeof id === 'string') {
+        const match = id.match(/(\d+)/);
+        if (match) return Number(match[1]);
+      } else if (typeof id === 'number') {
+        return id;
+      }
+    }
+    if (item.restaurantName) {
+      const matched = restaurants.find(r => r.name === item.restaurantName);
+      if (matched) {
+        if (typeof matched.id === 'string') {
+          const match = matched.id.match(/(\d+)/);
+          if (match) return Number(match[1]);
+        }
+        return matched.id;
+      }
+    }
+    return null;
+  };
+
+  const activeCartHotelId = getCartHotelId();
+
+  useEffect(() => {
+    setAppliedPromo(null);
+    setPromoInput('');
+    setPromoError('');
+  }, [activeCartHotelId]);
+
   const fetchBackendOffers = async () => {
-    const hotelId = cartItems.length > 0 ? cartItems[0].hotelId : null;
-    if (!hotelId || !currentUser?.token) return;
+    const hotelId = getCartHotelId();
+    if (!hotelId || !currentUser?.token) {
+      setBackendCoupons([]);
+      return;
+    }
     try {
-      const backendUrl = await getActiveBackend();
-      const response = await fetch(`${backendUrl}/offers/hotels/${hotelId}/public-offers`, {
+      const response = await fetch(`${resolvedBackendUrl}/offers/hotels/${hotelId}/public-offers`, {
         headers: {
           'Authorization': `Bearer ${currentUser?.token}`,
           'Content-Type': 'application/json'
@@ -795,18 +867,64 @@ export default function App() {
         const data = await response.json();
         if (Array.isArray(data)) {
           setBackendCoupons(data);
+        } else {
+          setBackendCoupons([]);
         }
+      } else {
+        setBackendCoupons([]);
       }
     } catch (err) {
-      console.error('Error fetching public offers:', err);
+      setBackendCoupons([]);
+    }
+  };
+
+  const fetchMyOrders = async () => {
+    if (!currentUser?.token) return;
+    try {
+      const res = await fetch(`${resolvedBackendUrl}/orders`, {
+        headers: {
+          'Authorization': `Bearer ${currentUser?.token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const mappedOrders = data.map(o => ({
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          items: (o.items || []).map(item => ({
+            itemId: item.id,
+            name: item.foodName,
+            price: item.unitPrice,
+            image: item.foodImage || 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=500&q=80',
+            quantity: item.quantity
+          })),
+          total: o.totalAmount,
+          address: o.deliveryAddress,
+          paymentMethod: o.paymentMethod,
+          placedAt: new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          estimatedTime: '25-30 mins',
+          orderStatus: o.orderStatus,
+          activeAssignment: o.activeAssignment
+        }));
+        setMyOrdersList(mappedOrders);
+      }
+    } catch (e) {
+      console.warn('Error fetching customer orders:', e);
     }
   };
 
   useEffect(() => {
-    if (isCartOpen || isCouponModalOpen) {
+    if (currentUser) {
+      fetchMyOrders();
+    }
+  }, [activeTab, currentUser]);
+
+  useEffect(() => {
+    if (isCartOpen || isCouponModalOpen || isCheckoutOpen) {
       fetchBackendOffers();
     }
-  }, [isCartOpen, isCouponModalOpen, cartItems.length]);
+  }, [isCartOpen, isCouponModalOpen, isCheckoutOpen, activeCartHotelId]);
 
   useEffect(() => {
     if (isCheckoutOpen) {
@@ -815,24 +933,31 @@ export default function App() {
   }, [isCheckoutOpen]);
 
   useEffect(() => {
+    let active = true;
     let intervalId = null;
+    let appStateSubscription = null;
+    
+    // Clear old details immediately when selected order changes/opens
+    setActiveOrderDetail(null);
     
     if (selectedOrderForDetail && selectedOrderForDetail.orderId) {
       const orderId = selectedOrderForDetail.orderId;
       
       const fetchStatus = async () => {
         try {
-          const backendUrl = await getActiveBackend();
-          const res = await fetch(`${backendUrl}/orders/${orderId}`, {
+          console.log('[TRACKING] Fetching status for order:', orderId);
+          const res = await fetch(`${resolvedBackendUrl}/orders/${orderId}`, {
             headers: {
               'Authorization': `Bearer ${currentUser?.token}`,
               'Content-Type': 'application/json'
             }
           });
-          if (res.ok) {
+          console.log('[TRACKING] Fetch response status:', res.status);
+          if (res.ok && active) {
             const data = await res.json();
+            console.log('[TRACKING] Order data received. Status:', data.orderStatus);
             setActiveOrderDetail(data);
-            
+            fetchMyOrders();
             const status = data.orderStatus?.toLowerCase();
             if (status === 'delivered' || status === 'cancelled' || status === 'rejected') {
               if (intervalId) {
@@ -840,24 +965,43 @@ export default function App() {
                 intervalId = null;
               }
             }
+          } else if (active) {
+            const errText = await res.text().catch(() => '');
+            console.warn('[TRACKING] Fetch status returned non-OK:', res.status, errText);
           }
         } catch (e) {
-          console.warn('Polling error fetching order status:', e);
+          if (active) {
+            console.warn('Polling error fetching order status:', e);
+          }
         }
       };
       
       fetchStatus();
-      intervalId = setInterval(fetchStatus, 5000);
+      intervalId = setInterval(fetchStatus, 4000);
+      
+      try {
+        appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+          if (nextAppState === 'active' && active) {
+            fetchStatus();
+          }
+        });
+      } catch (e) {
+        console.warn('Failed to add AppState listener:', e);
+      }
     } else {
       setActiveOrderDetail(null);
     }
     
     return () => {
+      active = false;
       if (intervalId) {
         clearInterval(intervalId);
       }
+      if (appStateSubscription && typeof appStateSubscription.remove === 'function') {
+        appStateSubscription.remove();
+      }
     };
-  }, [selectedOrderForDetail]);
+  }, [selectedOrderForDetail?.orderId, currentUser?.token]);
 
   // Animation & Toast Notification State (Slide in from RIGHT edge)
   const [cartAnim] = useState(new Animated.Value(1));
@@ -890,36 +1034,7 @@ export default function App() {
   const [checkoutLoadingText, setCheckoutLoadingText] = useState('');
   const [checkoutLayoutKey, setCheckoutLayoutKey] = useState(0);
   const [lastPlacedOrder, setLastPlacedOrder] = useState(null);
-  const [activeOrderDetail, setActiveOrderDetail] = useState(null);
   const [paymentFailedModal, setPaymentFailedModal] = useState({ visible: false, title: 'Payment Failed', message: '' });
-
-  const mapStatusToStep = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'placed':
-        return 1;
-      case 'accepted':
-        return 2;
-      case 'preparing':
-        return 3;
-      case 'ready_for_pickup':
-      case 'picked_up':
-        return 3;
-      case 'out_for_delivery':
-        return 4;
-      case 'delivered':
-        return 5;
-      case 'cancelled':
-      case 'rejected':
-        return -1;
-      default:
-        return 1;
-    }
-  };
-
-  // Active Multi-Order Live Tracking State
-  const [myOrdersList, setMyOrdersList] = useState([]);
-  const [orderStepMap, setOrderStepMap] = useState({}); // orderId -> step map
-  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState(null);
 
   // User Review & Rating States (Starts at 2 Stars)
   const [productReviews, setProductReviews] = useState({});
@@ -1081,7 +1196,6 @@ export default function App() {
   const addAddressToBackend = async (label, addressText, cityText) => {
     if (!currentUser || !currentUser.token) return null;
     try {
-      const backendUrl = await getActiveBackend();
       let phoneNum = currentUser.phone ? currentUser.phone.replace(/\D/g, '').slice(-10) : '';
       if (!/^[6-9]\d{9}$/.test(phoneNum)) {
         phoneNum = '9876543210';
@@ -1096,7 +1210,7 @@ export default function App() {
         pincode: '670001',
         isDefault: false
       };
-      const res = await fetch(`${backendUrl}/addresses`, {
+      const res = await fetch(`${resolvedBackendUrl}/addresses`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentUser.token}`,
@@ -1116,7 +1230,6 @@ export default function App() {
   const createDefaultAddressOnBackend = async () => {
     if (!currentUser || !currentUser.token) return;
     try {
-      const backendUrl = await getActiveBackend();
       let phoneNum = currentUser.phone ? currentUser.phone.replace(/\D/g, '').slice(-10) : '';
       if (!/^[6-9]\d{9}$/.test(phoneNum)) {
         phoneNum = '9876543210';
@@ -1133,7 +1246,7 @@ export default function App() {
         isDefault: true
       };
 
-      const res = await fetch(`${backendUrl}/addresses`, {
+      const res = await fetch(`${resolvedBackendUrl}/addresses`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentUser.token}`,
@@ -1154,8 +1267,7 @@ export default function App() {
   const syncAddressesFromBackend = async () => {
     if (!currentUser || !currentUser.token) return;
     try {
-      const backendUrl = await getActiveBackend();
-      const res = await fetch(`${backendUrl}/addresses`, {
+      const res = await fetch(`${resolvedBackendUrl}/addresses`, {
         headers: {
           'Authorization': `Bearer ${currentUser.token}`,
           'Content-Type': 'application/json'
@@ -1979,14 +2091,13 @@ export default function App() {
       return;
     }
 
-    const hotelId = cartItems.length > 0 ? cartItems[0].hotelId : null;
+    const hotelId = getCartHotelId();
     if (!hotelId) {
       setPromoError('❌ Unable to find restaurant details for validation');
       return;
     }
 
     try {
-      const backendUrl = await getActiveBackend();
       const validationPayload = {
         code,
         hotelId: Number(hotelId),
@@ -1999,7 +2110,7 @@ export default function App() {
         deliveryFee: Number(rawDeliveryFee),
       };
 
-      const res = await fetch(`${backendUrl}/offers/validate`, {
+      const res = await fetch(`${resolvedBackendUrl}/offers/validate`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentUser?.token}`,
@@ -2046,8 +2157,8 @@ export default function App() {
     if (appliedPromo) {
       const revalidatePromo = async () => {
         try {
-          const backendUrl = await getActiveBackend();
-          const hotelId = cartItems[0].hotelId;
+          const hotelId = getCartHotelId();
+          if (!hotelId) return;
           const validationPayload = {
             code: appliedPromo.code,
             hotelId: Number(hotelId),
@@ -2060,7 +2171,7 @@ export default function App() {
             deliveryFee: Number(rawDeliveryFee),
           };
 
-          const res = await fetch(`${backendUrl}/offers/validate`, {
+          const res = await fetch(`${resolvedBackendUrl}/offers/validate`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${currentUser?.token}`,
@@ -2108,14 +2219,14 @@ export default function App() {
     setCheckoutLoadingText('Syncing cart with backend...');
 
     try {
-      const backendUrl = await getActiveBackend();
+      const backendUrl = resolvedBackendUrl;
       const token = currentUser?.token;
       if (!token) {
         throw new Error('You must be logged in to checkout.');
       }
 
       // 1. Sync Cart to Backend
-      await fetch(`${backendUrl}/cart`, {
+      await fetch(`${resolvedBackendUrl}/cart`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -2125,20 +2236,46 @@ export default function App() {
 
       for (const item of cartItems) {
         const choiceIds = item.customizations ? item.customizations.map(c => c.id) : [];
-        const addRes = await fetch(`${backendUrl}/cart/items`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            foodId: Number(item.itemId),
-            quantity: Number(item.quantity),
-            choiceIds: choiceIds
-          })
+        const requestBody = JSON.stringify({
+          foodId: Number(item.itemId),
+          quantity: Number(item.quantity),
+          choiceIds: choiceIds
         });
-        if (!addRes.ok) {
-          throw new Error(`Failed to sync item "${item.name}" to backend`);
+        const url = `${resolvedBackendUrl}/cart/items`;
+        
+        let addRes;
+        let responseText = '';
+        let syncError = null;
+
+        try {
+          addRes = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: requestBody
+          });
+          responseText = await addRes.text().catch(() => '');
+          if (!addRes.ok) {
+            syncError = new Error(`HTTP ${addRes.status}: ${responseText}`);
+          }
+        } catch (e) {
+          syncError = e;
+        }
+
+        if (syncError) {
+          console.warn('SYNC ITEM NAME:', item.name);
+          console.warn('SYNC ITEM OBJECT:', JSON.stringify(item));
+          console.warn('SYNC FOOD ID:', item.itemId);
+          console.warn('SYNC HOTEL ID:', item.hotelId);
+          console.warn('SYNC URL:', url);
+          console.warn('SYNC REQUEST BODY:', requestBody);
+          console.warn('SYNC RESPONSE STATUS:', addRes ? addRes.status : 'N/A');
+          console.warn('SYNC RESPONSE DATA:', responseText || 'N/A');
+          console.warn('SYNC ERROR:', syncError.message || syncError);
+          
+          throw new Error(`Failed to sync item "${item.name}" to backend: ${responseText || syncError.message || 'Unknown error'}`);
         }
       }
 
@@ -2319,7 +2456,14 @@ export default function App() {
 
     } catch (err) {
       console.error('handlePlaceOrder error:', err);
-      setPaymentFailedModal({ visible: true, title: 'Order Failed', message: "We couldn't place your order. Please check your connection and try again." });
+      const isUnauthorized = err.message && (err.message.includes('401') || err.message.toLowerCase().includes('unauthorized'));
+      setPaymentFailedModal({
+        visible: true,
+        title: 'Order Failed',
+        message: isUnauthorized 
+          ? "Your login session has expired. Please log out and log back in to place your order."
+          : `We couldn't place your order. ${err.message || 'Please check your connection and try again.'}`
+      });
       setIsProcessingCheckout(false);
     }
   };
@@ -3217,10 +3361,10 @@ export default function App() {
                     const foodImg = firstItem ? firstItem.image : 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=500&q=80';
                     const foodName = firstItem ? firstItem.name : 'Delicious Meal';
                     const extraCount = ord.items.length > 1 ? ` + ${ord.items.length - 1} more` : '';
-                    const currentStep = orderStepMap[ord.orderId] || 1;
-                    const statusText = currentStep === 4 ? 'Delivered' : (currentStep === 3 ? 'On the Way' : (currentStep === 2 ? 'Preparing' : 'Confirmed'));
-                    const statusBg = currentStep === 4 ? '#ECFDF5' : '#FFF7ED';
-                    const statusColor = currentStep === 4 ? '#059669' : '#FF7A00';
+                    const currentStep = mapStatusToStep(ord.orderStatus || 'placed');
+                    const statusText = currentStep === 5 ? 'Delivered' : (currentStep === 4 ? 'On the Way' : (currentStep === 3 ? 'Preparing' : (currentStep === 2 ? 'Accepted' : (currentStep === -1 ? 'Cancelled' : 'Placed'))));
+                    const statusBg = currentStep === 5 ? '#ECFDF5' : (currentStep === -1 ? '#FEF2F2' : '#FFF7ED');
+                    const statusColor = currentStep === 5 ? '#059669' : (currentStep === -1 ? '#EF4444' : '#FF7A00');
 
                     return (
                       <TouchableOpacity
