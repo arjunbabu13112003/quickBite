@@ -19,7 +19,8 @@ import {
   ActivityIndicator,
   Animated,
   KeyboardAvoidingView,
-  Linking
+  Linking,
+  NativeModules
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
@@ -86,6 +87,13 @@ import Constants from 'expo-constants';
 // Helper to dynamically extract current PC IP address from Expo Metro
 const getExpoHostIp = () => {
   try {
+    const scriptURL = NativeModules?.SourceCode?.scriptURL;
+    if (scriptURL) {
+      const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
+      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+        return match[1];
+      }
+    }
     const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
     if (hostUri) {
       const ip = hostUri.split(':')[0];
@@ -94,7 +102,7 @@ const getExpoHostIp = () => {
   } catch (e) {
     console.warn('Expo hostUri detection:', e);
   }
-  return '192.168.220.93';
+  return '192.168.1.3';
 };
 
 const { width, height } = Dimensions.get('window');
@@ -272,7 +280,7 @@ const getBasePrice = (item, spiceLevel) => {
 };
 
 const resolveProductImage = (imgStr, activeBackend) => {
-  const host = activeBackend || 'http://192.168.220.93:5000';
+  const host = activeBackend || 'http://192.168.1.3:5000';
   if (!imgStr) return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
   
   let resolved = imgStr;
@@ -290,10 +298,34 @@ export default function App() {
   const bottomInset = initialWindowMetrics?.insets?.bottom || (Platform.OS === 'android' ? 24 : 34);
 
   // Navigation & Tab state: 'home' | 'wishlist' | 'orders' | 'profile' | 'admin'
-  const [activeTab, setActiveTab] = useState('home');
+  const [activeTab, _setActiveTab] = useState('home');
+  const [tabHistory, setTabHistory] = useState(['home']);
+
+  const setActiveTab = (tab) => {
+    _setActiveTab(prev => {
+      if (prev !== tab) {
+        setTabHistory(h => [...h, tab]);
+      }
+      return tab;
+    });
+  };
+
+  const goBack = () => {
+    setTabHistory(prevHistory => {
+      if (prevHistory.length > 1) {
+        const newHistory = [...prevHistory];
+        newHistory.pop(); // remove current tab
+        const prevTab = newHistory[newHistory.length - 1];
+        _setActiveTab(prevTab);
+        return newHistory;
+      }
+      _setActiveTab('home');
+      return ['home'];
+    });
+  };
 
   // Backend API & Authentication State
-  const API_BASE_URL = 'http://192.168.1.102:5000'; // NestJS + PostgreSQL Backend
+  const API_BASE_URL = 'http://192.168.1.3:5000'; // NestJS + PostgreSQL Backend
   const [currentUser, setCurrentUser] = useState(null);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
@@ -856,6 +888,7 @@ export default function App() {
   const [successScaleAnim] = useState(new Animated.Value(0));
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
   const [checkoutLoadingText, setCheckoutLoadingText] = useState('');
+  const [checkoutLayoutKey, setCheckoutLayoutKey] = useState(0);
   const [lastPlacedOrder, setLastPlacedOrder] = useState(null);
   const [activeOrderDetail, setActiveOrderDetail] = useState(null);
   const [paymentFailedModal, setPaymentFailedModal] = useState({ visible: false, title: 'Payment Failed', message: '' });
@@ -1162,8 +1195,7 @@ export default function App() {
     const detectedIp = getExpoHostIp();
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.220.64:5000',
-      'http://192.168.1.102:5000',
+      'http://192.168.1.3:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];
@@ -1570,8 +1602,7 @@ export default function App() {
 
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.220.64:5000',
-      'http://192.168.1.102:5000',
+      'http://192.168.1.3:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];
@@ -3157,7 +3188,16 @@ export default function App() {
                   marginTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 14 : 12,
                   marginBottom: 16
                 }}>
-                  <Text style={[styles.pageTitle, { color: D.heading, marginBottom: 0 }]}>My Orders 🛵</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <TouchableOpacity
+                      onPress={() => goBack()}
+                      style={{ marginRight: 8, padding: 4 }}
+                      activeOpacity={0.7}
+                    >
+                      <ArrowLeft size={22} color={D.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.pageTitle, { color: D.heading, marginBottom: 0 }]}>My Orders 🛵</Text>
+                  </View>
                   {myOrdersList.length > 0 && (
                     <View style={[styles.liveBadge, { backgroundColor: '#FEF2F2', borderColor: '#FF5252', borderWidth: 1 }]}>
                       <Text style={[styles.liveBadgeText, { color: '#FF5252' }]}>{myOrdersList.length} Orders</Text>
@@ -3197,7 +3237,7 @@ export default function App() {
                         <View style={{ flex: 1, marginLeft: 12, marginRight: 6 }}>
                           <Text style={[styles.orderCompactTitle, { color: D.text }]} numberOfLines={1}>{foodName}{extraCount}</Text>
                           <Text style={[styles.orderCompactSub, { color: D.textSub }]}>Order #{ord.orderId} • {ord.placedAt}</Text>
-                          <Text style={styles.orderCompactPrice}>₹{ord.total} <Text style={{ fontSize: 11, fontWeight: '500', color: D.textSub }}>({ord.paymentMethod})</Text></Text>
+                          <Text style={styles.orderCompactPrice}>₹{ord.total} <Text style={{ fontSize: 11, fontWeight: '700', color: ((ord.paymentMethod || '').toUpperCase().includes('COD') || (ord.paymentMethod || '').toUpperCase().includes('CASH')) ? '#D97706' : '#10B981' }}>({ord.paymentMethod || 'ONLINE'})</Text></Text>
                         </View>
 
                         <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -4491,7 +4531,12 @@ export default function App() {
                           alignItems: 'center',
                           justifyContent: 'center'
                         }}
-                        onPress={() => { setIsCartOpen(false); setIsCheckoutOpen(true); }}
+                        onPress={() => {
+                          setIsCartOpen(false);
+                          setTimeout(() => {
+                            setIsCheckoutOpen(true);
+                          }, 150);
+                        }}
                       >
                         <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '800', marginRight: 8 }}>Place Order</Text>
                         <Truck size={18} color="#ffffff" />
@@ -4653,346 +4698,319 @@ export default function App() {
             </SafeAreaView>
           </Modal>
           {/* CHECKOUT & PAYMENT MODAL */}
-          <Modal visible={isCheckoutOpen} animationType="slide" statusBarTranslucent onRequestClose={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setIsCartOpen(true); } }}>
-            <SafeAreaView style={{ flex: 1, backgroundColor: D.bg }}>
-              <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-                <View style={{ flex: 1, flexDirection: 'column' }}>
+          <Modal visible={isCheckoutOpen} animationType="slide" statusBarTranslucent onRequestClose={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setTimeout(() => setIsCartOpen(true), 150); } }} onShow={() => { setTimeout(() => setCheckoutLayoutKey(k => k + 1), 60); }}>
+            <View key={checkoutLayoutKey} style={{ flex: 1, backgroundColor: '#F5F7FA', paddingTop: STATUSBAR_HEIGHT }}>
 
-                {/* HEADER */}
+                {/* ── COMPACT HEADER ── */}
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
-                  paddingHorizontal: 20,
-                  paddingTop: 8,
-                  paddingBottom: 12,
-                  backgroundColor: D.card,
-                  borderBottomWidth: 1,
-                  borderBottomColor: D.cardBorder,
+                  justifyContent: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: 6,
+                  paddingBottom: 10,
+                  backgroundColor: '#FFFFFF',
+                  position: 'relative',
                 }}>
                   <TouchableOpacity 
-                    onPress={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setIsCartOpen(true); } }} 
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
-                      backgroundColor: D.chipBg,
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
+                    onPress={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setTimeout(() => setIsCartOpen(true), 150); } }} 
+                    style={{ position: 'absolute', left: 16, zIndex: 10, padding: 4 }}
                     disabled={isProcessingCheckout}
                   >
-                    <ArrowLeft size={18} color={D.text} />
+                    <ArrowLeft size={22} color="#059669" />
                   </TouchableOpacity>
-                  <Text style={{ fontSize: 18, fontWeight: '800', color: D.heading }}>Checkout</Text>
-                  <View style={{ width: 36 }} />
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: '#1E293B' }}>Checkout</Text>
                 </View>
+                {/* Green accent line */}
+                <View style={{ height: 2.5, backgroundColor: '#059669' }} />
 
-                {/* MAIN CONTENT */}
+                {/* ── SCROLLABLE CONTENT ── */}
                 <ScrollView 
                   style={{ flex: 1 }}
-                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }} 
+                  contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 30 }}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
                 >
-                  
-                  {/* DELIVERY ADDRESS SECTION */}
-                  <View style={{ marginBottom: 20 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: D.heading, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Delivering To</Text>
+
+                    {/* ── DELIVERY CARD ── */}
                     <View style={{
-                      backgroundColor: D.card,
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 12,
                       borderWidth: 1,
-                      borderColor: D.cardBorder,
-                      borderRadius: 16,
-                      padding: 16,
+                      borderColor: '#E2E8F0',
+                      padding: 14,
                       flexDirection: 'row',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.03,
-                      shadowRadius: 8,
-                      elevation: 2,
+                      marginBottom: 16,
                     }}>
-                      <View style={{ flex: 1, marginRight: 16 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                          <MapPin size={16} color="#059669" style={{ marginRight: 6 }} />
-                          <Text style={{ fontSize: 15, fontWeight: '700', color: D.text }} numberOfLines={1}>
-                            {currentUser?.name || 'Customer'}
-                          </Text>
-                        </View>
-                        <Text style={{ fontSize: 13, color: D.textSub, lineHeight: 18, marginBottom: 4 }} numberOfLines={2}>
+                      <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+                        <MapPin size={16} color="#059669" />
+                      </View>
+                      <View style={{ flex: 1, marginRight: 10 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>
+                          Delivering to {currentUser?.name || 'Customer'}
+                        </Text>
+                        <Text style={{ fontSize: 13, color: '#334155', fontWeight: '500' }} numberOfLines={1}>
                           {selectedAddress.address || selectedAddress.label}
                         </Text>
-                        <Text style={{ fontSize: 12, color: D.textSub }}>
-                          Phone: {currentUser?.phone || selectedAddress.phoneNumber || 'N/A'}
-                        </Text>
                       </View>
-                      
                       <TouchableOpacity 
                         onPress={() => setIsAddressModalOpen(true)}
-                        style={{
-                          backgroundColor: D.chipBg,
-                          paddingHorizontal: 12,
-                          paddingVertical: 6,
-                          borderRadius: 8,
-                          borderWidth: 1,
-                          borderColor: D.cardBorder
-                        }}
                         disabled={isProcessingCheckout}
+                        style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#059669' }}
                       >
                         <Text style={{ fontSize: 12, fontWeight: '700', color: '#059669' }}>Change</Text>
                       </TouchableOpacity>
                     </View>
-                  </View>
 
-                  {/* ORDER SUMMARY */}
-                  <View style={{ marginBottom: 20 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: D.heading, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Order Summary</Text>
-                    <View style={{
-                      backgroundColor: D.card,
-                      borderWidth: 1,
-                      borderColor: D.cardBorder,
-                      borderRadius: 16,
-                      padding: 16,
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.03,
-                      shadowRadius: 8,
-                      elevation: 2,
-                    }}>
-                      {cartItems.map((item, idx) => (
-                        <View key={item.cartItemId || idx} style={{
-                          borderBottomWidth: idx === cartItems.length - 1 ? 0 : 1,
-                          borderBottomColor: D.divider,
-                          paddingBottom: idx === cartItems.length - 1 ? 0 : 12,
-                          marginBottom: idx === cartItems.length - 1 ? 0 : 12,
-                        }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <View style={{ flex: 1 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                                <View style={{
-                                  borderColor: item.isVeg ? '#10B981' : '#EF4444',
-                                  width: 8,
-                                  height: 8,
-                                  borderWidth: 1,
-                                  justifyContent: 'center',
-                                  alignItems: 'center',
-                                  marginRight: 6,
-                                  borderRadius: 1
-                                }}>
-                                  <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: item.isVeg ? '#10B981' : '#EF4444' }} />
-                                </View>
-                                <Text style={{ fontSize: 14, fontWeight: '700', color: D.text }}>{item.name}</Text>
-                              </View>
-                              <Text style={{ fontSize: 12, color: D.textSub }}>
-                                Qty: {item.quantity} • Rs. {item.price} each
-                              </Text>
+                    {/* ── ORDER SUMMARY ── */}
+                    <View style={{ marginBottom: 16 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: '#1E293B' }}>Order Summary</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#059669' }}>{cartItems.length} {cartItems.length === 1 ? 'Item' : 'Items'}</Text>
+                      </View>
+                      <View style={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0',
+                        paddingHorizontal: 14,
+                        paddingVertical: 10,
+                      }}>
+                        {cartItems.map((item, idx) => (
+                          <View key={item.cartItemId || idx} style={{
+                            flexDirection: 'row',
+                            alignItems: 'flex-start',
+                            paddingVertical: 9,
+                            borderBottomWidth: idx === cartItems.length - 1 ? 0 : 1,
+                            borderBottomColor: '#F1F5F9',
+                          }}>
+                            <View style={{
+                              width: 14, height: 14, borderWidth: 1.5, borderRadius: 2,
+                              borderColor: item.isVeg ? '#16A34A' : '#EF4444',
+                              alignItems: 'center', justifyContent: 'center', marginRight: 8, marginTop: 2,
+                            }}>
+                              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.isVeg ? '#16A34A' : '#EF4444' }} />
                             </View>
-                            <Text style={{ fontSize: 14, fontWeight: '700', color: D.text, marginLeft: 12, flexShrink: 0 }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }} numberOfLines={1}>{item.name}</Text>
+                              <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
+                                Qty: {item.quantity} × Rs. {item.price}
+                              </Text>
+                              {item.customizations && item.customizations.length > 0 && (
+                                <Text style={{ fontSize: 10, color: '#94A3B8', marginTop: 1 }} numberOfLines={1}>
+                                  {item.customizations.map(c => c.name).join(', ')}
+                                </Text>
+                              )}
+                            </View>
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginLeft: 8 }}>
                               Rs. {Math.round(Number(item.price) * Number(item.quantity))}
                             </Text>
                           </View>
-                          {item.customizations && item.customizations.length > 0 && (
-                            <View style={{ marginTop: 4, paddingLeft: 14 }}>
-                              {item.customizations.map((choice, cidx) => (
-                                <Text key={cidx} style={{ fontSize: 11, color: D.textSub }}>
-                                  • {choice.name} {choice.price > 0 ? `(+Rs. ${choice.price})` : ''}
-                                </Text>
-                              ))}
+                        ))}
+
+                        {/* Applied Offer Row */}
+                        {appliedPromo && discountAmount > 0 && (
+                          <View style={{
+                            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                            paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9',
+                          }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 13, marginRight: 6 }}>🏷️</Text>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#059669' }}>
+                                {appliedPromo.code} Applied
+                              </Text>
                             </View>
-                          )}
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-
-                  {/* BILL DETAILS */}
-                  <View style={{ marginBottom: 20 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: D.heading, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Bill Details</Text>
-                    <View style={{
-                      backgroundColor: D.card,
-                      borderWidth: 1,
-                      borderColor: D.cardBorder,
-                      borderRadius: 16,
-                      padding: 16,
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.03,
-                      shadowRadius: 8,
-                      elevation: 2,
-                    }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <Text style={{ fontSize: 13, color: D.textSub }}>Item Total</Text>
-                        <Text style={{ fontSize: 13, color: D.text }}>Rs. {subtotal}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <Text style={{ fontSize: 13, color: D.textSub }}>Delivery Fee</Text>
-                        <Text style={{ fontSize: 13, color: D.text }}>Rs. {finalDeliveryFee}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <Text style={{ fontSize: 13, color: D.textSub }}>Taxes & Platform Fees</Text>
-                        <Text style={{ fontSize: 13, color: D.text }}>Rs. {taxesAndFees}</Text>
-                      </View>
-                      {discountAmount > 0 && (
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-                          <Text style={{ fontSize: 13, color: '#10B981', fontWeight: '600' }}>Discount</Text>
-                          <Text style={{ fontSize: 13, color: '#10B981', fontWeight: '600' }}>-Rs. {discountAmount}</Text>
-                        </View>
-                      )}
-                      <View style={{ borderTopWidth: 1, borderTopColor: D.divider, paddingTop: 10, marginTop: 4, flexDirection: 'row', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 14, fontWeight: '800', color: D.text }}>To Pay</Text>
-                        <Text style={{ fontSize: 14, fontWeight: '800', color: D.text }}>Rs. {grandTotal}</Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* PAYMENT METHOD */}
-                  <View style={{ marginBottom: 10 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: D.heading, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Payment Method</Text>
-                    
-                    {/* Pay Online */}
-                    <TouchableOpacity
-                      onPress={() => setPaymentMethod('online')}
-                      style={{
-                        backgroundColor: D.card,
-                        borderWidth: 1,
-                        borderColor: paymentMethod === 'online' ? '#059669' : D.cardBorder,
-                        borderRadius: 16,
-                        padding: 16,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        marginBottom: 10,
-                      }}
-                      disabled={isProcessingCheckout}
-                    >
-                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={{ fontSize: 22, marginRight: 12 }}>💳</Text>
-                        <View>
-                          <Text style={{ fontSize: 14, fontWeight: '700', color: D.text }}>Pay Online (Razorpay)</Text>
-                          <Text style={{ fontSize: 11, color: D.textSub }}>UPI, Cards, Netbanking & Wallets</Text>
-                        </View>
-                      </View>
-                      <View style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 9,
-                        borderWidth: 2,
-                        borderColor: paymentMethod === 'online' ? '#059669' : '#9CA3AF',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        {paymentMethod === 'online' && (
-                          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#059669' }} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#059669' }}>- Rs. {discountAmount}</Text>
+                          </View>
                         )}
                       </View>
-                    </TouchableOpacity>
+                    </View>
 
-                    {/* Cash on Delivery */}
-                    <TouchableOpacity
-                      onPress={() => setPaymentMethod('cod')}
-                      style={{
-                        backgroundColor: D.card,
+                    {/* ── BILL DETAILS ── */}
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#1E293B', marginBottom: 10 }}>Bill Details</Text>
+                      <View style={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 12,
                         borderWidth: 1,
-                        borderColor: paymentMethod === 'cod' ? '#059669' : D.cardBorder,
-                        borderRadius: 16,
-                        padding: 16,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}
-                      disabled={isProcessingCheckout}
-                    >
-                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={{ fontSize: 22, marginRight: 12 }}>💵</Text>
-                        <View>
-                          <Text style={{ fontSize: 14, fontWeight: '700', color: D.text }}>Cash on Delivery</Text>
-                          <Text style={{ fontSize: 11, color: D.textSub }}>Pay cash upon delivery</Text>
+                        borderColor: '#E2E8F0',
+                        padding: 14,
+                      }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>Item Total</Text>
+                          <Text style={{ fontSize: 13, color: '#334155' }}>Rs. {subtotal}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>Delivery Fee</Text>
+                          <Text style={{ fontSize: 13, color: '#334155' }}>Rs. {finalDeliveryFee}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>Taxes & Platform Fees</Text>
+                          <Text style={{ fontSize: 13, color: '#334155' }}>Rs. {taxesAndFees}</Text>
+                        </View>
+                        {discountAmount > 0 && (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <Text style={{ fontSize: 13, color: '#059669', fontWeight: '600' }}>Discount</Text>
+                            <Text style={{ fontSize: 13, color: '#059669', fontWeight: '600' }}>- Rs. {discountAmount}</Text>
+                          </View>
+                        )}
+                        <View style={{ borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 10, marginTop: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 14, fontWeight: '800', color: '#1E293B' }}>Total Payable</Text>
+                          <Text style={{ fontSize: 16, fontWeight: '800', color: '#1E293B' }}>Rs. {grandTotal}</Text>
                         </View>
                       </View>
-                      <View style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 9,
-                        borderWidth: 2,
-                        borderColor: paymentMethod === 'cod' ? '#059669' : '#9CA3AF',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        {paymentMethod === 'cod' && (
-                          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#059669' }} />
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  </View>
+                    </View>
+
+                    {/* ── PAYMENT METHOD ── */}
+                    <View style={{ marginBottom: 20 }}>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#1E293B', marginBottom: 10 }}>Payment Method</Text>
+
+                      {/* Pay Online */}
+                      <TouchableOpacity
+                        onPress={() => setPaymentMethod('online')}
+                        activeOpacity={0.7}
+                        disabled={isProcessingCheckout}
+                        style={{
+                          backgroundColor: paymentMethod === 'online' ? '#F0FDF9' : '#FFFFFF',
+                          borderWidth: 1.5,
+                          borderColor: paymentMethod === 'online' ? '#059669' : '#E2E8F0',
+                          borderRadius: 12,
+                          padding: 14,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <View style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+                              <Text style={{ fontSize: 18 }}>💳</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>Pay Online</Text>
+                              <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>UPI, Cards, Netbanking & Wallets</Text>
+                            </View>
+                          </View>
+                          {/* Radio */}
+                          <View style={{
+                            width: 20, height: 20, borderRadius: 10, borderWidth: 2,
+                            borderColor: paymentMethod === 'online' ? '#059669' : '#CBD5E1',
+                            alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {paymentMethod === 'online' && (
+                              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#059669' }} />
+                            )}
+                          </View>
+                        </View>
+                        {/* Chips row */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, marginLeft: 44 }}>
+                          <View style={{ backgroundColor: '#F1F5F9', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, marginRight: 6 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>UPI</Text>
+                          </View>
+                          <View style={{ backgroundColor: '#F1F5F9', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, marginRight: 10 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>CARDS</Text>
+                          </View>
+                          <Text style={{ fontSize: 10, color: '#94A3B8', fontStyle: 'italic' }}>Razorpay</Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Cash on Delivery */}
+                      <TouchableOpacity
+                        onPress={() => setPaymentMethod('cod')}
+                        activeOpacity={0.7}
+                        disabled={isProcessingCheckout}
+                        style={{
+                          backgroundColor: paymentMethod === 'cod' ? '#F0FDF9' : '#FFFFFF',
+                          borderWidth: 1.5,
+                          borderColor: paymentMethod === 'cod' ? '#059669' : '#E2E8F0',
+                          borderRadius: 12,
+                          padding: 14,
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <View style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: '#FEF9C3', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+                              <Text style={{ fontSize: 18 }}>💵</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>Cash on Delivery</Text>
+                              <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>Pay when your order arrives</Text>
+                            </View>
+                          </View>
+                          {/* Radio */}
+                          <View style={{
+                            width: 20, height: 20, borderRadius: 10, borderWidth: 2,
+                            borderColor: paymentMethod === 'cod' ? '#059669' : '#CBD5E1',
+                            alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {paymentMethod === 'cod' && (
+                              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#059669' }} />
+                            )}
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
 
                 </ScrollView>
 
-                {/* STICKY BOTTOM PAYMENT BAR */}
+                {/* ── FIXED BOTTOM BAR (normal flex child, always visible) ── */}
                 <View style={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  backgroundColor: D.card,
+                  backgroundColor: '#FFFFFF',
                   borderTopWidth: 1,
-                  borderTopColor: D.cardBorder,
+                  borderTopColor: '#E2E8F0',
                   paddingHorizontal: 20,
-                  paddingTop: 12,
-                  paddingBottom: Math.max(12, bottomInset),
+                  paddingTop: 10,
+                  paddingBottom: Math.max(14, bottomInset + 6),
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'space-between',
+                  elevation: 12,
                   shadowColor: '#000',
-                  shadowOffset: { width: 0, height: -4 },
-                  shadowOpacity: 0.05,
-                  shadowRadius: 8,
-                  elevation: 10,
+                  shadowOffset: { width: 0, height: -3 },
+                  shadowOpacity: 0.08,
+                  shadowRadius: 6,
                 }}>
                   <View>
-                    <Text style={{ fontSize: 11, color: D.textSub, textTransform: 'uppercase' }}>Total Amount</Text>
-                    <Text style={{ fontSize: 20, fontWeight: '900', color: D.text }}>Rs. {grandTotal}</Text>
+                    <Text style={{ fontSize: 11, color: '#94A3B8', fontWeight: '500' }}>Total</Text>
+                    <Text style={{ fontSize: 20, fontWeight: '900', color: '#1E293B' }}>Rs. {grandTotal}</Text>
                   </View>
-
                   <TouchableOpacity
                     onPress={handlePlaceOrder}
                     disabled={isProcessingCheckout}
+                    activeOpacity={0.8}
                     style={{
                       backgroundColor: '#059669',
-                      borderRadius: 14,
-                      paddingHorizontal: 28,
-                      paddingVertical: 14,
-                      minWidth: 160,
+                      borderRadius: 12,
+                      paddingHorizontal: 26,
+                      paddingVertical: 13,
+                      minWidth: 140,
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexDirection: 'row',
+                      elevation: 3,
                       shadowColor: '#059669',
-                      shadowOffset: { width: 0, height: 4 },
-                      shadowOpacity: 0.15,
-                      shadowRadius: 8,
-                      elevation: 4,
+                      shadowOffset: { width: 0, height: 3 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 6,
                     }}
                   >
                     {isProcessingCheckout ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <ActivityIndicator color="#ffffff" size="small" style={{ marginRight: 8 }} />
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                        <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 8 }} />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>
                           {checkoutLoadingText || 'Please wait...'}
                         </Text>
                       </View>
                     ) : (
-                      <Text style={{ fontSize: 15, fontWeight: '800', color: '#ffffff' }}>
-                        {paymentMethod === 'cod' ? 'Place Order' : `Pay Rs. ${grandTotal}`}
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#FFFFFF' }}>
+                        {paymentMethod === 'cod' ? 'Place Order →' : 'Pay Now →'}
                       </Text>
                     )}
                   </TouchableOpacity>
                 </View>
 
-                </View>
-              </KeyboardAvoidingView>
-            </SafeAreaView>
+            </View>
           </Modal>
+
 
           {/* PAYMENT FAILED MODAL */}
           <Modal

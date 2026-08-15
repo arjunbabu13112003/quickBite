@@ -202,8 +202,65 @@ export default function App() {
 
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isAdminDashboardOpen, setIsAdminDashboardOpen] = useState(false);
-  const [isWishlistPageOpen, setIsWishlistPageOpen] = useState(false);
+
+  const [navHistory, setNavHistory] = useState([
+    { screen: 'home', params: {} }
+  ]);
+
+  const currentNav = navHistory[navHistory.length - 1] || { screen: 'home', params: {} };
+  const isAdminDashboardOpen = currentNav.screen === 'admin';
+  const isWishlistPageOpen = currentNav.screen === 'wishlist';
+  const customizingItem = currentNav.screen === 'product' ? currentNav.params.item : null;
+  const selectedRestaurant = currentNav.screen === 'restaurant' ? currentNav.params.restaurant : null;
+  const isCheckoutOpen = currentNav.screen === 'checkout';
+  const isTrackerOpen = currentNav.screen === 'tracker';
+
+  const navigateTo = (screen, params = {}) => {
+    setNavHistory(prev => {
+      if (screen === 'home') {
+        return [{ screen: 'home', params: {} }];
+      }
+      return [...prev, { screen, params }];
+    });
+  };
+
+  const goBack = () => {
+    setNavHistory(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+  };
+
+  const resetToHome = () => {
+    setNavHistory([{ screen: 'home', params: {} }]);
+  };
+
+  const setIsAdminDashboardOpen = (val) => {
+    if (val) navigateTo('admin');
+    else goBack();
+  };
+
+  const setIsWishlistPageOpen = (val) => {
+    if (val) navigateTo('wishlist');
+    else goBack();
+  };
+
+  const setSelectedRestaurant = (val) => {
+    if (val) navigateTo('restaurant', { restaurant: val });
+    else goBack();
+  };
+
+  const setCustomizingItem = (val) => {
+    if (val) navigateTo('product', { item: val });
+    else goBack();
+  };
+
+  const setIsCheckoutOpen = (val) => {
+    if (val) navigateTo('checkout');
+    else goBack();
+  };
+
+  const setIsTrackerOpen = (val) => {
+    if (val) navigateTo('tracker');
+    else goBack();
+  };
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
@@ -211,18 +268,12 @@ export default function App() {
   const [filterVegOnly, setFilterVegOnly] = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
-  const [selectedRestaurant, setSelectedRestaurant] = useState(null);
-
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [tipPercent, setTipPercent] = useState(15);
 
-  const [customizingItem, setCustomizingItem] = useState(null);
   const [customizingRestaurant, setCustomizingRestaurant] = useState(null);
-
-  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [checkoutSummary, setCheckoutSummary] = useState(null);
-  const [isTrackerOpen, setIsTrackerOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -397,40 +448,28 @@ export default function App() {
         onOpenCart={() => setIsCartOpen(true)}
         favoriteCount={favorites.length + favoriteDishes.length}
         onOpenFavorites={() => {
-          setIsAdminDashboardOpen(false);
-          setCustomizingItem(null);
-          setSelectedRestaurant(null);
-          setIsWishlistPageOpen(true);
+          navigateTo('wishlist');
         }}
         theme={theme}
         onToggleTheme={toggleTheme}
         onResetToHome={() => {
-          setIsAdminDashboardOpen(false);
-          setIsWishlistPageOpen(false);
-          setCustomizingItem(null);
-          setSelectedRestaurant(null);
+          resetToHome();
           setActiveCategory('all');
           setSearchQuery('');
           setShowFavoritesOnly(false);
         }}
         onSelectRestaurant={(rest) => {
-          setIsAdminDashboardOpen(false);
-          setIsWishlistPageOpen(false);
-          setCustomizingItem(null);
-          setSelectedRestaurant(rest);
+          navigateTo('restaurant', { restaurant: rest });
         }}
         onOpenItemCustomizer={(item, rest) => {
-          setIsAdminDashboardOpen(false);
-          setIsWishlistPageOpen(false);
-          setCustomizingItem(item);
           setCustomizingRestaurant(rest);
+          navigateTo('product', { item });
         }}
         currentUser={currentUser}
         onOpenAuthModal={() => setIsAuthOpen(true)}
         onLogout={handleLogout}
         onOpenAdminDashboard={() => {
-          setIsWishlistPageOpen(false);
-          setIsAdminDashboardOpen(true);
+          navigateTo('admin');
         }}
         restaurants={restaurants}
       />
@@ -453,10 +492,9 @@ export default function App() {
             onToggleFavorite={toggleFavorite}
             onToggleFavoriteDish={toggleFavoriteDish}
             onSelectRestaurant={(rest) => {
-              setIsWishlistPageOpen(false);
-              setSelectedRestaurant(rest);
+              navigateTo('restaurant', { restaurant: rest });
             }}
-            onBackToHome={() => setIsWishlistPageOpen(false)}
+            onBackToHome={goBack}
             currentUser={currentUser}
             onAddToCart={handleAddToCart}
             restaurants={restaurants}
@@ -819,11 +857,8 @@ export default function App() {
           if (fullRestaurant) {
             const fullItem = fullRestaurant.menu.find(m => m.id === cartItem.itemId);
             if (fullItem) {
-              setIsAdminDashboardOpen(false);
-              setIsWishlistPageOpen(false);
-              setSelectedRestaurant(null);
-              setCustomizingItem(fullItem);
               setCustomizingRestaurant(fullRestaurant);
+              navigateTo('product', { item: fullItem });
             }
           }
         }}
