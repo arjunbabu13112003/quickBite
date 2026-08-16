@@ -101,6 +101,39 @@ export class Hotel {
   @Column({ type: 'boolean', default: true })
   supportsOnlinePayment: boolean;
 
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  cuisines?: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  restaurantType?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  ownerName?: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  alternatePhoneNumber?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  landmark?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  district?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  legalName?: string;
+
+  @Column({ type: 'boolean', default: true })
+  isDeliveryAvailable: boolean;
+
+  @Column({ type: 'integer', nullable: true })
+  estimatedDeliveryTime?: number;
+
+  @Column({ type: 'text', nullable: true })
+  operatingHours?: string;
+
+  @Column({ type: 'text', nullable: true })
+  gallery?: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

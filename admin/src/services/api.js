@@ -644,4 +644,55 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  updateHotelProfile: async (hotelId, payload) => {
+    const res = await fetch(`${API_BASE_URL}/hotels/${hotelId}/profile`, {
+      method: 'PATCH',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+  },
+
+  uploadHotelLogo: async (hotelId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers = { ...getAuthHeaders() };
+    delete headers['Content-Type'];
+
+    const res = await fetch(`${API_BASE_URL}/hotels/${hotelId}/upload-logo`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    return handleResponse(res);
+  },
+
+  uploadHotelCover: async (hotelId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers = { ...getAuthHeaders() };
+    delete headers['Content-Type'];
+
+    const res = await fetch(`${API_BASE_URL}/hotels/${hotelId}/upload-cover`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    return handleResponse(res);
+  },
+
+  uploadHotelGallery: async (hotelId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers = { ...getAuthHeaders() };
+    delete headers['Content-Type'];
+
+    const res = await fetch(`${API_BASE_URL}/hotels/${hotelId}/upload-gallery`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    return handleResponse(res);
+  },
 };

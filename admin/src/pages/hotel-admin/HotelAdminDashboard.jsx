@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
+import {
   LogOut, Store, Utensils, TrendingUp, Activity, ClipboardList,
   Building, RefreshCw, Plus, AlertTriangle, Bell, User,
   Settings, MapPin, Clock, Search, Loader2, Eye, Edit, Trash2, X, Check, EyeOff, Upload,
@@ -7,32 +7,33 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import CustomizationsSection from './CustomizationsSection';
+import RestaurantProfilePage from './RestaurantProfilePage';
 
 // ─── Order Status Config ─────────────────────────────────────────────────────
 const STATUS_CONFIG = {
-  placed:           { label: 'New / Placed',    color: '#ff5520', bg: 'rgba(255,85,32,0.1)',   badge: '#ff5520' },
-  accepted:         { label: 'Accepted',         color: '#3b82f6', bg: 'rgba(59,130,246,0.1)',  badge: '#3b82f6' },
-  preparing:        { label: 'Preparing',        color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  badge: 'var(--text-warning)' },
+  placed: { label: 'New / Placed', color: '#ff5520', bg: 'rgba(255,85,32,0.1)', badge: '#ff5520' },
+  accepted: { label: 'Accepted', color: '#3b82f6', bg: 'rgba(59,130,246,0.1)', badge: '#3b82f6' },
+  preparing: { label: 'Preparing', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', badge: 'var(--text-warning)' },
   ready_for_pickup: { label: 'Ready for Pickup', color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)', badge: '#7c3aed' },
-  picked_up:        { label: 'Picked Up',        color: '#06b6d4', bg: 'rgba(6,182,212,0.1)',  badge: '#0891b2' },
+  picked_up: { label: 'Picked Up', color: '#06b6d4', bg: 'rgba(6,182,212,0.1)', badge: '#0891b2' },
   out_for_delivery: { label: 'Out for Delivery', color: '#0ea5e9', bg: 'rgba(14,165,233,0.1)', badge: '#0284c7' },
-  delivered:        { label: 'Delivered',        color: 'var(--text-success)', bg: 'rgba(16,185,129,0.1)', badge: '#059669' },
-  cancelled:        { label: 'Cancelled',        color: 'var(--text-danger)', bg: 'rgba(239,68,68,0.1)',  badge: '#dc2626' },
-  rejected:         { label: 'Rejected',         color: 'var(--text-danger)', bg: 'rgba(239,68,68,0.1)',  badge: '#dc2626' },
+  delivered: { label: 'Delivered', color: 'var(--text-success)', bg: 'rgba(16,185,129,0.1)', badge: '#059669' },
+  cancelled: { label: 'Cancelled', color: 'var(--text-danger)', bg: 'rgba(239,68,68,0.1)', badge: '#dc2626' },
+  rejected: { label: 'Rejected', color: 'var(--text-danger)', bg: 'rgba(239,68,68,0.1)', badge: '#dc2626' },
 };
 
 // Valid hotel-admin status transitions
 const NEXT_TRANSITIONS = {
-  placed:    [{ status: 'accepted', label: 'Accept Order', primary: true }, { status: 'rejected', label: 'Reject', primary: false }],
-  accepted:  [{ status: 'preparing', label: 'Start Preparing', primary: true }],
+  placed: [{ status: 'accepted', label: 'Accept Order', primary: true }, { status: 'rejected', label: 'Reject', primary: false }],
+  accepted: [{ status: 'preparing', label: 'Start Preparing', primary: true }],
   preparing: [{ status: 'ready_for_pickup', label: 'Mark Ready', primary: true }],
   ready_for_pickup: [{ status: 'out_for_delivery', label: 'Dispatch Order', primary: true }],
   out_for_delivery: [{ status: 'delivered', label: 'Mark Delivered', primary: true }],
 };
 
 const PAYMENT_LABELS = {
-  cod:      'Cash on Delivery',
-  online:   'Online Payment',
+  cod: 'Cash on Delivery',
+  online: 'Online Payment',
   razorpay: 'Online (Razorpay)',
 };
 
@@ -65,14 +66,14 @@ function OrdersPage({ hotel }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const STATUS_FILTERS = [
-    { value: '',               label: 'All Orders' },
-    { value: 'placed',         label: 'New / Placed' },
-    { value: 'accepted',       label: 'Accepted' },
-    { value: 'preparing',      label: 'Preparing' },
+    { value: '', label: 'All Orders' },
+    { value: 'placed', label: 'New / Placed' },
+    { value: 'accepted', label: 'Accepted' },
+    { value: 'preparing', label: 'Preparing' },
     { value: 'ready_for_pickup', label: 'Ready for Pickup' },
-    { value: 'delivered',      label: 'Completed' },
-    { value: 'cancelled',      label: 'Cancelled' },
-    { value: 'rejected',       label: 'Rejected' },
+    { value: 'delivered', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' },
+    { value: 'rejected', label: 'Rejected' },
   ];
 
   const fetchOrders = useCallback(async (showRefreshing = false) => {
@@ -96,8 +97,8 @@ function OrdersPage({ hotel }) {
     }
   }, [hotel?.id, activeFilter]);
 
-  useEffect(() => { 
-    fetchOrders(); 
+  useEffect(() => {
+    fetchOrders();
     const interval = setInterval(() => {
       fetchOrders('silent');
     }, 5000);
@@ -228,7 +229,7 @@ function OrdersPage({ hotel }) {
                         <Clock size={12} />
                         {formatTime(order.placedAt)} &bull; {timeAgo(order.placedAt)}
                       </div>
-                      
+
                       {order.orderStatus === 'ready_for_pickup' && (
                         <div style={{ marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.6rem', borderRadius: 'var(--radius-sm)', background: order.activeAssignment ? 'var(--bg-success-subtle)' : 'var(--bg-warning-subtle)', border: `1px solid ${order.activeAssignment ? 'var(--border-success-subtle)' : 'var(--border-warning-subtle)'}`, fontSize: '0.75rem', fontWeight: '700', color: order.activeAssignment ? 'var(--text-success)' : 'var(--text-warning)' }}>
                           <span>🛵</span>
@@ -286,7 +287,7 @@ function OrdersPage({ hotel }) {
                       {order.deliveryAddressLine1 ? (
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', fontWeight: '600', lineHeight: '1.5' }}>
                           {[order.deliveryAddressLine1, order.deliveryAddressLine2, order.deliveryLandmark, order.deliveryArea,
-                            `${order.deliveryCity}, ${order.deliveryState} - ${order.deliveryPincode}`].filter(Boolean).join(', ')}
+                          `${order.deliveryCity}, ${order.deliveryState} - ${order.deliveryPincode}`].filter(Boolean).join(', ')}
                         </div>
                       ) : (
                         <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Address not recorded</span>
@@ -412,7 +413,7 @@ function CategoriesSection({ hotel }) {
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null); // null = add, object = edit
@@ -457,7 +458,7 @@ function CategoriesSection({ hotel }) {
   const createdThisWeek = categories.filter(c => c.isActive && new Date(c.createdAt).getTime() >= oneWeekAgo).length;
 
   // Filter categories by search query
-  const filteredCats = categories.filter(c => 
+  const filteredCats = categories.filter(c =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -483,8 +484,8 @@ function CategoriesSection({ hotel }) {
     if (!nameTrimmed) return;
 
     // Frontend validation: Prevent duplicate names in state
-    const duplicate = categories.find(c => 
-      c.name.toLowerCase() === nameTrimmed.toLowerCase() && 
+    const duplicate = categories.find(c =>
+      c.name.toLowerCase() === nameTrimmed.toLowerCase() &&
       (!editingCategory || c.id !== editingCategory.id)
     );
     if (duplicate) {
@@ -802,11 +803,11 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingFood, setEditingFood] = useState(null); // null = add, object = edit
-  
+
   // Wizard States
   const [wizardStep, setWizardStep] = useState(1);
   const [skipCustomization, setSkipCustomization] = useState(false);
-  
+
   // Customization States
   const [customizationHeading, setCustomizationHeading] = useState('');
   const [headingChoices, setHeadingChoices] = useState([]);
@@ -959,7 +960,7 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
       try {
         const res = await api.get(`/foods/${food.id}/customizations`);
         const fetchedGroups = Array.isArray(res) ? res : (res.data || []);
-        
+
         const singleGrp = fetchedGroups.find(g => g.selectionType === 'single');
         const multiGrp = fetchedGroups.find(g => g.selectionType === 'multiple');
 
@@ -1297,7 +1298,7 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
             });
           }
         } else if (singleGroupId) {
-           await api.patch(`/customization-groups/${singleGroupId}`, { isActive: false });
+          await api.patch(`/customization-groups/${singleGroupId}`, { isActive: false });
         }
 
         // 2. Process Addons Group
@@ -1333,7 +1334,7 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
             });
           }
         } else if (addonsGroupId) {
-           await api.patch(`/customization-groups/${addonsGroupId}`, { isActive: false });
+          await api.patch(`/customization-groups/${addonsGroupId}`, { isActive: false });
         }
       }
 
@@ -1376,316 +1377,316 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
       {!isModalOpen ? (
         <>
           {/* Summary KPI Cards Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1.25rem', marginBottom: '1.75rem' }}>
-        {/* Total Food Items */}
-        <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
-          <div>
-            <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Total Food Items</span>
-            <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{totalFoods}</span>
-          </div>
-          <Utensils size={20} style={{ color: 'var(--text-subtle)' }} />
-        </div>
-        {/* Available */}
-        <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
-          <div>
-            <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Available</span>
-            <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{availableCount}</span>
-          </div>
-          <Check size={20} style={{ color: 'var(--text-success)' }} />
-        </div>
-        {/* Sold Out */}
-        <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
-          <div>
-            <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Sold Out</span>
-            <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{soldOutCount}</span>
-          </div>
-          <X size={20} style={{ color: 'var(--text-danger)' }} />
-        </div>
-        {/* Veg Items */}
-        <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
-          <div>
-            <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Veg Items</span>
-            <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{vegCount}</span>
-          </div>
-          <div style={{ width: 14, height: 14, borderRadius: 2, borderWidth: 1.5, borderColor: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#10B981' }} />
-          </div>
-        </div>
-      </div>
-
-      {/* Toolbar Search / Filter bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', flex: 1, minWidth: '320px' }}>
-          {/* Search bar */}
-          <div style={{ position: 'relative', width: '220px' }}>
-            <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)', pointerEvents: 'none' }} />
-            <input
-              type="text"
-              placeholder="Search food items..."
-              value={searchQuery}
-              onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-              style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.75rem 0.5rem 2.25rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '600', outline: 'none' }}
-            />
-          </div>
-
-          {/* Category Filter */}
-          <select
-            value={selectedCategoryFilter}
-            onChange={e => { setSelectedCategoryFilter(e.target.value); setCurrentPage(1); }}
-            style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
-          >
-            <option value="">All Categories</option>
-            {categories.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-
-          {/* Status Filter */}
-          <select
-            value={selectedStatusFilter}
-            onChange={e => { setSelectedStatusFilter(e.target.value); setCurrentPage(1); }}
-            style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
-          >
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="disabled">Disabled</option>
-          </select>
-
-          {/* Veg / Non-Veg Filter */}
-          <select
-            value={selectedTypeFilter}
-            onChange={e => { setSelectedTypeFilter(e.target.value); setCurrentPage(1); }}
-            style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
-          >
-            <option value="">All Types</option>
-            <option value="veg">Veg Only</option>
-            <option value="non-veg">Non-Veg Only</option>
-          </select>
-
-          {/* Sort Filter */}
-          <select
-            value={sortBy}
-            onChange={e => { setSortBy(e.target.value); setCurrentPage(1); }}
-            style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
-          >
-            <option value="recent">Recently Added</option>
-            <option value="price-asc">Price: Low to High</option>
-            <option value="price-desc">Price: High to Low</option>
-            <option value="name-asc">Name: A to Z</option>
-          </select>
-        </div>
-
-        <button
-          onClick={() => openModal()}
-          style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.5rem 1rem', fontSize: '0.85rem', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', boxShadow: 'var(--shadow-glow)' }}
-        >
-          <Plus size={16} /> Add Food Item
-        </button>
-      </div>
-
-      {/* Error */}
-      {errorMsg && (
-        <div style={{ background: 'var(--bg-danger-subtle)', border: '1px solid #fee2e2', color: 'var(--text-danger)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: '700', fontSize: '0.88rem' }}>
-          &#9888;&#65039; {errorMsg}
-          <button onClick={() => fetchData()} style={{ background: 'var(--text-danger)', color: '#fff', border: 'none', padding: '0.3rem 0.65rem', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '800' }}>Retry</button>
-        </div>
-      )}
-
-      {/* Table / List */}
-      {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {[1, 2, 3].map(i => <div key={i} style={{ height: '50px', background: 'var(--bg-hover)', borderRadius: 'var(--radius-md)', animation: 'pulse 1.5s infinite ease-in-out' }} />)}
-        </div>
-      ) : currentFoods.length === 0 ? (
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '4rem 2rem', textAlign: 'center' }}>
-          <Store size={44} style={{ color: 'var(--text-subtle)', marginBottom: '1rem' }} />
-          <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '0.4rem' }}>No food items found</h3>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-            Try adjusting your search query, sorting, or filters.
-          </p>
-        </div>
-      ) : (
-        <div>
-          <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)', marginBottom: '1rem' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-main)' }}>
-                  <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>FOOD ITEM</th>
-                  <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>CATEGORY</th>
-                  <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>PRICE</th>
-                  <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>TYPE</th>
-                  <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>AVAILABILITY</th>
-                  <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>STATUS</th>
-                  <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800', textAlign: 'right' }}>ACTIONS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentFoods.map(food => {
-                  const catName = food.category?.name || 'Uncategorized';
-                  return (
-                    <tr key={food.id} style={{ borderBottom: '1px solid var(--border-color)', transition: 'background-color 0.1s' }}>
-                      {/* Food Item Image & Details */}
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <img
-                            src={food.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=50&q=80'}
-                            alt={food.name}
-                            style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', objectFit: 'cover', background: 'var(--bg-hover)' }}
-                          />
-                          <div>
-                            <div style={{ fontWeight: '800', color: 'var(--text-main)', fontSize: '0.9rem' }}>{food.name}</div>
-                            {food.description && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }} numberOfLines={1}>{food.description}</div>}
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Category */}
-                      <td style={{ padding: '0.85rem 1rem', fontWeight: '700', color: 'var(--text-muted)' }}>
-                        {catName}
-                      </td>
-
-                      {/* Price */}
-                      <td style={{ padding: '0.85rem 1rem', fontWeight: '850', color: 'var(--text-main)' }}>
-                        {food.offerPrice ? (
-                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                            <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: '600' }}>
-                              &#8377;{Number(food.price).toLocaleString('en-IN')}
-                            </span>
-                            <span style={{ color: 'var(--primary)', fontWeight: '900' }}>
-                              &#8377;{Number(food.offerPrice).toLocaleString('en-IN')}
-                            </span>
-                          </div>
-                        ) : (
-                          <span>&#8377;{Number(food.price).toLocaleString('en-IN')}</span>
-                        )}
-                      </td>
-
-                      {/* Veg / Non-Veg Type */}
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <span style={{
-                          background: food.isVeg ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
-                          color: food.isVeg ? 'var(--text-success)' : 'var(--text-danger)',
-                          border: `1px solid ${food.isVeg ? 'var(--border-success-subtle)' : '#fca5a5'}`,
-                          padding: '0.2rem 0.55rem', borderRadius: 'var(--radius-sm)',
-                          fontSize: '0.72rem', fontWeight: '800', textTransform: 'capitalize',
-                          display: 'inline-flex', alignItems: 'center', gap: '0.3rem'
-                        }}>
-                          <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: food.isVeg ? 'var(--text-success)' : 'var(--text-danger)' }} />
-                          {food.isVeg ? 'Veg' : 'Non-Veg'}
-                        </span>
-                      </td>
-
-                      {/* Availability Switch */}
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
-                          <input
-                            type="checkbox"
-                            checked={food.isAvailable}
-                            onChange={() => handleToggleAvailable(food)}
-                            style={{ display: 'none' }}
-                          />
-                          <div style={{
-                            width: '38px',
-                            height: '20px',
-                            borderRadius: '10px',
-                            backgroundColor: food.isAvailable ? 'var(--text-success)' : '#d1d5db',
-                            position: 'relative',
-                            transition: 'background-color 0.2s'
-                          }}>
-                            <div style={{
-                              width: '14px',
-                              height: '14px',
-                              borderRadius: '50%',
-                              backgroundColor: 'var(--bg-card)',
-                              position: 'absolute',
-                              top: '3px',
-                              left: food.isAvailable ? '21px' : '3px',
-                              transition: 'left 0.2s'
-                            }} />
-                          </div>
-                        </label>
-                      </td>
-
-                      {/* Status */}
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <span style={{
-                          background: food.isActive ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
-                          color: food.isActive ? 'var(--text-success)' : 'var(--text-danger)',
-                          padding: '0.2rem 0.6rem', borderRadius: 'var(--radius-full)',
-                          fontSize: '0.72rem', fontWeight: '800', textTransform: 'capitalize'
-                        }}>
-                          {food.isActive ? 'Active' : 'Disabled'}
-                        </span>
-                      </td>
-
-                      {/* Action buttons */}
-                      <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
-                        <div style={{ display: 'inline-flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                          <button
-                            title="Edit Food Item"
-                            onClick={() => openModal(food)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.3rem', color: 'var(--text-muted)' }}
-                          >
-                            <Edit size={16} />
-                          </button>
-                          <button
-                            title={food.isActive ? 'Disable Food' : 'Enable Food'}
-                            onClick={() => handleToggleActive(food)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.3rem', color: food.isActive ? 'var(--text-danger)' : 'var(--text-success)' }}
-                          >
-                            {food.isActive ? <EyeOff size={16} /> : <Check size={16} />}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <span>Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, totalItems)} of {totalItems} items</span>
-              <div style={{ display: 'flex', gap: '0.3rem' }}>
-                <button
-                  disabled={currentPage === 1}
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  style={{ padding: '0.3rem 0.6rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontWeight: '700' }}
-                >
-                  &lt;
-                </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => (
-                  <button
-                    key={pageNum}
-                    onClick={() => handlePageChange(pageNum)}
-                    style={{
-                      padding: '0.3rem 0.6rem',
-                      background: currentPage === pageNum ? 'var(--primary)' : '#ffffff',
-                      color: currentPage === pageNum ? '#ffffff' : 'var(--text-muted)',
-                      border: `1px solid ${currentPage === pageNum ? 'var(--primary)' : 'var(--border-color)'}`,
-                      borderRadius: 'var(--radius-sm)',
-                      fontWeight: '700',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {pageNum}
-                  </button>
-                ))}
-                <button
-                  disabled={currentPage === totalPages}
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  style={{ padding: '0.3rem 0.6rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontWeight: '700' }}
-                >
-                  &gt;
-                </button>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1.25rem', marginBottom: '1.75rem' }}>
+            {/* Total Food Items */}
+            <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Total Food Items</span>
+                <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{totalFoods}</span>
+              </div>
+              <Utensils size={20} style={{ color: 'var(--text-subtle)' }} />
+            </div>
+            {/* Available */}
+            <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Available</span>
+                <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{availableCount}</span>
+              </div>
+              <Check size={20} style={{ color: 'var(--text-success)' }} />
+            </div>
+            {/* Sold Out */}
+            <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Sold Out</span>
+                <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{soldOutCount}</span>
+              </div>
+              <X size={20} style={{ color: 'var(--text-danger)' }} />
+            </div>
+            {/* Veg Items */}
+            <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: 'var(--shadow-sm)' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Veg Items</span>
+                <span style={{ fontSize: '1.85rem', fontWeight: '850', color: 'var(--text-main)' }}>{vegCount}</span>
+              </div>
+              <div style={{ width: 14, height: 14, borderRadius: 2, borderWidth: 1.5, borderColor: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#10B981' }} />
               </div>
             </div>
+          </div>
+
+          {/* Toolbar Search / Filter bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', flex: 1, minWidth: '320px' }}>
+              {/* Search bar */}
+              <div style={{ position: 'relative', width: '220px' }}>
+                <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Search food items..."
+                  value={searchQuery}
+                  onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.75rem 0.5rem 2.25rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '600', outline: 'none' }}
+                />
+              </div>
+
+              {/* Category Filter */}
+              <select
+                value={selectedCategoryFilter}
+                onChange={e => { setSelectedCategoryFilter(e.target.value); setCurrentPage(1); }}
+                style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
+              >
+                <option value="">All Categories</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+
+              {/* Status Filter */}
+              <select
+                value={selectedStatusFilter}
+                onChange={e => { setSelectedStatusFilter(e.target.value); setCurrentPage(1); }}
+                style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
+              >
+                <option value="">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="disabled">Disabled</option>
+              </select>
+
+              {/* Veg / Non-Veg Filter */}
+              <select
+                value={selectedTypeFilter}
+                onChange={e => { setSelectedTypeFilter(e.target.value); setCurrentPage(1); }}
+                style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
+              >
+                <option value="">All Types</option>
+                <option value="veg">Veg Only</option>
+                <option value="non-veg">Non-Veg Only</option>
+              </select>
+
+              {/* Sort Filter */}
+              <select
+                value={sortBy}
+                onChange={e => { setSortBy(e.target.value); setCurrentPage(1); }}
+                style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '700', outline: 'none', background: 'var(--bg-card)', cursor: 'pointer' }}
+              >
+                <option value="recent">Recently Added</option>
+                <option value="price-asc">Price: Low to High</option>
+                <option value="price-desc">Price: High to Low</option>
+                <option value="name-asc">Name: A to Z</option>
+              </select>
+            </div>
+
+            <button
+              onClick={() => openModal()}
+              style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.5rem 1rem', fontSize: '0.85rem', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', boxShadow: 'var(--shadow-glow)' }}
+            >
+              <Plus size={16} /> Add Food Item
+            </button>
+          </div>
+
+          {/* Error */}
+          {errorMsg && (
+            <div style={{ background: 'var(--bg-danger-subtle)', border: '1px solid #fee2e2', color: 'var(--text-danger)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: '700', fontSize: '0.88rem' }}>
+              &#9888;&#65039; {errorMsg}
+              <button onClick={() => fetchData()} style={{ background: 'var(--text-danger)', color: '#fff', border: 'none', padding: '0.3rem 0.65rem', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '800' }}>Retry</button>
+            </div>
           )}
-        </div>
-      )}
-      </>
+
+          {/* Table / List */}
+          {loading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {[1, 2, 3].map(i => <div key={i} style={{ height: '50px', background: 'var(--bg-hover)', borderRadius: 'var(--radius-md)', animation: 'pulse 1.5s infinite ease-in-out' }} />)}
+            </div>
+          ) : currentFoods.length === 0 ? (
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '4rem 2rem', textAlign: 'center' }}>
+              <Store size={44} style={{ color: 'var(--text-subtle)', marginBottom: '1rem' }} />
+              <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '0.4rem' }}>No food items found</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                Try adjusting your search query, sorting, or filters.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)', marginBottom: '1rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-main)' }}>
+                      <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>FOOD ITEM</th>
+                      <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>CATEGORY</th>
+                      <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>PRICE</th>
+                      <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>TYPE</th>
+                      <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>AVAILABILITY</th>
+                      <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800' }}>STATUS</th>
+                      <th style={{ padding: '0.85rem 1rem', color: 'var(--text-subtle)', fontWeight: '800', textAlign: 'right' }}>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentFoods.map(food => {
+                      const catName = food.category?.name || 'Uncategorized';
+                      return (
+                        <tr key={food.id} style={{ borderBottom: '1px solid var(--border-color)', transition: 'background-color 0.1s' }}>
+                          {/* Food Item Image & Details */}
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                              <img
+                                src={food.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=50&q=80'}
+                                alt={food.name}
+                                style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', objectFit: 'cover', background: 'var(--bg-hover)' }}
+                              />
+                              <div>
+                                <div style={{ fontWeight: '800', color: 'var(--text-main)', fontSize: '0.9rem' }}>{food.name}</div>
+                                {food.description && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }} numberOfLines={1}>{food.description}</div>}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Category */}
+                          <td style={{ padding: '0.85rem 1rem', fontWeight: '700', color: 'var(--text-muted)' }}>
+                            {catName}
+                          </td>
+
+                          {/* Price */}
+                          <td style={{ padding: '0.85rem 1rem', fontWeight: '850', color: 'var(--text-main)' }}>
+                            {food.offerPrice ? (
+                              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: '600' }}>
+                                  &#8377;{Number(food.price).toLocaleString('en-IN')}
+                                </span>
+                                <span style={{ color: 'var(--primary)', fontWeight: '900' }}>
+                                  &#8377;{Number(food.offerPrice).toLocaleString('en-IN')}
+                                </span>
+                              </div>
+                            ) : (
+                              <span>&#8377;{Number(food.price).toLocaleString('en-IN')}</span>
+                            )}
+                          </td>
+
+                          {/* Veg / Non-Veg Type */}
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <span style={{
+                              background: food.isVeg ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+                              color: food.isVeg ? 'var(--text-success)' : 'var(--text-danger)',
+                              border: `1px solid ${food.isVeg ? 'var(--border-success-subtle)' : '#fca5a5'}`,
+                              padding: '0.2rem 0.55rem', borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.72rem', fontWeight: '800', textTransform: 'capitalize',
+                              display: 'inline-flex', alignItems: 'center', gap: '0.3rem'
+                            }}>
+                              <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: food.isVeg ? 'var(--text-success)' : 'var(--text-danger)' }} />
+                              {food.isVeg ? 'Veg' : 'Non-Veg'}
+                            </span>
+                          </td>
+
+                          {/* Availability Switch */}
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
+                              <input
+                                type="checkbox"
+                                checked={food.isAvailable}
+                                onChange={() => handleToggleAvailable(food)}
+                                style={{ display: 'none' }}
+                              />
+                              <div style={{
+                                width: '38px',
+                                height: '20px',
+                                borderRadius: '10px',
+                                backgroundColor: food.isAvailable ? 'var(--text-success)' : '#d1d5db',
+                                position: 'relative',
+                                transition: 'background-color 0.2s'
+                              }}>
+                                <div style={{
+                                  width: '14px',
+                                  height: '14px',
+                                  borderRadius: '50%',
+                                  backgroundColor: 'var(--bg-card)',
+                                  position: 'absolute',
+                                  top: '3px',
+                                  left: food.isAvailable ? '21px' : '3px',
+                                  transition: 'left 0.2s'
+                                }} />
+                              </div>
+                            </label>
+                          </td>
+
+                          {/* Status */}
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <span style={{
+                              background: food.isActive ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                              color: food.isActive ? 'var(--text-success)' : 'var(--text-danger)',
+                              padding: '0.2rem 0.6rem', borderRadius: 'var(--radius-full)',
+                              fontSize: '0.72rem', fontWeight: '800', textTransform: 'capitalize'
+                            }}>
+                              {food.isActive ? 'Active' : 'Disabled'}
+                            </span>
+                          </td>
+
+                          {/* Action buttons */}
+                          <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
+                            <div style={{ display: 'inline-flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                              <button
+                                title="Edit Food Item"
+                                onClick={() => openModal(food)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.3rem', color: 'var(--text-muted)' }}
+                              >
+                                <Edit size={16} />
+                              </button>
+                              <button
+                                title={food.isActive ? 'Disable Food' : 'Enable Food'}
+                                onClick={() => handleToggleActive(food)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.3rem', color: food.isActive ? 'var(--text-danger)' : 'var(--text-success)' }}
+                              >
+                                {food.isActive ? <EyeOff size={16} /> : <Check size={16} />}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  <span>Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, totalItems)} of {totalItems} items</span>
+                  <div style={{ display: 'flex', gap: '0.3rem' }}>
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      style={{ padding: '0.3rem 0.6rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontWeight: '700' }}
+                    >
+                      &lt;
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => (
+                      <button
+                        key={pageNum}
+                        onClick={() => handlePageChange(pageNum)}
+                        style={{
+                          padding: '0.3rem 0.6rem',
+                          background: currentPage === pageNum ? 'var(--primary)' : '#ffffff',
+                          color: currentPage === pageNum ? '#ffffff' : 'var(--text-muted)',
+                          border: `1px solid ${currentPage === pageNum ? 'var(--primary)' : 'var(--border-color)'}`,
+                          borderRadius: 'var(--radius-sm)',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {pageNum}
+                      </button>
+                    ))}
+                    <button
+                      disabled={currentPage === totalPages}
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      style={{ padding: '0.3rem 0.6rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontWeight: '700' }}
+                    >
+                      &gt;
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       ) : (
         <div style={{
           background: 'var(--bg-card)',
@@ -1698,549 +1699,549 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
           overflow: 'hidden'
         }}>
 
-            {/* ── Sticky Header ── */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '1rem 1.5rem',
-              borderBottom: '1px solid var(--border-color)',
-              flexShrink: 0,
-              background: 'var(--bg-card)'
-            }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '850', color: 'var(--text-main)', margin: 0 }}>
-                  {editingFood ? 'Edit Food Item' : 'Add Food Item'}
-                </h3>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.75rem', fontWeight: '700' }}>
-                  <span style={{ color: wizardStep === 1 ? 'var(--primary)' : 'var(--text-muted)' }}>1 Details</span>
-                  <span style={{ color: 'var(--border-color)' }}>&bull;</span>
-                  <span style={{ color: wizardStep === 2 ? 'var(--primary)' : 'var(--text-muted)' }}>2 Customization</span>
-                  <span style={{ color: 'var(--border-color)' }}>&bull;</span>
-                  <span style={{ color: wizardStep === 3 ? 'var(--primary)' : 'var(--text-muted)' }}>3 Review</span>
-                </div>
+          {/* ── Sticky Header ── */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '1rem 1.5rem',
+            borderBottom: '1px solid var(--border-color)',
+            flexShrink: 0,
+            background: 'var(--bg-card)'
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: '850', color: 'var(--text-main)', margin: 0 }}>
+                {editingFood ? 'Edit Food Item' : 'Add Food Item'}
+              </h3>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.75rem', fontWeight: '700' }}>
+                <span style={{ color: wizardStep === 1 ? 'var(--primary)' : 'var(--text-muted)' }}>1 Details</span>
+                <span style={{ color: 'var(--border-color)' }}>&bull;</span>
+                <span style={{ color: wizardStep === 2 ? 'var(--primary)' : 'var(--text-muted)' }}>2 Customization</span>
+                <span style={{ color: 'var(--border-color)' }}>&bull;</span>
+                <span style={{ color: wizardStep === 3 ? 'var(--primary)' : 'var(--text-muted)' }}>3 Review</span>
               </div>
-              <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', alignSelf: 'flex-start' }}><X size={20} /></button>
             </div>
+            <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', alignSelf: 'flex-start' }}><X size={20} /></button>
+          </div>
 
-            {/* ── Scrollable Body ── */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column' }}>
+          {/* ── Scrollable Body ── */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column' }}>
 
-              {wizardStep === 1 && (
-                <>
+            {wizardStep === 1 && (
+              <>
 
-              {/* ─── Basic Information ─── */}
-              <div style={{ marginBottom: '1.1rem' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.7rem 0' }}>Basic Information</p>
+                {/* ─── Basic Information ─── */}
+                <div style={{ marginBottom: '1.1rem' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.7rem 0' }}>Basic Information</p>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.65rem' }}>
-                  <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Food Name *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Classic Cheese Burger"
-                      value={modalName}
-                      onChange={e => setModalName(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
-                    />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>Category *</label>
-                      {!isAddingNewCategory ? (
-                        <button type="button" onClick={() => setIsAddingNewCategory(true)} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '0.7rem', fontWeight: '800', cursor: 'pointer', padding: 0 }}>+ Add New</button>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.65rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Food Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Classic Cheese Burger"
+                        value={modalName}
+                        onChange={e => setModalName(e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
+                      />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>Category *</label>
+                        {!isAddingNewCategory ? (
+                          <button type="button" onClick={() => setIsAddingNewCategory(true)} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '0.7rem', fontWeight: '800', cursor: 'pointer', padding: 0 }}>+ Add New</button>
+                        ) : (
+                          <button type="button" onClick={() => setIsAddingNewCategory(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: '800', cursor: 'pointer', padding: 0 }}>Cancel</button>
+                        )}
+                      </div>
+                      {isAddingNewCategory ? (
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                          <input
+                            type="text"
+                            placeholder="New category name"
+                            value={newCategoryName}
+                            onChange={e => setNewCategoryName(e.target.value)}
+                            onKeyDown={handleAddCategoryInline}
+                            style={{ flex: 1, padding: '0.45rem 0.55rem', border: '1.5px solid var(--primary)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleAddCategoryInline()}
+                            disabled={!newCategoryName.trim() || submitting}
+                            style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '0 0.8rem', fontSize: '0.75rem', fontWeight: '800', cursor: (!newCategoryName.trim() || submitting) ? 'not-allowed' : 'pointer', opacity: (!newCategoryName.trim() || submitting) ? 0.5 : 1 }}
+                          >
+                            Add
+                          </button>
+                        </div>
                       ) : (
-                        <button type="button" onClick={() => setIsAddingNewCategory(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: '800', cursor: 'pointer', padding: 0 }}>Cancel</button>
+                        <select
+                          required
+                          value={modalCategory}
+                          onChange={e => setModalCategory(e.target.value)}
+                          style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600', background: 'var(--bg-card)' }}
+                        >
+                          <option value="" disabled>Select Category</option>
+                          {categories.filter(c => c.isActive || (editingFood && editingFood.categoryId === c.id)).map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
                       )}
                     </div>
-                    {isAddingNewCategory ? (
-                      <div style={{ display: 'flex', gap: '0.4rem' }}>
-                        <input
-                          type="text"
-                          placeholder="New category name"
-                          value={newCategoryName}
-                          onChange={e => setNewCategoryName(e.target.value)}
-                          onKeyDown={handleAddCategoryInline}
-                          style={{ flex: 1, padding: '0.45rem 0.55rem', border: '1.5px solid var(--primary)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleAddCategoryInline()}
-                          disabled={!newCategoryName.trim() || submitting}
-                          style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '0 0.8rem', fontSize: '0.75rem', fontWeight: '800', cursor: (!newCategoryName.trim() || submitting) ? 'not-allowed' : 'pointer', opacity: (!newCategoryName.trim() || submitting) ? 0.5 : 1 }}
-                        >
-                          Add
-                        </button>
-                      </div>
-                    ) : (
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.65rem', marginBottom: '0.65rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Platform Home Category</label>
                       <select
-                        required
-                        value={modalCategory}
-                        onChange={e => setModalCategory(e.target.value)}
+                        value={modalHomeCategory}
+                        onChange={e => setModalHomeCategory(e.target.value)}
                         style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600', background: 'var(--bg-card)' }}
                       >
-                        <option value="" disabled>Select Category</option>
-                        {categories.filter(c => c.isActive || (editingFood && editingFood.categoryId === c.id)).map(c => (
+                        <option value="">None — Don't show in Home Categories</option>
+                        {homeCategories.filter(c => c.isActive || (editingFood && editingFood.homeFoodCategoryId === c.id)).map(c => (
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                       </select>
-                    )}
+                    </div>
                   </div>
-                </div>
+                  <div style={{ marginBottom: '0.65rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Description</label>
+                    <textarea
+                      placeholder="Describe this dish (ingredients, spice level...)"
+                      value={modalDesc}
+                      onChange={e => setModalDesc(e.target.value)}
+                      rows="2"
+                      style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600', resize: 'vertical' }}
+                    />
+                  </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.65rem', marginBottom: '0.65rem' }}>
                   <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Platform Home Category</label>
+                    <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Food Type</label>
                     <select
-                      value={modalHomeCategory}
-                      onChange={e => setModalHomeCategory(e.target.value)}
+                      value={modalIsVeg ? 'veg' : 'non-veg'}
+                      onChange={e => setModalIsVeg(e.target.value === 'veg')}
                       style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600', background: 'var(--bg-card)' }}
                     >
-                      <option value="">None — Don't show in Home Categories</option>
-                      {homeCategories.filter(c => c.isActive || (editingFood && editingFood.homeFoodCategoryId === c.id)).map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
+                      <option value="veg">🌱 Pure Veg</option>
+                      <option value="non-veg">🍗 Non-Veg</option>
                     </select>
                   </div>
                 </div>
-                <div style={{ marginBottom: '0.65rem' }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Description</label>
-                  <textarea
-                    placeholder="Describe this dish (ingredients, spice level...)"
-                    value={modalDesc}
-                    onChange={e => setModalDesc(e.target.value)}
-                    rows="2"
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600', resize: 'vertical' }}
-                  />
-                </div>
 
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Food Type</label>
-                  <select
-                    value={modalIsVeg ? 'veg' : 'non-veg'}
-                    onChange={e => setModalIsVeg(e.target.value === 'veg')}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600', background: 'var(--bg-card)' }}
-                  >
-                    <option value="veg">🌱 Pure Veg</option>
-                    <option value="non-veg">🍗 Non-Veg</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* ─── Pricing ─── */}
-              <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
-              <div style={{ marginBottom: '1.1rem' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.7rem 0' }}>Pricing</p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
-                  <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Regular Price (₹) *</label>
-                    <input
-                      type="number"
-                      required
-                      min="0.01"
-                      step="0.01"
-                      placeholder="e.g. 349"
-                      value={modalRegularPrice}
-                      onChange={e => setModalRegularPrice(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Offer Price (₹) — <span style={{ color: 'var(--text-danger)', fontStyle: 'italic', fontWeight: '600' }}>optional</span></label>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      placeholder="e.g. 299"
-                      value={modalOfferPrice}
-                      onChange={e => setModalOfferPrice(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
-                    />
-                    <p style={{ fontSize: '0.7rem', color: 'var(--text-danger)', margin: '0.2rem 0 0 0' }}>Must be lower than regular price</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* ─── Ingredients — exactly ONCE ─── */}
-              <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
-              <div style={{ marginBottom: '1.1rem' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.7rem 0' }}>Ingredients</p>
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <input
-                    type="text"
-                    placeholder="Add ingredient (e.g. Basmati Rice)"
-                    value={ingredientInput}
-                    onChange={e => setIngredientInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        addIngredient();
-                      }
-                    }}
-                    style={{ flex: 1, padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={addIngredient}
-                    style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
-                  >
-                    + Add
-                  </button>
-                </div>
-                {modalIngredients.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-main)' }}>
-                    {modalIngredients.map((ing, idx) => (
-                      <span
-                        key={idx}
-                        style={{
-                          background: 'rgba(255,85,32,0.08)',
-                          color: 'var(--primary)',
-                          border: '1px solid rgba(255,85,32,0.2)',
-                          padding: '0.17rem 0.42rem',
-                          borderRadius: 'var(--radius-sm)',
-                          fontSize: '0.78rem',
-                          fontWeight: '700',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.28rem'
-                        }}
-                      >
-                        {ing}
-                        <span onClick={() => removeIngredient(idx)} style={{ cursor: 'pointer', fontWeight: '900', color: 'var(--text-danger)', fontSize: '0.82rem', lineHeight: 1 }}>&times;</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* ─── Food Images ─── */}
-              <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
-              <div style={{ marginBottom: '1.1rem' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.2rem 0' }}>Food Images</p>
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '0 0 0.65rem 0' }}>Upload up to 3 images (JPEG/PNG/WebP, max 5 MB each). Image 1 is the Primary/Cover image.</p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.6rem' }}>
-                  {[0, 1, 2].map(index => {
-                    const previewSrc = modalPreviews[index];     // display URL
-                    const slotValue  = modalImages[index];       // File | string | null
-                    const hasContent = slotValue !== null && slotValue !== undefined;
-                    const isNewFile  = slotValue instanceof File;
-                    return (
-                      <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '0.28rem' }}>
-                        <span style={{ fontSize: '0.68rem', fontWeight: '800', color: index === 0 ? 'var(--primary)' : 'var(--text-muted)', textAlign: 'center' }}>
-                          {index === 0 ? 'Image 1 [Primary]' : `Image ${index + 1}`}
-                        </span>
-                        <input type="file" ref={fileInputRefs[index]} accept="image/jpeg,image/png,image/webp" onChange={e => handleImageFileChange(index, e)} style={{ display: 'none' }} />
-                        {hasContent && previewSrc ? (
-                          <div style={{ position: 'relative', border: `1.5px solid ${isNewFile ? 'var(--primary)' : 'var(--border-color)'}`, borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--bg-main)', aspectRatio: '1' }}>
-                            <img src={previewSrc} alt={`Slot ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            {isNewFile && (
-                              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, background: 'rgba(255,85,32,0.85)', padding: '0.1rem 0.3rem', fontSize: '0.58rem', fontWeight: '800', color: '#fff', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                New
-                              </div>
-                            )}
-                            <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'space-around', padding: '0.18rem 0' }}>
-                              <button type="button" onClick={() => fileInputRefs[index].current?.click()} style={{ background: 'none', border: 'none', color: '#ffffff', fontSize: '0.64rem', fontWeight: '750', cursor: 'pointer', padding: 0 }}>Replace</button>
-                              <button type="button" onClick={() => handleRemoveImage(index)} style={{ background: 'none', border: 'none', color: 'var(--text-danger)', fontSize: '0.64rem', fontWeight: '750', cursor: 'pointer', padding: 0 }}>Remove</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div
-                            onClick={() => fileInputRefs[index].current?.click()}
-                            style={{ border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', aspectRatio: '1', cursor: 'pointer', background: 'var(--bg-main)', color: 'var(--text-subtle)', gap: '0.2rem', transition: 'border-color 0.15s' }}
-                          >
-                            <Plus size={16} />
-                            <span style={{ fontSize: '0.66rem', fontWeight: '800' }}>Add Image</span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* ─── Availability ─── */}
-              <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
-              <div style={{ paddingBottom: '0.25rem' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.6rem 0' }}>Availability</p>
-                <div style={{ display: 'flex', gap: '1.5rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem', fontWeight: '700', cursor: 'pointer', color: 'var(--text-main)' }}>
-                    <input type="checkbox" checked={modalAvailable} onChange={e => setModalAvailable(e.target.checked)} style={{ cursor: 'pointer', accentColor: 'var(--primary)', width: '14px', height: '14px' }} />
-                    Mark Available
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem', fontWeight: '700', cursor: 'pointer', color: 'var(--text-main)' }}>
-                    <input type="checkbox" checked={modalActive} onChange={e => setModalActive(e.target.checked)} style={{ cursor: 'pointer', accentColor: 'var(--primary)', width: '14px', height: '14px' }} />
-                    Mark Active
-                  </label>
-                </div>
-              </div>
-              </>
-              )}
-
-              {wizardStep === 2 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-                  
-                  {/* SECTION 1: HEADING & CHOICES */}
-                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
-                    <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', borderTopLeftRadius: 'var(--radius-lg)', borderTopRightRadius: 'var(--radius-lg)' }}>
-                      <h4 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-main)' }}>Customization Heading & Options</h4>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-subtle)' }}>These options will appear as single-choice pills in the customer app.</p>
-                    </div>
-                    
-                    <div style={{ padding: '1.5rem' }}>
-                      <label style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem', display: 'block' }}>Customization Heading *</label>
-                      <input 
-                        type="text" 
-                        value={customizationHeading}
-                        onChange={(e) => setCustomizationHeading(e.target.value)}
-                        placeholder="e.g. Choose Spice Level"
-                        style={{ width: '100%', padding: '0.7rem 1rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.9rem', outline: 'none', marginBottom: '1.5rem' }}
+                {/* ─── Pricing ─── */}
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
+                <div style={{ marginBottom: '1.1rem' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.7rem 0' }}>Pricing</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Regular Price (₹) *</label>
+                      <input
+                        type="number"
+                        required
+                        min="0.01"
+                        step="0.01"
+                        placeholder="e.g. 349"
+                        value={modalRegularPrice}
+                        onChange={e => setModalRegularPrice(e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
                       />
-
-                      <label style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem', display: 'block' }}>Options (No Extra Price)</label>
-                      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
-                        <input 
-                          type="text" 
-                          value={newHeadingChoice} 
-                          onChange={(e) => setNewHeadingChoice(e.target.value)} 
-                          onKeyDown={handleAddHeadingChoice}
-                          placeholder="e.g. Mild" 
-                          style={{ flex: 1, padding: '0.6rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }} 
-                        />
-                        <button type="button" onClick={() => handleAddHeadingChoice()} style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '0.65rem 1.5rem', fontSize: '0.85rem', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <Plus size={16} /> Add
-                        </button>
-                      </div>
-
-                      {headingChoices.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginTop: '1rem' }}>
-                          {headingChoices.map((choice, idx) => (
-                            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.75rem', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '20px' }}>
-                              <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-main)' }}>{choice.name}</span>
-                              <button type="button" onClick={() => handleRemoveHeadingChoice(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-                                <X size={14} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  </div>
-
-                  {/* SECTION 2: ADD-ONS */}
-                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
-                    <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', borderTopLeftRadius: 'var(--radius-lg)', borderTopRightRadius: 'var(--radius-lg)' }}>
-                      <h4 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-main)' }}>Add-ons</h4>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-subtle)' }}>Customers can select multiple add-ons. These will add to the final price.</p>
-                    </div>
-                    
-                    <div style={{ padding: '1.5rem' }}>
-                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '1.5rem' }}>
-                        <div style={{ flex: 2 }}>
-                          <label style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.4rem', display: 'block' }}>Add-on Name *</label>
-                          <input type="text" value={newAddonName} onChange={(e) => setNewAddonName(e.target.value)} onKeyDown={handleAddAddon} placeholder="e.g. Extra Cheese" style={{ width: '100%', padding: '0.6rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.4rem', display: 'block' }}>Extra Price (₹) *</label>
-                          <input type="number" min="0" value={newAddonPrice} onChange={(e) => setNewAddonPrice(e.target.value)} onKeyDown={handleAddAddon} placeholder="0" style={{ width: '100%', padding: '0.6rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }} />
-                        </div>
-                        <button type="button" onClick={() => handleAddAddon()} style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '0.65rem 1.5rem', fontSize: '0.85rem', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <Plus size={16} /> Add
-                        </button>
-                      </div>
-
-                      {addons.length > 0 && (
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr>
-                              <th style={{ textAlign: 'left', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Add-on</th>
-                              <th style={{ textAlign: 'center', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Extra Price</th>
-                              <th style={{ textAlign: 'center', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Status</th>
-                              <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Action</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {addons.map((opt, idx) => (
-                              <tr key={idx} style={{ borderTop: '1px solid var(--border-color)' }}>
-                                <td style={{ padding: '0.85rem 0.5rem', fontSize: '0.85rem', fontWeight: '700' }}>{opt.name}</td>
-                                <td style={{ padding: '0.85rem 0.5rem', fontSize: '0.85rem', fontWeight: '800', textAlign: 'center', color: parseFloat(opt.additionalPrice) > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>
-                                  {parseFloat(opt.additionalPrice) > 0 ? `+₹${parseFloat(opt.additionalPrice)}` : '₹0'}
-                                </td>
-                                <td style={{ padding: '0.85rem 0.5rem', textAlign: 'center' }}>
-                                  <div 
-                                    onClick={() => handleToggleAddonActive(idx)}
-                                    style={{ width: '36px', height: '20px', backgroundColor: opt.isAvailable !== false ? 'var(--primary)' : '#cbd5e1', borderRadius: '10px', position: 'relative', cursor: 'pointer', margin: '0 auto' }}
-                                  >
-                                    <div style={{ width: '16px', height: '16px', backgroundColor: 'var(--bg-card)', borderRadius: '50%', position: 'absolute', top: '2px', left: opt.isAvailable !== false ? '18px' : '2px', transition: 'left 0.2s' }} />
-                                  </div>
-                                </td>
-                                <td style={{ padding: '0.85rem 0.5rem', textAlign: 'right' }}>
-                                  <button type="button" onClick={() => handleRemoveAddon(idx)} style={{ background: 'none', border: 'none', color: 'var(--text-danger)', cursor: 'pointer', padding: '0.2rem' }}>
-                                    <Trash2 size={16} />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Offer Price (₹) — <span style={{ color: 'var(--text-danger)', fontStyle: 'italic', fontWeight: '600' }}>optional</span></label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        placeholder="e.g. 299"
+                        value={modalOfferPrice}
+                        onChange={e => setModalOfferPrice(e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
+                      />
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-danger)', margin: '0.2rem 0 0 0' }}>Must be lower than regular price</p>
                     </div>
                   </div>
                 </div>
-              )}
 
-              {wizardStep === 3 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                  {/* Summary Block */}
-                  <div style={{ background: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem' }}>
-                    <h4 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '1.2rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.8rem' }}>Review & Confirm</h4>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-                      <div>
-                        <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Food Name</p>
-                        <p style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>{modalName}</p>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Category</p>
-                        <p style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>{categories.find(c => String(c.id) === modalCategory)?.name || 'Unknown'}</p>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Regular Price</p>
-                        <p style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>₹{modalRegularPrice}</p>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Offer Price</p>
-                        <p style={{ fontSize: '0.9rem', fontWeight: '700', color: modalOfferPrice ? 'var(--primary)' : 'var(--text-muted)' }}>{modalOfferPrice ? `₹${modalOfferPrice}` : 'None'}</p>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Type</p>
-                        <p style={{ fontSize: '0.9rem', fontWeight: '700', color: modalIsVeg ? '#059669' : '#dc2626' }}>{modalIsVeg ? 'Vegetarian' : 'Non-Vegetarian'}</p>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Status</p>
-                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
-                          <span style={{ fontSize: '0.7rem', fontWeight: '800', padding: '0.15rem 0.5rem', borderRadius: '4px', background: modalAvailable ? '#dcfce7' : 'var(--border-danger-subtle)', color: modalAvailable ? '#166534' : 'var(--text-danger)' }}>
-                            {modalAvailable ? 'Available' : 'Sold Out'}
-                          </span>
-                          <span style={{ fontSize: '0.7rem', fontWeight: '800', padding: '0.15rem 0.5rem', borderRadius: '4px', background: modalActive ? '#e0e7ff' : '#f3f4f6', color: modalActive ? '#3730a3' : '#4b5563' }}>
-                            {modalActive ? 'Active' : 'Disabled'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Images ({modalImages.filter(i => i !== null).length})</p>
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                      {modalPreviews.filter(p => p).map((preview, i) => (
-                        <img key={i} src={preview} alt="Preview" style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }} />
+                {/* ─── Ingredients — exactly ONCE ─── */}
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
+                <div style={{ marginBottom: '1.1rem' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.7rem 0' }}>Ingredients</p>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <input
+                      type="text"
+                      placeholder="Add ingredient (e.g. Basmati Rice)"
+                      value={ingredientInput}
+                      onChange={e => setIngredientInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addIngredient();
+                        }
+                      }}
+                      style={{ flex: 1, padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.84rem', fontWeight: '600' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={addIngredient}
+                      style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+                    >
+                      + Add
+                    </button>
+                  </div>
+                  {modalIngredients.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', padding: '0.45rem 0.55rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-main)' }}>
+                      {modalIngredients.map((ing, idx) => (
+                        <span
+                          key={idx}
+                          style={{
+                            background: 'rgba(255,85,32,0.08)',
+                            color: 'var(--primary)',
+                            border: '1px solid rgba(255,85,32,0.2)',
+                            padding: '0.17rem 0.42rem',
+                            borderRadius: 'var(--radius-sm)',
+                            fontSize: '0.78rem',
+                            fontWeight: '700',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.28rem'
+                          }}
+                        >
+                          {ing}
+                          <span onClick={() => removeIngredient(idx)} style={{ cursor: 'pointer', fontWeight: '900', color: 'var(--text-danger)', fontSize: '0.82rem', lineHeight: 1 }}>&times;</span>
+                        </span>
                       ))}
                     </div>
+                  )}
+                </div>
 
-                    <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Ingredients ({modalIngredients.length})</p>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1.5rem' }}>
-                      {modalIngredients.length > 0 ? modalIngredients.map((ing, i) => (
-                        <span key={i} style={{ fontSize: '0.75rem', fontWeight: '700', padding: '0.2rem 0.5rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-sm)', color: 'var(--text-main)' }}>{ing}</span>
-                      )) : <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No ingredients added.</span>}
+                {/* ─── Food Images ─── */}
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
+                <div style={{ marginBottom: '1.1rem' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.2rem 0' }}>Food Images</p>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '0 0 0.65rem 0' }}>Upload up to 3 images (JPEG/PNG/WebP, max 5 MB each). Image 1 is the Primary/Cover image.</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.6rem' }}>
+                    {[0, 1, 2].map(index => {
+                      const previewSrc = modalPreviews[index];     // display URL
+                      const slotValue = modalImages[index];       // File | string | null
+                      const hasContent = slotValue !== null && slotValue !== undefined;
+                      const isNewFile = slotValue instanceof File;
+                      return (
+                        <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '0.28rem' }}>
+                          <span style={{ fontSize: '0.68rem', fontWeight: '800', color: index === 0 ? 'var(--primary)' : 'var(--text-muted)', textAlign: 'center' }}>
+                            {index === 0 ? 'Image 1 [Primary]' : `Image ${index + 1}`}
+                          </span>
+                          <input type="file" ref={fileInputRefs[index]} accept="image/jpeg,image/png,image/webp" onChange={e => handleImageFileChange(index, e)} style={{ display: 'none' }} />
+                          {hasContent && previewSrc ? (
+                            <div style={{ position: 'relative', border: `1.5px solid ${isNewFile ? 'var(--primary)' : 'var(--border-color)'}`, borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--bg-main)', aspectRatio: '1' }}>
+                              <img src={previewSrc} alt={`Slot ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              {isNewFile && (
+                                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, background: 'rgba(255,85,32,0.85)', padding: '0.1rem 0.3rem', fontSize: '0.58rem', fontWeight: '800', color: '#fff', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  New
+                                </div>
+                              )}
+                              <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'space-around', padding: '0.18rem 0' }}>
+                                <button type="button" onClick={() => fileInputRefs[index].current?.click()} style={{ background: 'none', border: 'none', color: '#ffffff', fontSize: '0.64rem', fontWeight: '750', cursor: 'pointer', padding: 0 }}>Replace</button>
+                                <button type="button" onClick={() => handleRemoveImage(index)} style={{ background: 'none', border: 'none', color: 'var(--text-danger)', fontSize: '0.64rem', fontWeight: '750', cursor: 'pointer', padding: 0 }}>Remove</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => fileInputRefs[index].current?.click()}
+                              style={{ border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', aspectRatio: '1', cursor: 'pointer', background: 'var(--bg-main)', color: 'var(--text-subtle)', gap: '0.2rem', transition: 'border-color 0.15s' }}
+                            >
+                              <Plus size={16} />
+                              <span style={{ fontSize: '0.66rem', fontWeight: '800' }}>Add Image</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ─── Availability ─── */}
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0 1rem 0' }} />
+                <div style={{ paddingBottom: '0.25rem' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 0.6rem 0' }}>Availability</p>
+                  <div style={{ display: 'flex', gap: '1.5rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem', fontWeight: '700', cursor: 'pointer', color: 'var(--text-main)' }}>
+                      <input type="checkbox" checked={modalAvailable} onChange={e => setModalAvailable(e.target.checked)} style={{ cursor: 'pointer', accentColor: 'var(--primary)', width: '14px', height: '14px' }} />
+                      Mark Available
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem', fontWeight: '700', cursor: 'pointer', color: 'var(--text-main)' }}>
+                      <input type="checkbox" checked={modalActive} onChange={e => setModalActive(e.target.checked)} style={{ cursor: 'pointer', accentColor: 'var(--primary)', width: '14px', height: '14px' }} />
+                      Mark Active
+                    </label>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {wizardStep === 2 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+
+                {/* SECTION 1: HEADING & CHOICES */}
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
+                  <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', borderTopLeftRadius: 'var(--radius-lg)', borderTopRightRadius: 'var(--radius-lg)' }}>
+                    <h4 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-main)' }}>Customization Heading & Options</h4>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-subtle)' }}>These options will appear as single-choice pills in the customer app.</p>
+                  </div>
+
+                  <div style={{ padding: '1.5rem' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem', display: 'block' }}>Customization Heading *</label>
+                    <input
+                      type="text"
+                      value={customizationHeading}
+                      onChange={(e) => setCustomizationHeading(e.target.value)}
+                      placeholder="e.g. Choose Spice Level"
+                      style={{ width: '100%', padding: '0.7rem 1rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.9rem', outline: 'none', marginBottom: '1.5rem' }}
+                    />
+
+                    <label style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem', display: 'block' }}>Options (No Extra Price)</label>
+                    <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+                      <input
+                        type="text"
+                        value={newHeadingChoice}
+                        onChange={(e) => setNewHeadingChoice(e.target.value)}
+                        onKeyDown={handleAddHeadingChoice}
+                        placeholder="e.g. Mild"
+                        style={{ flex: 1, padding: '0.6rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}
+                      />
+                      <button type="button" onClick={() => handleAddHeadingChoice()} style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '0.65rem 1.5rem', fontSize: '0.85rem', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Plus size={16} /> Add
+                      </button>
                     </div>
 
-                    <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.4rem' }}>Customizations</p>
-                    {skipCustomization ? (
-                      <p style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-muted)' }}>Customization Skipped.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.8rem' }}>
-                        {headingChoices.length > 0 ? (
-                          <div>
-                            <p style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.3rem' }}>{customizationHeading}</p>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                              {headingChoices.map((c, i) => (
-                                <span key={i} style={{ fontSize: '0.75rem', fontWeight: '700', padding: '0.2rem 0.5rem', background: 'rgba(255,85,32,0.1)', color: 'var(--primary)', borderRadius: 'var(--radius-sm)' }}>
-                                  {c.name}
-                                </span>
-                              ))}
-                            </div>
+                    {headingChoices.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginTop: '1rem' }}>
+                        {headingChoices.map((choice, idx) => (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.75rem', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '20px' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-main)' }}>{choice.name}</span>
+                            <button type="button" onClick={() => handleRemoveHeadingChoice(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                              <X size={14} />
+                            </button>
                           </div>
-                        ) : (
-                          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No options added.</p>
-                        )}
-                        
-                        {addons.length > 0 && (
-                          <div>
-                            <p style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.3rem' }}>Add-ons ({addons.length})</p>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                              {addons.map((a, i) => (
-                                <span key={i} style={{ fontSize: '0.75rem', fontWeight: '700', padding: '0.2rem 0.5rem', background: 'var(--bg-main)', color: 'var(--text-main)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-                                  {a.name} (+₹{a.additionalPrice})
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        ))}
                       </div>
                     )}
                   </div>
                 </div>
+
+                {/* SECTION 2: ADD-ONS */}
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
+                  <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', borderTopLeftRadius: 'var(--radius-lg)', borderTopRightRadius: 'var(--radius-lg)' }}>
+                    <h4 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-main)' }}>Add-ons</h4>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-subtle)' }}>Customers can select multiple add-ons. These will add to the final price.</p>
+                  </div>
+
+                  <div style={{ padding: '1.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '1.5rem' }}>
+                      <div style={{ flex: 2 }}>
+                        <label style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.4rem', display: 'block' }}>Add-on Name *</label>
+                        <input type="text" value={newAddonName} onChange={(e) => setNewAddonName(e.target.value)} onKeyDown={handleAddAddon} placeholder="e.g. Extra Cheese" style={{ width: '100%', padding: '0.6rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.4rem', display: 'block' }}>Extra Price (₹) *</label>
+                        <input type="number" min="0" value={newAddonPrice} onChange={(e) => setNewAddonPrice(e.target.value)} onKeyDown={handleAddAddon} placeholder="0" style={{ width: '100%', padding: '0.6rem 0.75rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }} />
+                      </div>
+                      <button type="button" onClick={() => handleAddAddon()} style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '0.65rem 1.5rem', fontSize: '0.85rem', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Plus size={16} /> Add
+                      </button>
+                    </div>
+
+                    {addons.length > 0 && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: 'left', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Add-on</th>
+                            <th style={{ textAlign: 'center', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Extra Price</th>
+                            <th style={{ textAlign: 'center', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Status</th>
+                            <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '0.7rem', color: 'var(--text-subtle)', fontWeight: '800', textTransform: 'uppercase' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {addons.map((opt, idx) => (
+                            <tr key={idx} style={{ borderTop: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '0.85rem 0.5rem', fontSize: '0.85rem', fontWeight: '700' }}>{opt.name}</td>
+                              <td style={{ padding: '0.85rem 0.5rem', fontSize: '0.85rem', fontWeight: '800', textAlign: 'center', color: parseFloat(opt.additionalPrice) > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>
+                                {parseFloat(opt.additionalPrice) > 0 ? `+₹${parseFloat(opt.additionalPrice)}` : '₹0'}
+                              </td>
+                              <td style={{ padding: '0.85rem 0.5rem', textAlign: 'center' }}>
+                                <div
+                                  onClick={() => handleToggleAddonActive(idx)}
+                                  style={{ width: '36px', height: '20px', backgroundColor: opt.isAvailable !== false ? 'var(--primary)' : '#cbd5e1', borderRadius: '10px', position: 'relative', cursor: 'pointer', margin: '0 auto' }}
+                                >
+                                  <div style={{ width: '16px', height: '16px', backgroundColor: 'var(--bg-card)', borderRadius: '50%', position: 'absolute', top: '2px', left: opt.isAvailable !== false ? '18px' : '2px', transition: 'left 0.2s' }} />
+                                </div>
+                              </td>
+                              <td style={{ padding: '0.85rem 0.5rem', textAlign: 'right' }}>
+                                <button type="button" onClick={() => handleRemoveAddon(idx)} style={{ background: 'none', border: 'none', color: 'var(--text-danger)', cursor: 'pointer', padding: '0.2rem' }}>
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {wizardStep === 3 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {/* Summary Block */}
+                <div style={{ background: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem' }}>
+                  <h4 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '1.2rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.8rem' }}>Review & Confirm</h4>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Food Name</p>
+                      <p style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>{modalName}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Category</p>
+                      <p style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>{categories.find(c => String(c.id) === modalCategory)?.name || 'Unknown'}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Regular Price</p>
+                      <p style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>₹{modalRegularPrice}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Offer Price</p>
+                      <p style={{ fontSize: '0.9rem', fontWeight: '700', color: modalOfferPrice ? 'var(--primary)' : 'var(--text-muted)' }}>{modalOfferPrice ? `₹${modalOfferPrice}` : 'None'}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Type</p>
+                      <p style={{ fontSize: '0.9rem', fontWeight: '700', color: modalIsVeg ? '#059669' : '#dc2626' }}>{modalIsVeg ? 'Vegetarian' : 'Non-Vegetarian'}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Status</p>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
+                        <span style={{ fontSize: '0.7rem', fontWeight: '800', padding: '0.15rem 0.5rem', borderRadius: '4px', background: modalAvailable ? '#dcfce7' : 'var(--border-danger-subtle)', color: modalAvailable ? '#166534' : 'var(--text-danger)' }}>
+                          {modalAvailable ? 'Available' : 'Sold Out'}
+                        </span>
+                        <span style={{ fontSize: '0.7rem', fontWeight: '800', padding: '0.15rem 0.5rem', borderRadius: '4px', background: modalActive ? '#e0e7ff' : '#f3f4f6', color: modalActive ? '#3730a3' : '#4b5563' }}>
+                          {modalActive ? 'Active' : 'Disabled'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Images ({modalImages.filter(i => i !== null).length})</p>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                    {modalPreviews.filter(p => p).map((preview, i) => (
+                      <img key={i} src={preview} alt="Preview" style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }} />
+                    ))}
+                  </div>
+
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Ingredients ({modalIngredients.length})</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1.5rem' }}>
+                    {modalIngredients.length > 0 ? modalIngredients.map((ing, i) => (
+                      <span key={i} style={{ fontSize: '0.75rem', fontWeight: '700', padding: '0.2rem 0.5rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-sm)', color: 'var(--text-main)' }}>{ing}</span>
+                    )) : <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No ingredients added.</span>}
+                  </div>
+
+                  <p style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.4rem' }}>Customizations</p>
+                  {skipCustomization ? (
+                    <p style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-muted)' }}>Customization Skipped.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.8rem' }}>
+                      {headingChoices.length > 0 ? (
+                        <div>
+                          <p style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.3rem' }}>{customizationHeading}</p>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                            {headingChoices.map((c, i) => (
+                              <span key={i} style={{ fontSize: '0.75rem', fontWeight: '700', padding: '0.2rem 0.5rem', background: 'rgba(255,85,32,0.1)', color: 'var(--primary)', borderRadius: 'var(--radius-sm)' }}>
+                                {c.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No options added.</p>
+                      )}
+
+                      {addons.length > 0 && (
+                        <div>
+                          <p style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.3rem' }}>Add-ons ({addons.length})</p>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                            {addons.map((a, i) => (
+                              <span key={i} style={{ fontSize: '0.75rem', fontWeight: '700', padding: '0.2rem 0.5rem', background: 'var(--bg-main)', color: 'var(--text-main)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                                {a.name} (+₹{a.additionalPrice})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+          </div>{/* end scrollable body */}
+
+          {/* ── Sticky Footer ── */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.6rem',
+            padding: '0.85rem 1.5rem',
+            borderTop: '1px solid var(--border-color)',
+            flexShrink: 0,
+            background: 'var(--bg-card)'
+          }}>
+            {/* Upload progress message */}
+            <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--primary)', minHeight: '1.2rem' }}>
+              {uploadProgress && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                  {uploadProgress}
+                </span>
               )}
-
-            </div>{/* end scrollable body */}
-
-            {/* ── Sticky Footer ── */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '0.6rem',
-              padding: '0.85rem 1.5rem',
-              borderTop: '1px solid var(--border-color)',
-              flexShrink: 0,
-              background: 'var(--bg-card)'
-            }}>
-              {/* Upload progress message */}
-              <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--primary)', minHeight: '1.2rem' }}>
-                {uploadProgress && (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-                    {uploadProgress}
-                  </span>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: '0.6rem' }}>
-                {wizardStep === 1 && (
-                  <>
-                    <button type="button" onClick={() => setIsModalOpen(false)} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-muted)' }}>
-                      Cancel
-                    </button>
-                    <button type="button" onClick={handleNextStep1} style={{ background: 'var(--primary)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.25rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: '#ffffff' }}>
-                      Next
-                    </button>
-                  </>
-                )}
-                {wizardStep === 2 && (
-                  <>
-                    <button type="button" onClick={() => setWizardStep(1)} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-muted)' }}>
-                      Back
-                    </button>
-                    <button type="button" onClick={() => { setSkipCustomization(true); setWizardStep(3); }} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-main)' }}>
-                      Skip Customization
-                    </button>
-                    <button type="button" onClick={handleNextStep2} style={{ background: 'var(--primary)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.25rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: '#ffffff' }}>
-                      Next
-                    </button>
-                  </>
-                )}
-                {wizardStep === 3 && (
-                  <>
-                    <button type="button" onClick={() => setWizardStep(2)} disabled={submitting} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: submitting ? 'not-allowed' : 'pointer', color: 'var(--text-muted)' }}>
-                      Back
-                    </button>
-                    <button type="button" onClick={handleModalSubmit} disabled={submitting} style={{ background: 'var(--primary)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.25rem', fontSize: '0.82rem', fontWeight: '800', cursor: submitting ? 'not-allowed' : 'pointer', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                      {submitting && <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />}
-                      {editingFood ? 'Save Changes' : 'Create Food Item'}
-                    </button>
-                  </>
-                )}
-              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.6rem' }}>
+              {wizardStep === 1 && (
+                <>
+                  <button type="button" onClick={() => setIsModalOpen(false)} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                    Cancel
+                  </button>
+                  <button type="button" onClick={handleNextStep1} style={{ background: 'var(--primary)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.25rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: '#ffffff' }}>
+                    Next
+                  </button>
+                </>
+              )}
+              {wizardStep === 2 && (
+                <>
+                  <button type="button" onClick={() => setWizardStep(1)} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                    Back
+                  </button>
+                  <button type="button" onClick={() => { setSkipCustomization(true); setWizardStep(3); }} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-main)' }}>
+                    Skip Customization
+                  </button>
+                  <button type="button" onClick={handleNextStep2} style={{ background: 'var(--primary)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.25rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: '#ffffff' }}>
+                    Next
+                  </button>
+                </>
+              )}
+              {wizardStep === 3 && (
+                <>
+                  <button type="button" onClick={() => setWizardStep(2)} disabled={submitting} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.1rem', fontSize: '0.82rem', fontWeight: '800', cursor: submitting ? 'not-allowed' : 'pointer', color: 'var(--text-muted)' }}>
+                    Back
+                  </button>
+                  <button type="button" onClick={handleModalSubmit} disabled={submitting} style={{ background: 'var(--primary)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.42rem 1.25rem', fontSize: '0.82rem', fontWeight: '800', cursor: submitting ? 'not-allowed' : 'pointer', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    {submitting && <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />}
+                    {editingFood ? 'Save Changes' : 'Create Food Item'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
+        </div>
       )}
     </div>
   );
@@ -2257,7 +2258,7 @@ function SettingsPage({ currentUser, hotel }) {
           <h3 style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '1rem' }}>Account Information</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {[
-              { label: 'Name',  value: currentUser?.name },
+              { label: 'Name', value: currentUser?.name },
               { label: 'Email', value: currentUser?.email },
             ].map(row => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2278,7 +2279,7 @@ function SettingsPage({ currentUser, hotel }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {[
               { label: 'Branch Name', value: hotel?.name },
-              { label: 'City',        value: hotel?.city },
+              { label: 'City', value: hotel?.city },
             ].map(row => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>{row.label}</span>
@@ -2312,7 +2313,7 @@ function OffersManagementPage({ hotel }) {
   const [foods, setFoods] = useState([]);
   const [filter, setFilter] = useState('all'); // 'all', 'active', 'scheduled', 'expired'
   const [search, setSearch] = useState('');
-  
+
   // Drawer & Action states
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState(null); // null for create, object for edit
@@ -2417,17 +2418,17 @@ function OffersManagementPage({ hotel }) {
     setApplicabilityType('all');
     setApplicableCategoryIds([]);
     setApplicableFoodIds([]);
-    
+
     // Default start at current local time, end in 7 days
     const now = new Date();
     const tzoffset = now.getTimezoneOffset() * 60000;
     const localStart = new Date(now - tzoffset).toISOString().slice(0, 16);
     setStartAt(localStart);
-    
+
     const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const localEnd = new Date(end - tzoffset).toISOString().slice(0, 16);
     setEndAt(localEnd);
-    
+
     setTotalUsageLimit('');
     setUsagePerCustomer(1);
     setIsActive(true);
@@ -2447,13 +2448,13 @@ function OffersManagementPage({ hotel }) {
     setApplicabilityType(offer.applicabilityType);
     setApplicableCategoryIds((offer.applicableCategories || []).map(c => c.id));
     setApplicableFoodIds((offer.applicableFoods || []).map(f => f.id));
-    
+
     // Format dates to local datetime input
     const startTz = new Date(new Date(offer.startAt).getTime() - new Date(offer.startAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     const endTz = new Date(new Date(offer.endAt).getTime() - new Date(offer.endAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     setStartAt(startTz);
     setEndAt(endTz);
-    
+
     setTotalUsageLimit(offer.totalUsageLimit !== null && offer.totalUsageLimit !== undefined ? offer.totalUsageLimit : '');
     setUsagePerCustomer(offer.usagePerCustomer || 1);
     setIsActive(offer.isActive);
@@ -2566,7 +2567,7 @@ function OffersManagementPage({ hotel }) {
     if (filter === 'active' && status !== 'ACTIVE') return false;
     if (filter === 'scheduled' && status !== 'SCHEDULED') return false;
     if (filter === 'expired' && status !== 'EXPIRED') return false;
-    
+
     if (search.trim()) {
       const q = search.toLowerCase();
       return o.name.toLowerCase().includes(q) || o.code.toLowerCase().includes(q);
@@ -2600,7 +2601,7 @@ function OffersManagementPage({ hotel }) {
             <Check size={20} />
           </div>
         </div>
-        
+
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: 'var(--shadow-sm)' }}>
           <div>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: '700' }}>Scheduled</span>
@@ -2660,7 +2661,7 @@ function OffersManagementPage({ hotel }) {
             </button>
           ))}
         </div>
-        
+
         <div style={{ position: 'relative', width: '280px', flexGrow: 1, maxWidth: '320px', minWidth: '200px' }}>
           <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)', pointerEvents: 'none' }} />
           <input
@@ -2712,7 +2713,7 @@ function OffersManagementPage({ hotel }) {
                   const status = getOfferStatus(o);
                   const stStyle = getStatusStyle(status);
                   const opensUpward = filteredOffers.length >= 3 && idx === filteredOffers.length - 1;
-                  
+
                   let discountLabel = '';
                   if (o.discountType === 'percentage') discountLabel = `${o.discountValue}% OFF`;
                   else if (o.discountType === 'flat') discountLabel = `Rs. ${o.discountValue} OFF`;
@@ -2720,11 +2721,11 @@ function OffersManagementPage({ hotel }) {
 
                   let appliesLabel = 'All Menu Items';
                   if (o.applicabilityType === 'categories') {
-                    appliesLabel = o.applicableCategories?.length > 0 
+                    appliesLabel = o.applicableCategories?.length > 0
                       ? `${o.applicableCategories.map(c => c.name).join(', ')}`
                       : 'Specific Categories';
                   } else if (o.applicabilityType === 'foods') {
-                    appliesLabel = o.applicableFoods?.length > 0 
+                    appliesLabel = o.applicableFoods?.length > 0
                       ? `${o.applicableFoods.map(f => f.name).join(', ')}`
                       : 'Specific Foods';
                   }
@@ -2769,7 +2770,7 @@ function OffersManagementPage({ hotel }) {
                         >
                           <MoreVertical size={16} />
                         </button>
-                        
+
                         {actionMenuOpenId === o.id && (
                           <div style={{
                             position: 'absolute',
@@ -2826,7 +2827,7 @@ function OffersManagementPage({ hotel }) {
       {/* CREATE/EDIT OFFER DRAWER */}
       {isDrawerOpen && (
         <>
-          <div 
+          <div
             onClick={() => setIsDrawerOpen(false)}
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000 }}
           />
@@ -2845,18 +2846,18 @@ function OffersManagementPage({ hotel }) {
             {/* Scrollable Form Content */}
             <form onSubmit={handleSubmit} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
-                
+
                 {/* Section: Details */}
                 <div>
                   <h4 style={{ fontSize: '0.75rem', fontWeight: '800', textTransform: 'uppercase', color: 'var(--primary)', tracking: '0.5px', marginBottom: '0.75rem' }}>Offer Details</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Offer Name</label>
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         required
-                        placeholder="e.g. Weekend Special" 
-                        value={name} 
+                        placeholder="e.g. Weekend Special"
+                        value={name}
                         onChange={e => setName(e.target.value)}
                         className={`premium-form-control ${errors.name ? 'premium-form-error' : ''}`}
                         style={{ width: '100%' }}
@@ -2866,11 +2867,11 @@ function OffersManagementPage({ hotel }) {
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Offer Code</label>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           required
-                          placeholder="e.g. WEEKEND20" 
-                          value={code} 
+                          placeholder="e.g. WEEKEND20"
+                          value={code}
                           onChange={e => setCode(e.target.value.toUpperCase())}
                           className={`premium-form-control ${errors.code ? 'premium-form-error' : ''}`}
                           style={{ flex: 1 }}
@@ -2928,11 +2929,11 @@ function OffersManagementPage({ hotel }) {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', width: '100%' }}>
                       <div>
                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Discount %</label>
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           required
-                          min="1" 
-                          max="100" 
+                          min="1"
+                          max="100"
                           placeholder="20"
                           value={discountValue}
                           onChange={e => setDiscountValue(e.target.value)}
@@ -2944,8 +2945,8 @@ function OffersManagementPage({ hotel }) {
                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Max Discount</label>
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                           <span style={{ position: 'absolute', left: '1rem', color: '#5c6b84', fontSize: '0.88rem', fontWeight: '600', pointerEvents: 'none' }}>Rs.</span>
-                          <input 
-                            type="number" 
+                          <input
+                            type="number"
                             placeholder="Optional"
                             value={maxDiscount}
                             onChange={e => setMaxDiscount(e.target.value)}
@@ -2962,10 +2963,10 @@ function OffersManagementPage({ hotel }) {
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Discount Amount</label>
                       <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                         <span style={{ position: 'absolute', left: '1rem', color: '#5c6b84', fontSize: '0.88rem', fontWeight: '600', pointerEvents: 'none' }}>Rs.</span>
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           required
-                          min="1" 
+                          min="1"
                           placeholder="50"
                           value={discountValue}
                           onChange={e => setDiscountValue(e.target.value)}
@@ -2985,9 +2986,9 @@ function OffersManagementPage({ hotel }) {
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Minimum Order Value</label>
                       <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                         <span style={{ position: 'absolute', left: '1rem', color: '#5c6b84', fontSize: '0.88rem', fontWeight: '600', pointerEvents: 'none' }}>Rs.</span>
-                        <input 
-                          type="number" 
-                          min="0" 
+                        <input
+                          type="number"
+                          min="0"
                           value={minimumOrderValue}
                           onChange={e => setMinimumOrderValue(e.target.value)}
                           className="premium-form-control"
@@ -2997,8 +2998,8 @@ function OffersManagementPage({ hotel }) {
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Applicable To</label>
-                      <select 
-                        value={applicabilityType} 
+                      <select
+                        value={applicabilityType}
                         onChange={e => setApplicabilityType(e.target.value)}
                         className="premium-form-control"
                         style={{ width: '100%', cursor: 'pointer' }}
@@ -3012,8 +3013,8 @@ function OffersManagementPage({ hotel }) {
                     {/* Specific Categories search checklist */}
                     {applicabilityType === 'categories' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           placeholder="Search categories..."
                           value={catSearch}
                           onChange={e => setCatSearch(e.target.value)}
@@ -3028,8 +3029,8 @@ function OffersManagementPage({ hotel }) {
                               const checked = applicableCategoryIds.includes(c.id);
                               return (
                                 <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-main)', cursor: 'pointer' }}>
-                                  <input 
-                                    type="checkbox" 
+                                  <input
+                                    type="checkbox"
                                     checked={checked}
                                     style={{ accentColor: 'var(--primary)' }}
                                     onChange={() => {
@@ -3053,8 +3054,8 @@ function OffersManagementPage({ hotel }) {
                     {/* Specific Foods search checklist */}
                     {applicabilityType === 'foods' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           placeholder="Search food items..."
                           value={foodSearch}
                           onChange={e => setFoodSearch(e.target.value)}
@@ -3069,8 +3070,8 @@ function OffersManagementPage({ hotel }) {
                               const checked = applicableFoodIds.includes(f.id);
                               return (
                                 <label key={f.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-main)', cursor: 'pointer' }}>
-                                  <input 
-                                    type="checkbox" 
+                                  <input
+                                    type="checkbox"
                                     checked={checked}
                                     style={{ accentColor: 'var(--primary)' }}
                                     onChange={() => {
@@ -3100,34 +3101,34 @@ function OffersManagementPage({ hotel }) {
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Start Date & Time</label>
                       <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                        <input 
-                          type="datetime-local" 
+                        <input
+                          type="datetime-local"
                           required
                           value={startAt}
                           onChange={e => setStartAt(e.target.value)}
                           className="premium-form-control"
                           style={{ width: '100%', fontSize: '0.82rem' }}
                         />
-                        <Calendar 
-                          size={16} 
-                          style={{ position: 'absolute', right: '0.75rem', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }} 
+                        <Calendar
+                          size={16}
+                          style={{ position: 'absolute', right: '0.75rem', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }}
                         />
                       </div>
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>End Date & Time</label>
                       <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                        <input 
-                          type="datetime-local" 
+                        <input
+                          type="datetime-local"
                           required
                           value={endAt}
                           onChange={e => setEndAt(e.target.value)}
                           className={`premium-form-control ${errors.endAt ? 'premium-form-error' : ''}`}
                           style={{ width: '100%', fontSize: '0.82rem' }}
                         />
-                        <Calendar 
-                          size={16} 
-                          style={{ position: 'absolute', right: '0.75rem', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }} 
+                        <Calendar
+                          size={16}
+                          style={{ position: 'absolute', right: '0.75rem', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }}
                         />
                       </div>
                       {errors.endAt && <span style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block', fontWeight: '600' }}>{errors.endAt}</span>}
@@ -3141,8 +3142,8 @@ function OffersManagementPage({ hotel }) {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', width: '100%' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Total Usage Limit</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         placeholder="Unlimited"
                         value={totalUsageLimit}
                         onChange={e => setTotalUsageLimit(e.target.value)}
@@ -3152,8 +3153,8 @@ function OffersManagementPage({ hotel }) {
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Usage Per Customer</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         required
                         min="1"
                         value={usagePerCustomer}
@@ -3249,11 +3250,11 @@ export default function HotelAdminDashboard({
   const [foods, setFoods] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [statusUpdating, setStatusUpdating] = useState(false);
-  
+
   // Notifications State
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  
+
   const fetchNotifications = async () => {
     try {
       const data = await api.getHotelNotifications();
@@ -3330,8 +3331,8 @@ export default function HotelAdminDashboard({
     }
   };
 
-  useEffect(() => { 
-    fetchDashboardData(); 
+  useEffect(() => {
+    fetchDashboardData();
     fetchNotifications();
     const interval = setInterval(() => {
       fetchDashboardData(true);
@@ -3377,13 +3378,13 @@ export default function HotelAdminDashboard({
   const liveOrders = orders.filter(o => ['placed', 'accepted', 'preparing', 'ready_for_pickup', 'picked_up', 'out_for_delivery'].includes(o.orderStatus)).slice(0, 5);
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard',           icon: <Activity size={18} /> },
-    { id: 'orders',    label: 'Orders',              icon: <ClipboardList size={18} /> },
-    { id: 'menu',      label: 'Menu Management',     icon: <Utensils size={18} /> },
-    { id: 'offers',    label: 'Offers & Promotions', icon: <TrendingUp size={18} /> },
-    { id: 'analytics', label: 'Analytics',           icon: <Store size={18} /> },
-    { id: 'profile',   label: 'Restaurant Profile',  icon: <Building size={18} /> },
-    { id: 'settings',  label: 'Settings',            icon: <Settings size={18} /> },
+    { id: 'dashboard', label: 'Dashboard', icon: <Activity size={18} /> },
+    { id: 'orders', label: 'Orders', icon: <ClipboardList size={18} /> },
+    { id: 'menu', label: 'Menu Management', icon: <Utensils size={18} /> },
+    { id: 'offers', label: 'Offers & Promotions', icon: <TrendingUp size={18} /> },
+    { id: 'analytics', label: 'Analytics', icon: <Store size={18} /> },
+    { id: 'profile', label: 'Restaurant Profile', icon: <Building size={18} /> },
+    { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
   ];
 
   return (
@@ -3483,7 +3484,7 @@ export default function HotelAdminDashboard({
             </button>
 
             <div style={{ position: 'relative' }}>
-              <button 
+              <button
                 onClick={() => setShowNotifications(!showNotifications)}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', position: 'relative' }}
               >
@@ -3492,7 +3493,7 @@ export default function HotelAdminDashboard({
                   <span style={{ position: 'absolute', top: '-2px', right: '-2px', width: '8px', height: '8px', background: 'var(--primary)', borderRadius: '50%', border: '2px solid #ffffff' }} />
                 )}
               </button>
-              
+
               {showNotifications && (
                 <div style={{ position: 'absolute', top: '120%', right: 0, width: '300px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)', zIndex: 100, overflow: 'hidden' }}>
                   <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)', fontWeight: '800', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3524,8 +3525,8 @@ export default function HotelAdminDashboard({
                       <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-subtle)', fontSize: '0.8rem' }}>No notifications</div>
                     ) : (
                       notifications.map(n => (
-                        <div 
-                          key={n.id} 
+                        <div
+                          key={n.id}
                           onClick={() => {
                             if (!n.isRead) markNotificationRead(n.id);
                           }}
@@ -3588,7 +3589,7 @@ export default function HotelAdminDashboard({
             loading ? (
               <div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-                  {[1,2,3,4].map(i => <div key={i} style={{ height: '140px', borderRadius: 'var(--radius-lg)', background: 'var(--bg-hover)', animation: 'pulse 1.5s infinite ease-in-out' }} />)}
+                  {[1, 2, 3, 4].map(i => <div key={i} style={{ height: '140px', borderRadius: 'var(--radius-lg)', background: 'var(--bg-hover)', animation: 'pulse 1.5s infinite ease-in-out' }} />)}
                 </div>
                 <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1.5, minWidth: '320px', height: '300px', background: 'var(--bg-hover)', borderRadius: 'var(--radius-xl)' }} />
@@ -3601,10 +3602,10 @@ export default function HotelAdminDashboard({
                 <h3 style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.75rem' }}>Quick Actions</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
                   {[
-                    { label: '+ Add Food',     action: () => { setOpenAddFoodOnMount(true); setActiveTab('menu'); },   color: 'var(--primary)' },
-                    { label: '+ Add Category', action: () => setActiveTab('menu'),   color: 'var(--accent-blue)' },
+                    { label: '+ Add Food', action: () => { setOpenAddFoodOnMount(true); setActiveTab('menu'); }, color: 'var(--primary)' },
+                    { label: '+ Add Category', action: () => setActiveTab('menu'), color: 'var(--accent-blue)' },
                     { label: '+ Create Offer', action: () => setActiveTab('offers'), color: 'var(--accent-amber)' },
-                    { label: 'Manage Status',  action: handleToggleOpenStatus,        color: 'var(--secondary)' },
+                    { label: 'Manage Status', action: handleToggleOpenStatus, color: 'var(--secondary)' },
                   ].map((act, idx) => (
                     <div key={idx} onClick={act.action}
                       style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1rem 1.25rem', cursor: 'pointer', fontWeight: '800', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', transition: 'all var(--transition-fast)' }}
@@ -3776,8 +3777,11 @@ export default function HotelAdminDashboard({
           {/* ── OFFERS TAB ── */}
           {activeTab === 'offers' && <OffersManagementPage hotel={hotel} />}
 
+          {/* ── PROFILE TAB ── */}
+          {activeTab === 'profile' && <RestaurantProfilePage hotel={hotel} setHotel={setHotel} />}
+
           {/* ── PLACEHOLDER TABS ── */}
-          {!['dashboard', 'orders', 'menu', 'settings', 'offers'].includes(activeTab) && (
+          {!['dashboard', 'orders', 'menu', 'settings', 'offers', 'profile'].includes(activeTab) && (
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '5rem 2rem', textAlign: 'center', boxShadow: 'var(--shadow-sm)' }}>
               <Store size={48} style={{ color: 'var(--primary)', marginBottom: '1.5rem' }} />
               <h2 style={{ fontSize: '1.5rem', fontWeight: '850', marginBottom: '0.5rem' }}>
