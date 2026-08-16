@@ -29,8 +29,10 @@ export default function Dashboard() {
   const [orders, setOrders] = useState([]);
   const [customerCount, setCustomerCount] = useState(0);
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const fetchDashboardData = async (isBackground = false) => {
+    if (!isBackground) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [hotelsData, partnersData, ordersData, statsData] = await Promise.all([
@@ -46,14 +48,22 @@ export default function Dashboard() {
       setCustomerCount(statsData?.totalCustomers || 0);
     } catch (err) {
       console.error(err);
-      setError('Unable to load platform dashboard metrics. Please check connection to NestJS server.');
+      if (!isBackground) {
+        setError('Unable to load platform dashboard metrics. Please check connection to NestJS server.');
+      }
     } finally {
-      setLoading(false);
+      if (!isBackground) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     fetchDashboardData();
+    const interval = setInterval(() => {
+      fetchDashboardData(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // --- STATS CALCULATIONS ---

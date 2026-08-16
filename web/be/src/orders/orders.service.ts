@@ -338,12 +338,23 @@ export class OrdersService {
         ? order.items.reduce((sum, item) => sum + item.quantity, 0)
         : 0;
 
+      const items = (order.items || []).map((item) => ({
+        id: item.id,
+        foodId: item.foodId,
+        foodName: item.foodName,
+        foodImage: item.foodImage,
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice.toString()),
+      }));
+
       return {
         id: order.id,
         orderNumber: order.orderNumber,
         hotel: hotelPublic,
         subtotal: parseFloat(order.subtotal.toString()),
         deliveryFee: parseFloat(order.deliveryFee.toString()),
+        taxAmount: parseFloat(order.taxAmount.toString()),
+        discountAmount: parseFloat(order.discountAmount.toString()),
         totalAmount: parseFloat(order.totalAmount.toString()),
         paymentMethod: order.paymentMethod,
         paymentStatus: order.paymentStatus,
@@ -351,6 +362,7 @@ export class OrdersService {
         placedAt: order.placedAt,
         createdAt: order.createdAt,
         itemCount,
+        items,
         activeAssignment: activeAssignment
           ? {
               id: activeAssignment.id,
@@ -724,6 +736,43 @@ export class OrdersService {
 
     return {
       message: `Order status updated to ${nextStatus}`,
+      orderId: order.id,
+      orderStatus: order.orderStatus,
+    };
+  }
+
+  async cancelOrder(userId: number, orderId: number): Promise<any> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId, userId },
+    });
+    if (!order) {
+      throw new NotFoundException(`Order with ID ${orderId} not found`);
+    }
+
+    const current = order.orderStatus?.toLowerCase();
+    if (current === 'out_for_delivery' || current === 'delivered') {
+      throw new BadRequestException(
+        'Order cannot be cancelled because it is already out for delivery or delivered',
+      );
+    }
+    if (current === 'cancelled' || current === 'rejected') {
+      throw new BadRequestException('Order is already cancelled or rejected');
+    }
+
+    order.orderStatus = 'cancelled';
+    const now = new Date();
+    order.cancelledAt = now;
+
+    // Inactivate any active delivery partner assignments for this order
+    await this.dataSource.getRepository('DeliveryAssignment').update(
+      { orderId: order.id, isActive: true },
+      { isActive: false, unassignedAt: now }
+    );
+
+    await this.orderRepository.save(order);
+
+    return {
+      message: 'Order cancelled successfully',
       orderId: order.id,
       orderStatus: order.orderStatus,
     };

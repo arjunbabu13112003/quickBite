@@ -116,4 +116,13 @@ export class OrdersController {
       dto.status,
     );
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('orders/:orderId/cancel')
+  async cancelOrder(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Request() req,
+  ) {
+    return this.ordersService.cancelOrder(req.user.userId, orderId);
+  }
 }

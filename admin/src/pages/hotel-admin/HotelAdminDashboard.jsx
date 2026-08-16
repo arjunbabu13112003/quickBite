@@ -77,20 +77,32 @@ function OrdersPage({ hotel }) {
 
   const fetchOrders = useCallback(async (showRefreshing = false) => {
     if (!hotel?.id) return;
-    showRefreshing ? setRefreshing(true) : setLoading(true);
+    if (showRefreshing !== 'silent') {
+      showRefreshing ? setRefreshing(true) : setLoading(true);
+    }
     setErrorMsg('');
     try {
       const data = await api.getHotelOrders(hotel.id, activeFilter);
       setOrders(data || []);
     } catch (err) {
-      setErrorMsg(err.message || 'Failed to load orders.');
+      if (showRefreshing !== 'silent') {
+        setErrorMsg(err.message || 'Failed to load orders.');
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (showRefreshing !== 'silent') {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [hotel?.id, activeFilter]);
 
-  useEffect(() => { fetchOrders(); }, [fetchOrders]);
+  useEffect(() => { 
+    fetchOrders(); 
+    const interval = setInterval(() => {
+      fetchOrders('silent');
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchOrders]);
 
   const handleUpdateStatus = async (orderId, newStatus) => {
     setUpdatingOrderId(orderId);
@@ -3289,9 +3301,11 @@ export default function HotelAdminDashboard({
     }
   };
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (isBackground = false) => {
     if (!hotel?.id) return;
-    setLoading(true);
+    if (!isBackground) {
+      setLoading(true);
+    }
     setErrorMsg('');
     try {
       const [detailsData, ordersData, ratingData, foodsData] = await Promise.all([
@@ -3306,15 +3320,24 @@ export default function HotelAdminDashboard({
       setFoods(foodsData);
     } catch (err) {
       console.error(err);
-      setErrorMsg('Failed to load dashboard data. Please try again.');
+      if (!isBackground) {
+        setErrorMsg('Failed to load dashboard data. Please try again.');
+      }
     } finally {
-      setLoading(false);
+      if (!isBackground) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => { 
     fetchDashboardData(); 
     fetchNotifications();
+    const interval = setInterval(() => {
+      fetchDashboardData(true);
+      fetchNotifications();
+    }, 5000);
+    return () => clearInterval(interval);
   }, [hotel?.id]);
 
   const handleToggleOpenStatus = async () => {

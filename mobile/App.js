@@ -892,14 +892,31 @@ export default function App() {
         const mappedOrders = data.map(o => ({
           orderId: o.id,
           orderNumber: o.orderNumber,
-          items: (o.items || []).map(item => ({
-            itemId: item.id,
-            name: item.foodName,
-            price: item.unitPrice,
-            image: item.foodImage || 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=500&q=80',
-            quantity: item.quantity
-          })),
+          hotel: o.hotel,
+           items: (o.items || []).map(item => {
+            let img = item.foodImage || '';
+            if (img) {
+              if (img.startsWith('http://') || img.startsWith('https://')) {
+                if (img.includes('localhost:') || img.includes('127.0.0.1:')) {
+                  img = img.replace(/http:\/\/(localhost|127\.0\.0\.1):5000/g, resolvedBackendUrl);
+                }
+              } else {
+                img = `${resolvedBackendUrl}/uploads/foods/${img}`;
+              }
+            }
+            return {
+              itemId: item.foodId || item.id,
+              name: item.foodName,
+              price: item.unitPrice,
+              image: img || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+              quantity: item.quantity
+            };
+          }),
           total: o.totalAmount,
+          subtotal: o.subtotal,
+          deliveryFee: o.deliveryFee,
+          taxAmount: o.taxAmount,
+          discountAmount: o.discountAmount,
           address: o.deliveryAddress,
           paymentMethod: o.paymentMethod,
           placedAt: new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -912,6 +929,46 @@ export default function App() {
     } catch (e) {
       console.warn('Error fetching customer orders:', e);
     }
+  };
+
+  const handleCancelOrder = async () => {
+    const orderId = selectedOrderForDetail?.orderId || selectedOrderForDetail?.id;
+    if (!orderId) return;
+
+    Alert.alert(
+      'Cancel Order',
+      'Are you sure you want to cancel this order?',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await fetch(`${resolvedBackendUrl}/orders/${orderId}/cancel`, {
+                method: 'PATCH',
+                headers: {
+                  'Authorization': `Bearer ${currentUser?.token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+
+              if (res.ok) {
+                Alert.alert('Order Cancelled', 'Your order has been cancelled successfully.');
+                fetchMyOrders();
+                setSelectedOrderForDetail(null);
+              } else {
+                const errText = await res.text().catch(() => '');
+                Alert.alert('Error', errText || 'Failed to cancel order.');
+              }
+            } catch (e) {
+              console.warn('Cancel order error:', e);
+              Alert.alert('Error', 'Unable to reach the server. Please check your connection.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   useEffect(() => {
@@ -2327,6 +2384,10 @@ export default function App() {
           orderNumber: backendOrder.orderNumber,
           items: [...cartItems],
           total: grandTotal,
+          subtotal: subtotal,
+          deliveryFee: finalDeliveryFee,
+          taxAmount: taxesAndFees,
+          discountAmount: discountAmount,
           address: selectedAddress,
           paymentMethod: 'COD',
           placedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -2418,6 +2479,10 @@ export default function App() {
             orderNumber: backendOrder.orderNumber,
             items: [...cartItems],
             total: grandTotal,
+            subtotal: subtotal,
+            deliveryFee: finalDeliveryFee,
+            taxAmount: taxesAndFees,
+            discountAmount: discountAmount,
             address: selectedAddress,
             paymentMethod: 'ONLINE',
             placedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -3320,17 +3385,16 @@ export default function App() {
 
             {/* TAB 3: LIVE COMPACT MULTI-ORDER LIST */}
             {activeTab === 'orders' && (
-              <ScrollView
-                onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: globalScrollY } } }], { useNativeDriver: false })}
-                scrollEventThrottle={16}
-                contentContainerStyle={[styles.tabContainer, myOrdersList.length === 0 && { flexGrow: 1, justifyContent: 'center' }]}
-              >
+              <View style={{ flex: 1, backgroundColor: D.bg }}>
+                {/* Fixed Header */}
                 <View style={{
                   flexDirection: 'row',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  marginTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 14 : 12,
-                  marginBottom: 16
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 14 : 12,
+                  paddingBottom: 8,
+                  backgroundColor: D.bg
                 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <TouchableOpacity
@@ -3349,55 +3413,106 @@ export default function App() {
                   )}
                 </View>
 
-                {myOrdersList.length === 0 ? (
-                  <View style={styles.emptyStateCenter}>
-                    <Truck size={52} color={darkMode ? '#475569' : '#D1D5DB'} />
-                    <Text style={[styles.emptyTitle, { color: D.text }]}>No Orders Placed Yet</Text>
-                    <Text style={[styles.emptySubtitle, { color: D.textSub }]}>Place an order from any restaurant to view compact order summary & live tracking here.</Text>
-                  </View>
-                ) : (
-                  myOrdersList.map((ord, orderIdx) => {
-                    const firstItem = ord.items && ord.items[0];
-                    const foodImg = firstItem ? firstItem.image : 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=500&q=80';
-                    const foodName = firstItem ? firstItem.name : 'Delicious Meal';
-                    const extraCount = ord.items.length > 1 ? ` + ${ord.items.length - 1} more` : '';
-                    const currentStep = mapStatusToStep(ord.orderStatus || 'placed');
-                    const statusText = currentStep === 5 ? 'Delivered' : (currentStep === 4 ? 'On the Way' : (currentStep === 3 ? 'Preparing' : (currentStep === 2 ? 'Accepted' : (currentStep === -1 ? 'Cancelled' : 'Placed'))));
-                    const statusBg = currentStep === 5 ? '#ECFDF5' : (currentStep === -1 ? '#FEF2F2' : '#FFF7ED');
-                    const statusColor = currentStep === 5 ? '#059669' : (currentStep === -1 ? '#EF4444' : '#FF7A00');
+                {/* Scrollable Order Items */}
+                <ScrollView
+                  onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: globalScrollY } } }], { useNativeDriver: false })}
+                  scrollEventThrottle={16}
+                  contentContainerStyle={[
+                    { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 110 },
+                    myOrdersList.length === 0 && { flexGrow: 1, justifyContent: 'center' }
+                  ]}
+                >
+                  {myOrdersList.length === 0 ? (
+                    <View style={styles.emptyStateCenter}>
+                      <Truck size={52} color={darkMode ? '#475569' : '#D1D5DB'} />
+                      <Text style={[styles.emptyTitle, { color: D.text }]}>No Orders Placed Yet</Text>
+                      <Text style={[styles.emptySubtitle, { color: D.textSub }]}>Place an order from any restaurant to view compact order summary & live tracking here.</Text>
+                    </View>
+                  ) : (
+                    myOrdersList.map((ord, orderIdx) => {
+                      const firstItem = ord.items && ord.items[0];
+                      const foodImg = firstItem ? firstItem.image : 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=500&q=80';
+                      const foodName = firstItem ? firstItem.name : 'Delicious Meal';
+                      const extraCount = ord.items.length > 1 ? ` + ${ord.items.length - 1} more` : '';
+                      const currentStep = mapStatusToStep(ord.orderStatus || 'placed');
+                      const statusText = currentStep === 5 ? 'Delivered' : (currentStep === 4 ? 'On the Way' : (currentStep === 3 ? 'Preparing' : (currentStep === 2 ? 'Accepted' : (currentStep === -1 ? 'Cancelled' : 'Placed'))));
+                      const statusBg = currentStep === 5 ? '#ECFDF5' : (currentStep === -1 ? '#FEF2F2' : '#FFF7ED');
+                      const statusColor = currentStep === 5 ? '#059669' : (currentStep === -1 ? '#EF4444' : '#FF7A00');
 
-                    return (
-                      <TouchableOpacity
-                        key={ord.orderId}
-                        style={[
-                          styles.orderCompactRowCard,
-                          { backgroundColor: D.card, borderColor: D.cardBorder, marginBottom: 12 }
-                        ]}
-                        onPress={() => setSelectedOrderForDetail(ord)}
-                        activeOpacity={0.7}
-                      >
-                        <Image source={{ uri: foodImg }} style={styles.orderCompactImg} />
+                      return (
+                        <View
+                          key={ord.orderId}
+                          style={[
+                            styles.orderCompactRowCard,
+                            { backgroundColor: D.card, borderColor: D.cardBorder, marginBottom: 12 }
+                          ]}
+                        >
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            onPress={() => {
+                              if (!firstItem || !firstItem.itemId) return;
+                              // Find the product item in the restaurants list
+                              let foundProduct = null;
+                              let foundRestaurant = null;
+                              
+                              for (const r of restaurants) {
+                                if (r.menu) {
+                                  const prod = r.menu.find(m => m.itemId === firstItem.itemId || m.id === firstItem.itemId);
+                                  if (prod) {
+                                    foundProduct = prod;
+                                    foundRestaurant = r;
+                                    break;
+                                  }
+                                }
+                              }
+                              
+                              if (foundProduct) {
+                                openProductDetails(foundProduct, foundRestaurant);
+                              } else {
+                                // Fallback: construct product details
+                                const constructedProduct = {
+                                  id: firstItem.itemId,
+                                  itemId: firstItem.itemId,
+                                  name: firstItem.name,
+                                  price: firstItem.price,
+                                  image: firstItem.image,
+                                  description: 'Ordered item from your history',
+                                  hotelId: ord.hotel?.id
+                                };
+                                openProductDetails(constructedProduct, ord.hotel);
+                              }
+                            }}
+                          >
+                            <Image source={{ uri: foodImg }} style={styles.orderCompactImg} />
+                          </TouchableOpacity>
 
-                        <View style={{ flex: 1, marginLeft: 12, marginRight: 6 }}>
-                          <Text style={[styles.orderCompactTitle, { color: D.text }]} numberOfLines={1}>{foodName}{extraCount}</Text>
-                          <Text style={[styles.orderCompactSub, { color: D.textSub }]}>Order #{ord.orderId} • {ord.placedAt}</Text>
-                          <Text style={styles.orderCompactPrice}>₹{ord.total} <Text style={{ fontSize: 11, fontWeight: '700', color: ((ord.paymentMethod || '').toUpperCase().includes('COD') || (ord.paymentMethod || '').toUpperCase().includes('CASH')) ? '#D97706' : '#10B981' }}>({ord.paymentMethod || 'ONLINE'})</Text></Text>
+                          <TouchableOpacity
+                            style={{ flex: 1, flexDirection: 'row', marginLeft: 12, alignItems: 'center' }}
+                            activeOpacity={0.7}
+                            onPress={() => setSelectedOrderForDetail(ord)}
+                          >
+                            <View style={{ flex: 1, marginRight: 6 }}>
+                              <Text style={[styles.orderCompactTitle, { color: D.text }]} numberOfLines={1}>{foodName}{extraCount}</Text>
+                              <Text style={[styles.orderCompactSub, { color: D.textSub }]}>Order #{ord.orderId} • {ord.placedAt}</Text>
+                              <Text style={styles.orderCompactPrice}>₹{ord.total} <Text style={{ fontSize: 11, fontWeight: '700', color: ((ord.paymentMethod || '').toUpperCase().includes('COD') || (ord.paymentMethod || '').toUpperCase().includes('CASH')) ? '#D97706' : '#10B981' }}>({ord.paymentMethod || 'ONLINE'})</Text></Text>
+                            </View>
+
+                            <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                              <View style={[styles.orderStatusBadgeSmall, { backgroundColor: statusBg, borderColor: statusColor, borderWidth: 1 }]}>
+                                <Text style={[styles.orderStatusBadgeTextSmall, { color: statusColor }]}>{statusText}</Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FF5252', marginRight: 2 }}>Details</Text>
+                                <ChevronRight size={14} color="#FF5252" />
+                              </View>
+                            </View>
+                          </TouchableOpacity>
                         </View>
-
-                        <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
-                          <View style={[styles.orderStatusBadgeSmall, { backgroundColor: statusBg, borderColor: statusColor, borderWidth: 1 }]}>
-                            <Text style={[styles.orderStatusBadgeTextSmall, { color: statusColor }]}>{statusText}</Text>
-                          </View>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#FF5252', marginRight: 2 }}>Details</Text>
-                            <ChevronRight size={14} color="#FF5252" />
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })
-                )}
-              </ScrollView>
+                      );
+                    })
+                  )}
+                </ScrollView>
+              </View>
             )}
 
             {/* TAB 4: PROFILE */}
@@ -5543,9 +5658,19 @@ export default function App() {
                   <TouchableOpacity onPress={() => setSelectedOrderForDetail(null)} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
                     <ArrowLeft size={20} color={D.text} />
                   </TouchableOpacity>
-                  <Text style={[styles.modalHeaderTitle, { color: D.heading }]}>
-                    Order #{activeOrderDetail?.orderNumber || selectedOrderForDetail.orderNumber || selectedOrderForDetail.orderId}
-                  </Text>
+                  {(() => {
+                    const firstItem = activeOrderDetail?.items?.[0] || selectedOrderForDetail?.items?.[0];
+                    const foodName = firstItem ? (firstItem.foodName || firstItem.name) : 'Meal';
+                    const extraCount = (activeOrderDetail?.items || selectedOrderForDetail?.items || []).length > 1 
+                      ? ` + ${(activeOrderDetail?.items || selectedOrderForDetail?.items || []).length - 1} more` 
+                      : '';
+                    const orderId = activeOrderDetail?.id || selectedOrderForDetail.orderId;
+                    return (
+                      <Text style={[styles.modalHeaderTitle, { color: D.heading, fontSize: 14 }]} numberOfLines={1}>
+                        {foodName}{extraCount} • #{orderId}
+                      </Text>
+                    );
+                  })()}
                   <View style={{ width: 20 }} />
                 </View>
 
@@ -5553,9 +5678,19 @@ export default function App() {
                   <View style={[styles.orderTrackerCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
                     <View style={styles.orderHeader}>
                       <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={[styles.orderIdText, { color: D.heading }]}>
-                          Order #{activeOrderDetail?.orderNumber || selectedOrderForDetail.orderNumber || selectedOrderForDetail.orderId}
-                        </Text>
+                        {(() => {
+                          const firstItem = activeOrderDetail?.items?.[0] || selectedOrderForDetail?.items?.[0];
+                          const foodName = firstItem ? (firstItem.foodName || firstItem.name) : 'Meal';
+                          const extraCount = (activeOrderDetail?.items || selectedOrderForDetail?.items || []).length > 1 
+                            ? ` + ${(activeOrderDetail?.items || selectedOrderForDetail?.items || []).length - 1} more` 
+                            : '';
+                          const orderId = activeOrderDetail?.id || selectedOrderForDetail.orderId;
+                          return (
+                            <Text style={[styles.orderIdText, { color: D.heading }]}>
+                              {foodName}{extraCount} • #{orderId}
+                            </Text>
+                          );
+                        })()}
                         <Text style={[styles.orderTimeText, { color: D.textSub }]} numberOfLines={2}>
                           {activeOrderDetail?.createdAt 
                             ? `Placed at ${new Date(activeOrderDetail.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
@@ -5778,14 +5913,66 @@ export default function App() {
                         const name = item.foodName || item.name;
                         const price = item.finalUnitPrice || item.price;
                         const qty = item.quantity;
+                        const customizations = item.customizations || [];
                         return (
-                          <View key={i} style={styles.summaryItemRow}>
-                            <Text style={[styles.summaryItemName, { color: D.textSub }]}>{qty}x {name}</Text>
-                            <Text style={[styles.summaryItemPrice, { color: D.text }]}>Rs. {price * qty}</Text>
+                          <View key={i} style={{ marginBottom: 10 }}>
+                            <View style={styles.summaryItemRow}>
+                              <Text style={[styles.summaryItemName, { color: D.textSub }]}>{qty}x {name}</Text>
+                              <Text style={[styles.summaryItemPrice, { color: D.text }]}>Rs. {price * qty}</Text>
+                            </View>
+                            {customizations.length > 0 && (
+                              <View style={{ marginLeft: 16, marginTop: 2 }}>
+                                {customizations.map((cust, cIdx) => (
+                                  <Text key={cIdx} style={{ fontSize: 11, color: D.textSub, fontStyle: 'italic' }}>
+                                    + {cust.choiceName} ({cust.groupName}) {cust.additionalPrice > 0 ? `(+Rs. ${cust.additionalPrice})` : ''}
+                                  </Text>
+                                ))}
+                              </View>
+                            )}
                           </View>
                         );
                       })}
-                      <View style={[styles.divider, { backgroundColor: D.divider }]} />
+                      
+                      <View style={[styles.divider, { backgroundColor: D.divider, marginVertical: 8 }]} />
+                      
+                      <View style={{ gap: 4 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 13, color: D.textSub }}>Subtotal</Text>
+                          <Text style={{ fontSize: 13, color: D.text }}>
+                            Rs. {activeOrderDetail?.subtotal || selectedOrderForDetail?.subtotal || (selectedOrderForDetail.total - (selectedOrderForDetail.deliveryFee || 0))}
+                          </Text>
+                        </View>
+                        
+                        {((activeOrderDetail?.deliveryFee || selectedOrderForDetail?.deliveryFee) >= 0) && (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 13, color: D.textSub }}>Delivery Fee</Text>
+                            <Text style={{ fontSize: 13, color: D.text }}>
+                              Rs. {activeOrderDetail?.deliveryFee ?? selectedOrderForDetail?.deliveryFee ?? 0}
+                            </Text>
+                          </View>
+                        )}
+                        
+                        {((activeOrderDetail?.taxAmount || selectedOrderForDetail?.taxAmount) >= 0) && (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 13, color: D.textSub }}>Taxes & Platform Fees</Text>
+                            <Text style={{ fontSize: 13, color: D.text }}>
+                              Rs. {activeOrderDetail?.taxAmount ?? selectedOrderForDetail?.taxAmount ?? 0}
+                            </Text>
+                          </View>
+                        )}
+                        
+                        {((activeOrderDetail?.discountAmount || selectedOrderForDetail?.discountAmount) > 0) && (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 13, color: '#059669', fontWeight: '600' }}>Discount</Text>
+                            <Text style={{ fontSize: 13, color: '#059669', fontWeight: '600' }}>
+                              - Rs. {activeOrderDetail?.discountAmount || selectedOrderForDetail?.discountAmount}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      
+                      <View style={[styles.divider, { backgroundColor: D.divider, marginVertical: 8 }]} />
+                      
                       <View style={styles.summaryTotalRow}>
                         <Text style={[styles.summaryTotalLabel, { color: D.text }]}>
                           Total Paid ({activeOrderDetail?.paymentMethod || selectedOrderForDetail.paymentMethod})
@@ -5795,6 +5982,34 @@ export default function App() {
                         </Text>
                       </View>
                     </View>
+
+                    {/* Cancel Order Button (Only allowed before out_for_delivery / delivered / cancelled / rejected) */}
+                    {(() => {
+                      const status = (activeOrderDetail?.orderStatus || selectedOrderForDetail?.orderStatus || 'placed').toLowerCase();
+                      const canCancel = ['placed', 'accepted', 'preparing', 'ready_for_pickup'].includes(status);
+                      
+                      if (!canCancel) return null;
+                      
+                      return (
+                        <TouchableOpacity
+                          onPress={handleCancelOrder}
+                          style={{
+                            backgroundColor: '#EF4444',
+                            borderRadius: 12,
+                            paddingVertical: 14,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginTop: 16,
+                            marginBottom: 8
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                            Cancel Order
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })()}
                   </View>
                 </ScrollView>
               </SafeAreaView>
@@ -5810,19 +6025,23 @@ export default function App() {
           >
             {selectedCategoryModal && (
               <SafeAreaView style={[styles.safeArea, { backgroundColor: D.bg }]}>
-                <View style={[styles.modalHeader, { backgroundColor: D.card, borderBottomColor: D.cardBorder }]}>
+                <View style={[styles.modalHeader, { backgroundColor: D.card, borderBottomColor: D.cardBorder, justifyContent: 'center', position: 'relative', height: 56, paddingVertical: 0 }]}>
                   <TouchableOpacity
-                    style={styles.closeCircleBtn}
+                    style={[styles.closeCircleBtn, { position: 'absolute', left: 16 }]}
                     onPress={() => setSelectedCategoryModal(null)}
                   >
                     <ArrowLeft size={20} color={D.text} />
                   </TouchableOpacity>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 20, marginRight: 6 }}>{selectedCategoryModal.icon}</Text>
-                    <Text style={[styles.modalHeaderTitle, { color: D.heading }]}>{selectedCategoryModal.name} Collection</Text>
+                  
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', maxWidth: '70%' }}>
+                    {selectedCategoryModal.icon ? <Text style={{ fontSize: 20, marginRight: 6 }}>{selectedCategoryModal.icon}</Text> : null}
+                    <Text style={[styles.modalHeaderTitle, { color: D.heading, textAlign: 'center', flex: 0 }]} numberOfLines={1}>
+                      {selectedCategoryModal.name} Collection
+                    </Text>
                   </View>
+                  
                   <TouchableOpacity
-                    style={styles.cartIconBtnModal}
+                    style={[styles.cartIconBtnModal, { position: 'absolute', right: 16 }]}
                     onPress={() => { setSelectedCategoryModal(null); setIsCartOpen(true); }}
                   >
                     <ShoppingBag size={18} color={D.text} />
