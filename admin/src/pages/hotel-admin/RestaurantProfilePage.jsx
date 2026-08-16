@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Building, Phone, Mail, MapPin, Clock, Truck, FileText, 
-  Camera, Trash2, Edit, Check, X, Star, Upload, Sparkles, Map
+  Camera, Trash2, Edit, Check, X, Star, Upload, Sparkles, Map, Search
 } from 'lucide-react';
 import { api } from '../../services/api';
 
@@ -32,9 +32,18 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerInstanceRef = useRef(null);
+
+  const [mapSearchQuery, setMapSearchQuery] = useState('');
+  const [mapSuggestions, setMapSuggestions] = useState([]);
+  const [searchingMapLoc, setSearchingMapLoc] = useState(false);
+
   // Fetch / Initialize data
   useEffect(() => {
-    if (hotel) {
+    if (hotel && !isEditMode) {
       // Parse operatingHours
       let parsedHours = DEFAULT_HOURS;
       if (hotel.operatingHours) {
@@ -94,7 +103,7 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
         })
         .catch(err => console.warn('Failed to fetch rating summary', err));
     }
-  }, [hotel]);
+  }, [hotel, isEditMode]);
 
   // Save profile changes
   const handleSave = async (e) => {
@@ -192,6 +201,20 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
       alert('Logo upload failed: ' + err.message);
     } finally {
       setLoading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    setLoading(true);
+    try {
+      await api.updateHotelProfile(hotel.id, { logo: '' });
+      handleChange('logo', '');
+      setHotel(prev => ({ ...prev, logo: '' }));
+    } catch (err) {
+      alert('Failed to remove logo: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -207,6 +230,20 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
       alert('Cover upload failed: ' + err.message);
     } finally {
       setLoading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveCover = async () => {
+    setLoading(true);
+    try {
+      await api.updateHotelProfile(hotel.id, { image: '' });
+      handleChange('image', '');
+      setHotel(prev => ({ ...prev, image: '' }));
+    } catch (err) {
+      alert('Failed to remove cover image: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -217,19 +254,28 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
     try {
       const res = await api.uploadHotelGallery(hotel.id, file);
       handleChange('gallery', res.gallery);
+      setHotel(prev => ({ ...prev, gallery: JSON.stringify(res.gallery) }));
     } catch (err) {
       alert('Gallery photo upload failed: ' + err.message);
     } finally {
       setLoading(false);
+      e.target.value = '';
     }
   };
 
-  const removeGalleryImage = (index) => {
+  const removeGalleryImage = async (index) => {
     if (!isEditMode) return;
-    setFormData(prev => {
-      const updated = (prev.gallery || []).filter((_, idx) => idx !== index);
-      return { ...prev, gallery: updated };
-    });
+    const updatedGallery = (formData.gallery || []).filter((_, idx) => idx !== index);
+    setLoading(true);
+    try {
+      await api.updateHotelProfile(hotel.id, { gallery: JSON.stringify(updatedGallery) });
+      handleChange('gallery', updatedGallery);
+      setHotel(prev => ({ ...prev, gallery: JSON.stringify(updatedGallery) }));
+    } catch (err) {
+      alert('Failed to remove gallery image: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Location selector mock (updates to random Kochi values for demo, or allows inputting)
@@ -242,6 +288,195 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
     
     handleChange('latitude', nextLat);
     handleChange('longitude', nextLng);
+  };
+
+  // 1. Dynamic Leaflet script and stylesheet loader
+  useEffect(() => {
+    if (window.L) {
+      setLeafletLoaded(true);
+      return;
+    }
+
+    // Load Leaflet CSS
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+
+    // Load Leaflet JS
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.onload = () => {
+      setLeafletLoaded(true);
+    };
+    document.body.appendChild(script);
+  }, []);
+
+  // 2. Interactive Map initializer and synchronization hook
+  useEffect(() => {
+    if (!leafletLoaded || !mapRef.current) return;
+
+    const initialLat = parseFloat(formData.latitude) || 9.9816;
+    const initialLng = parseFloat(formData.longitude) || 76.2999;
+
+    if (!mapInstanceRef.current) {
+      // Initialize Leaflet Map
+      const map = window.L.map(mapRef.current, {
+        zoomControl: true,
+        scrollWheelZoom: false
+      }).setView([initialLat, initialLng], 14);
+
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      // Create Custom Pulsing Marker Icon matching QuickBite's orange/red primary theme color
+      const pulsingIcon = window.L.divIcon({
+        html: `
+          <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+            <div style="position: absolute; width: 32px; height: 32px; background: rgba(255, 85, 32, 0.25); border-radius: 50%; animation: mapPulse 2s infinite; pointer-events: none;"></div>
+            <div style="background-color: #ff5520; width: 15px; height: 15px; border-radius: 50%; border: 3.5px solid #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.45); z-index: 10;"></div>
+          </div>
+        `,
+        className: 'custom-map-marker',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+      });
+
+      const marker = window.L.marker([initialLat, initialLng], {
+        icon: pulsingIcon,
+        draggable: isEditMode
+      }).addTo(map);
+
+      // Handle marker drag
+      marker.on('dragend', (e) => {
+        const { lat, lng } = e.target.getLatLng();
+        handleChange('latitude', Number(lat.toFixed(6)));
+        handleChange('longitude', Number(lng.toFixed(6)));
+      });
+
+      mapInstanceRef.current = map;
+      markerInstanceRef.current = marker;
+    } else {
+      // Sync map and marker with changing coords from inputs or buttons
+      const map = mapInstanceRef.current;
+      const marker = markerInstanceRef.current;
+      const currentMarkerLatLng = marker.getLatLng();
+
+      if (Math.abs(currentMarkerLatLng.lat - initialLat) > 0.00001 || Math.abs(currentMarkerLatLng.lng - initialLng) > 0.00001) {
+        marker.setLatLng([initialLat, initialLng]);
+        map.setView([initialLat, initialLng], map.getZoom());
+      }
+
+      // Update marker draggability depending on isEditMode
+      if (isEditMode) {
+        marker.dragging.enable();
+      } else {
+        marker.dragging.disable();
+      }
+    }
+  }, [leafletLoaded, formData.latitude, formData.longitude, isEditMode]);
+
+  // 3. Browser Location Geolocation Retriever
+  const handleGetCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+    setLoading(true);
+
+    const optionsHigh = { enableHighAccuracy: true, timeout: 4000, maximumAge: 0 };
+    const optionsLow = { enableHighAccuracy: false, timeout: 6000, maximumAge: 10000 };
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = Number(position.coords.latitude.toFixed(6));
+        const lng = Number(position.coords.longitude.toFixed(6));
+        handleChange('latitude', lat);
+        handleChange('longitude', lng);
+        setLoading(false);
+      },
+      (error) => {
+        console.warn('High accuracy location failed, trying low accuracy fallback...', error);
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = Number(pos.coords.latitude.toFixed(6));
+            const lng = Number(pos.coords.longitude.toFixed(6));
+            handleChange('latitude', lat);
+            handleChange('longitude', lng);
+            setLoading(false);
+          },
+          (err) => {
+            alert('Failed to retrieve location: ' + err.message + '. Please check browser location permissions.');
+            setLoading(false);
+          },
+          optionsLow
+        );
+      },
+      optionsHigh
+    );
+  };
+
+  // 4. Geocoding Query suggestion loader from OpenStreetMap Photon API
+  useEffect(() => {
+    if (!mapSearchQuery.trim() || mapSearchQuery.trim().length < 2) {
+      setMapSuggestions([]);
+      return;
+    }
+
+    setSearchingMapLoc(true);
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const query = encodeURIComponent(mapSearchQuery.trim());
+        const res = await fetch(`https://photon.komoot.io/api/?q=${query}&limit=6&lat=11.2588&lon=75.7804`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.features) {
+            const suggestions = data.features.map(feat => {
+              const props = feat.properties;
+              const coords = feat.geometry.coordinates;
+              const name = props.name || props.street || mapSearchQuery;
+              const district = props.district || props.city || props.county || 'Kerala';
+              const state = props.state || 'Kerala';
+              return {
+                label: name,
+                address: `${name}, ${district}, ${state}`,
+                lat: coords[1],
+                lon: coords[0],
+                city: props.city || props.town || props.village || district,
+                state: state,
+                postcode: props.postcode || '',
+                district: district
+              };
+            });
+            setMapSuggestions(suggestions);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to geocode location query', err);
+      } finally {
+        setSearchingMapLoc(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [mapSearchQuery]);
+
+  // 5. Autocomplete selection handler to update coordinates and address fields
+  const handleSelectSuggestion = (place) => {
+    handleChange('latitude', Number(place.lat.toFixed(6)));
+    handleChange('longitude', Number(place.lon.toFixed(6)));
+    if (place.city) handleChange('city', place.city);
+    if (place.state) handleChange('state', place.state);
+    if (place.postcode) handleChange('pincode', place.postcode);
+    if (place.district) handleChange('district', place.district);
+    
+    // Set landmark or append to address
+    handleChange('landmark', place.label);
+    
+    setMapSearchQuery('');
+    setMapSuggestions([]);
   };
 
   if (!hotel) {
@@ -266,7 +501,19 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
       )}
 
       {/* ── HEADER ACTION ROW ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+      <div style={{ 
+        position: 'sticky', 
+        top: 0, 
+        zIndex: 999, 
+        background: 'var(--bg-card)', 
+        borderBottom: '1px solid var(--border-color)', 
+        padding: '1rem 0.75rem', 
+        margin: '-0.5rem -0.75rem 1.5rem -0.75rem',
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
+      }}>
         <div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '850', color: 'var(--text-main)', margin: 0 }}>Restaurant Profile</h2>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Manage your restaurant details, operating hours, and media.</p>
@@ -610,20 +857,82 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
             </div>
 
             {/* Map Preview Wrapper */}
-            <div style={{ height: '140px', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', position: 'relative', overflow: 'hidden' }}>
-              <div style={{ position: 'absolute', inset: 0, opacity: 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Map size={80} style={{ color: 'var(--text-muted)' }} />
-              </div>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '700', zIndex: 1 }}>Coordinates: {formData.latitude}, {formData.longitude}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <style>{`
+                @keyframes mapPulse {
+                  0% { transform: scale(0.5); opacity: 1; }
+                  100% { transform: scale(1.6); opacity: 0; }
+                }
+                .custom-map-marker {
+                  background: transparent !important;
+                  border: none !important;
+                }
+                .map-search-suggestion-item:hover {
+                  background-color: var(--bg-hover) !important;
+                }
+              `}</style>
+
+              {/* Location Search Input */}
               {isEditMode && (
-                <button
-                  type="button"
-                  onClick={handleUpdateLocation}
-                  style={{ zIndex: 1, display: 'flex', alignItems: 'center', gap: '0.25rem', background: 'var(--primary)', color: '#fff', border: 'none', padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
-                >
-                  <MapPin size={12} /> Update Location
-                </button>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.4rem 0.75rem', gap: '0.5rem' }}>
+                    <Search size={16} style={{ color: 'var(--text-subtle)' }} />
+                    <input
+                      type="text"
+                      placeholder="Search and set location (e.g. Kannur Road, Focus Mall)..."
+                      value={mapSearchQuery}
+                      onChange={(e) => setMapSearchQuery(e.target.value)}
+                      style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)', outline: 'none', fontSize: '0.85rem' }}
+                    />
+                    {searchingMapLoc && <div className="spinner-small" style={{ width: '14px', height: '14px', border: '2px solid var(--primary)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />}
+                  </div>
+
+                  {mapSuggestions.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', zIndex: 1000, marginTop: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', maxHeight: '200px', overflowY: 'auto' }}>
+                      {mapSuggestions.map((place, idx) => (
+                        <div
+                          key={idx}
+                          className="map-search-suggestion-item"
+                          onClick={() => handleSelectSuggestion(place)}
+                          style={{ padding: '0.6rem 0.85rem', cursor: 'pointer', borderBottom: idx < mapSuggestions.length - 1 ? '1px solid var(--border-color)' : 'none', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}
+                        >
+                          <span style={{ fontSize: '0.85rem', fontWeight: '750', color: 'var(--text-main)' }}>{place.label}</span>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{place.address}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
+
+              <div style={{ height: '240px', width: '100%', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', position: 'relative', overflow: 'hidden', backgroundColor: 'var(--bg-subtle)' }}>
+                {leafletLoaded ? (
+                  <div ref={mapRef} style={{ width: '100%', height: '100%', zIndex: 0 }} />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: 0.7 }}>
+                    <Map size={36} className="spin" style={{ color: 'var(--text-muted)' }} />
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading Map engine...</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '700' }}>
+                  📍 Marker Coordinates: {formData.latitude || '9.9816'}, {formData.longitude || '76.2999'}
+                </span>
+                
+                {isEditMode && (
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={handleGetCurrentLocation}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', background: 'var(--text-success)', color: '#fff', border: 'none', padding: '0.45rem 0.85rem', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
+                    >
+                      <MapPin size={12} /> Use My Current GPS
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -831,7 +1140,7 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
                     {isEditMode && (
                       <button
                         type="button"
-                        onClick={() => handleChange('logo', '')}
+                        onClick={handleRemoveLogo}
                         style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'rgba(239, 68, 68, 0.9)', color: '#fff', border: 'none', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                       >
                         <Trash2 size={12} />
@@ -864,7 +1173,7 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
                     {isEditMode && (
                       <button
                         type="button"
-                        onClick={() => handleChange('image', '')}
+                        onClick={handleRemoveCover}
                         style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'rgba(239, 68, 68, 0.9)', color: '#fff', border: 'none', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                       >
                         <Trash2 size={12} />

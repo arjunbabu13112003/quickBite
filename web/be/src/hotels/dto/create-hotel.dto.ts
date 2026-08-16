@@ -171,4 +171,49 @@ export class CreateHotelDto {
   @IsOptional()
   @IsBoolean()
   supportsOnlinePayment?: boolean;
+
+  @IsOptional()
+  @IsString()
+  ownerName?: string;
+
+  @IsOptional()
+  @IsString()
+  alternatePhoneNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  landmark?: string;
+
+  @IsOptional()
+  @IsString()
+  district?: string;
+
+  @IsOptional()
+  @IsString()
+  legalName?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isDeliveryAvailable?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  estimatedDeliveryTime?: number;
+
+  @IsOptional()
+  @IsString()
+  operatingHours?: string;
+
+  @IsOptional()
+  @IsString()
+  gallery?: string;
+
+  @IsOptional()
+  @IsString()
+  restaurantType?: string;
+
+  @IsOptional()
+  @IsString()
+  cuisines?: string;
 }

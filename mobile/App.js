@@ -21,7 +21,8 @@ import {
   KeyboardAvoidingView,
   Linking,
   NativeModules,
-  AppState
+  AppState,
+  Share
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
@@ -75,7 +76,10 @@ import {
   EllipsisVertical,
   ChevronDown,
   ChevronUp,
-  RefreshCw
+  RefreshCw,
+  Share2,
+  Mail,
+  Calendar
 } from 'lucide-react-native';
 
 import {
@@ -604,6 +608,11 @@ export default function App() {
   const [selectedRestaurant, setSelectedRestaurant] = useState(null);
   const [restaurantOffers, setRestaurantOffers] = useState([]);
   const [loadingRestaurantOffers, setLoadingRestaurantOffers] = useState(false);
+  const [isRestActionSheetOpen, setIsRestActionSheetOpen] = useState(false);
+  const [isRestDetailsModalOpen, setIsRestDetailsModalOpen] = useState(false);
+  const [detailedRestaurant, setDetailedRestaurant] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [viewerImageIndex, setViewerImageIndex] = useState(null);
 
   // Restaurant Modal Redesign — scroll animation & filter states
   const restScrollY = useRef(new Animated.Value(0)).current;
@@ -617,15 +626,52 @@ export default function App() {
   // Reset restaurant modal state when restaurant changes
   useEffect(() => {
     if (selectedRestaurant) {
-      restScrollY.setValue(0);
       setMenuSearchQuery('');
       setPureVegFilter(false);
       setRecommendedCollapsed(false);
-      setIsRestStickyActive(false);
-      lastStickyState.current = false;
-      setSearchSectionY(0);
     }
   }, [selectedRestaurant?.id]);
+
+  // Fetch detailed restaurant profile when selectedRestaurant changes
+  useEffect(() => {
+    if (selectedRestaurant?.id) {
+      setLoadingDetails(true);
+      setDetailedRestaurant(null); // Clear stale details immediately
+      
+      const restId = selectedRestaurant.id;
+      console.log('RESTAURANT DETAILS ID:', restId);
+
+      fetch(`${resolvedBackendUrl}/hotels/${restId}`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch detailed restaurant profile');
+          return res.json();
+        })
+        .then(data => {
+          console.log('RESTAURANT DETAILS RESPONSE:', JSON.stringify(data));
+          console.log('PHONE:', data.phoneNumber);
+          console.log('EMAIL:', data.email);
+          console.log('LANDMARK:', data.landmark);
+          console.log('FULL ADDRESS:', data.address);
+          console.log('LOGO:', data.logo);
+          console.log('COVER:', data.image);
+          console.log('GALLERY:', data.gallery);
+          console.log('PREPARATION TIME:', data.averagePreparationTime);
+          console.log('MIN ORDER:', data.minimumOrderAmount);
+          console.log('DELIVERY RADIUS:', data.deliveryRadiusKm);
+
+          setDetailedRestaurant(data);
+        })
+        .catch(err => {
+          console.warn('Error fetching detailed restaurant profile:', err);
+          setDetailedRestaurant(selectedRestaurant);
+        })
+        .finally(() => {
+          setLoadingDetails(false);
+        });
+    } else {
+      setDetailedRestaurant(null);
+    }
+  }, [selectedRestaurant?.id, resolvedBackendUrl]);
 
   // Animated interpolations for header center title
   const restTitleOpacity = restScrollY.interpolate({
@@ -1570,6 +1616,7 @@ export default function App() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ flexDirection: 'row', gap: 8, paddingTop: 8 }}
+          nestedScrollEnabled={true}
         >
           <TouchableOpacity
             onPress={() => setPureVegFilter(!pureVegFilter)}
@@ -3712,7 +3759,7 @@ export default function App() {
           {/* RESTAURANT DETAIL MODAL (FEATURE 1: STICKY TOP HEADER WITH CART ICON) */}
           <Modal visible={!!selectedRestaurant} animationType="slide" statusBarTranslucent onRequestClose={() => setSelectedRestaurant(null)}>
             {selectedRestaurant && (
-              <View style={{ flex: 1, backgroundColor: D.modalBg }}>
+              <View key={selectedRestaurant.id} style={{ flex: 1, backgroundColor: D.modalBg }}>
                 {renderToastBanner()}
                 
                 {/* ─── FIXED TOP HEADER ─── */}
@@ -3728,27 +3775,25 @@ export default function App() {
                     </Text>
                   </Animated.View>
 
-                  <TouchableOpacity style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
+                  <TouchableOpacity 
+                    onPress={() => setIsRestActionSheetOpen(true)}
+                    style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}
+                  >
                     <EllipsisVertical size={20} color={D.text} />
                   </TouchableOpacity>
                 </View>
 
-                {/* ─── STICKY SEARCH + FILTERS CONTAINER ─── */}
-                {isRestStickyActive && (
-                  <View style={[styles.rdStickyContainer, { top: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 56 : 64, borderBottomColor: D.navBorder }]}>
-                    {renderSearchAndFilters()}
-                  </View>
-                )}
-
                 {/* ─── SCROLLABLE CONTENT ─── */}
                 <Animated.ScrollView
+                  style={{ flex: 1 }}
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingBottom: 120 }}
+                  contentContainerStyle={{ paddingBottom: 120, flexGrow: 1 }}
                   onScroll={Animated.event(
                     [{ nativeEvent: { contentOffset: { y: restScrollY } } }],
-                    { useNativeDriver: false, listener: handleRestScroll }
+                    { useNativeDriver: true }
                   )}
                   scrollEventThrottle={16}
+                  stickyHeaderIndices={[1]}
                 >
                   {/* Restaurant Details Card */}
                   <View style={[styles.rdRestaurantCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
@@ -3820,7 +3865,7 @@ export default function App() {
                       return (
                         <View style={{ marginTop: 12 }}>
                           <View style={{ height: 1, backgroundColor: D.divider, marginBottom: 12 }} />
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} nestedScrollEnabled={true}>
                             {offers.map((off, idx) => (
                               <View
                                 key={`offer-${idx}`}
@@ -3844,10 +3889,7 @@ export default function App() {
                   </View>
 
                   {/* Normal Scroll Flow Search + Filters Section */}
-                  <View
-                    onLayout={(e) => setSearchSectionY(e.nativeEvent.layout.y)}
-                    style={{ opacity: isRestStickyActive ? 0 : 1 }}
-                  >
+                  <View style={{ backgroundColor: D.card }}>
                     {renderSearchAndFilters()}
                   </View>
 
@@ -3956,6 +3998,600 @@ export default function App() {
                 {renderFloatingCartBar(Math.max(12, bottomInset) + 12, true)}
               </View>
             )}
+          </Modal>
+
+          {/* Restaurant Actions Bottom Sheet */}
+          <Modal
+            visible={isRestActionSheetOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsRestActionSheetOpen(false)}
+          >
+            <TouchableOpacity 
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+              activeOpacity={1}
+              onPress={() => setIsRestActionSheetOpen(false)}
+            >
+              <View style={{ backgroundColor: D.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: Math.max(24, bottomInset) }}>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: D.text, marginBottom: 16, textAlign: 'center' }}>
+                  {selectedRestaurant?.name || 'Restaurant Actions'}
+                </Text>
+
+                <TouchableOpacity 
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: D.divider }}
+                  onPress={() => {
+                    setIsRestActionSheetOpen(false);
+                    if (selectedRestaurant) {
+                      toggleFavorite(selectedRestaurant.id);
+                    }
+                  }}
+                >
+                  <Heart 
+                    size={20} 
+                    color={selectedRestaurant && favorites.includes(selectedRestaurant.id) ? '#FF5252' : D.text} 
+                    fill={selectedRestaurant && favorites.includes(selectedRestaurant.id) ? '#FF5252' : 'transparent'} 
+                  />
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: D.text, marginLeft: 12 }}>
+                    {selectedRestaurant && favorites.includes(selectedRestaurant.id) ? 'Remove from Favorites' : 'Add to Favorites'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: D.divider }}
+                  onPress={async () => {
+                    setIsRestActionSheetOpen(false);
+                    if (selectedRestaurant) {
+                      try {
+                        await Share.share({
+                          title: selectedRestaurant.name,
+                          message: `Check out ${selectedRestaurant.name} on QuickBite!\nCuisines: ${selectedRestaurant.cuisines || 'Multi'}\nAddress: ${selectedRestaurant.address || 'Kerala'}\nRating: ${selectedRestaurant.rating || '4.0'} ★`
+                        });
+                      } catch (err) {
+                        console.warn(err);
+                      }
+                    }
+                  }}
+                >
+                  <Share2 size={20} color={D.text} />
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: D.text, marginLeft: 12 }}>
+                    Share Restaurant
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }}
+                  onPress={() => {
+                    setIsRestActionSheetOpen(false);
+                    setTimeout(() => setIsRestDetailsModalOpen(true), 200);
+                  }}
+                >
+                  <Info size={20} color={D.text} />
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: D.text, marginLeft: 12 }}>
+                    Restaurant Details
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={{ marginTop: 12, backgroundColor: D.chipBg, borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}
+                  onPress={() => setIsRestActionSheetOpen(false)}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: '750', color: D.text }}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+
+          {/* Restaurant Details Modal */}
+          <Modal
+            visible={isRestDetailsModalOpen}
+            animationType="slide"
+            statusBarTranslucent
+            onRequestClose={() => setIsRestDetailsModalOpen(false)}
+          >
+            {selectedRestaurant && (() => {
+              const data = detailedRestaurant || selectedRestaurant || {};
+              
+              const resolveImageUrl = (imgStr) => {
+                if (!imgStr) return null;
+                if (imgStr.startsWith('http://') || imgStr.startsWith('https://')) {
+                  if (imgStr.includes('localhost:') || imgStr.includes('127.0.0.1:')) {
+                    return imgStr.replace(/http:\/\/(localhost|127\.0\.0\.1):5000/g, resolvedBackendUrl);
+                  }
+                  return imgStr;
+                }
+                return `${resolvedBackendUrl}/uploads/hotels/${imgStr}`;
+              };
+
+              const resolvedCover = resolveImageUrl(data.image) || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=500';
+              const resolvedLogo = resolveImageUrl(data.logo) || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=100';
+
+              const addressParts = [];
+              if (data.address && data.address.trim()) addressParts.push(data.address.trim());
+              if (data.landmark && data.landmark.trim()) addressParts.push(data.landmark.trim());
+              if (data.city && data.city.trim()) addressParts.push(data.city.trim());
+              if (data.district && data.district.trim()) addressParts.push(data.district.trim());
+              if (data.state && data.state.trim()) addressParts.push(data.state.trim());
+              
+              let fullLocationStr = addressParts.join(', ');
+              if (data.pincode && data.pincode.trim()) {
+                fullLocationStr += ` - ${data.pincode.trim()}`;
+              }
+              if (!fullLocationStr) {
+                fullLocationStr = data.address || 'N/A';
+              }
+
+              let gallery = [];
+              if (data.gallery) {
+                try {
+                  gallery = typeof data.gallery === 'string' ? JSON.parse(data.gallery) : data.gallery;
+                } catch (e) {
+                  console.warn(e);
+                }
+              }
+              const resolvedGallery = (gallery || []).map(img => resolveImageUrl(img)).filter(Boolean);
+
+              const getTodayOpenStatus = () => {
+                if (!data.operatingHours) return true;
+                try {
+                  const parsed = typeof data.operatingHours === 'string' ? JSON.parse(data.operatingHours) : data.operatingHours;
+                  if (!Array.isArray(parsed) || parsed.length === 0) return true;
+                  
+                  const daysList = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                  const todayName = daysList[new Date().getDay()];
+                  
+                  const todaySchedule = parsed.find(d => d.day && d.day.toLowerCase() === todayName.toLowerCase());
+                  if (todaySchedule) {
+                    if (!todaySchedule.isOpen) return false;
+                    
+                    const now = new Date();
+                    const currentMins = now.getHours() * 60 + now.getMinutes();
+                    
+                    const parseTimeToMins = (timeStr) => {
+                      if (!timeStr) return 0;
+                      const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+                      if (!match) return 0;
+                      let hrs = parseInt(match[1], 10);
+                      const mins = parseInt(match[2], 10);
+                      const ampm = match[3];
+                      if (ampm) {
+                        if (ampm.toUpperCase() === 'PM' && hrs < 12) hrs += 12;
+                        if (ampm.toUpperCase() === 'AM' && hrs === 12) hrs = 0;
+                      }
+                      return hrs * 60 + mins;
+                    };
+                    
+                    const openMins = parseTimeToMins(todaySchedule.openTime || todaySchedule.open);
+                    const closeMins = parseTimeToMins(todaySchedule.closeTime || todaySchedule.close);
+                    
+                    if (openMins === 0 && closeMins === 0) return true;
+                    
+                    if (closeMins < openMins) {
+                      return currentMins >= openMins || currentMins <= closeMins;
+                    }
+                    return currentMins >= openMins && currentMins <= closeMins;
+                  }
+                } catch (e) {
+                  console.warn(e);
+                }
+                return true;
+              };
+
+              const isOpenNow = getTodayOpenStatus();
+
+              const handleViewOnMap = () => {
+                const query = encodeURIComponent(`${data.name}, ${fullLocationStr}`);
+                const url = Platform.select({
+                  ios: `maps://?q=${query}`,
+                  android: `geo:0,0?q=${query}`
+                });
+                Linking.openURL(url).catch(() => {
+                  Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+                });
+              };
+
+              return (
+                <View key={data.id} style={{ flex: 1, backgroundColor: D.modalBg }}>
+                  {/* Header */}
+                  <View style={[styles.rdFixedHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder, height: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 56 : 64, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }]}>
+                    <TouchableOpacity onPress={() => setIsRestDetailsModalOpen(false)} style={{ padding: 8 }}>
+                      <ArrowLeft size={22} color={D.text} />
+                    </TouchableOpacity>
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <Text style={[styles.rdHeaderTitleText, { color: D.text, fontSize: 16, fontWeight: '800' }]} numberOfLines={1}>
+                        Restaurant Details
+                      </Text>
+                    </View>
+                    <TouchableOpacity style={{ padding: 8 }}>
+                      <EllipsisVertical size={20} color={D.text} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {loadingDetails && !detailedRestaurant ? (
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: D.modalBg }}>
+                      <ActivityIndicator size="large" color="#FF5252" />
+                      <Text style={{ color: D.textSub, marginTop: 10, fontSize: 13 }}>Fetching restaurant details...</Text>
+                    </View>
+                  ) : (
+                    <ScrollView 
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ padding: 16, paddingBottom: Math.max(32, bottomInset) + 40, flexGrow: 1 }}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {/* Hero Restaurant Card */}
+                      <View style={{ backgroundColor: D.card, borderRadius: 20, borderWidth: 1, borderColor: D.cardBorder, overflow: 'hidden', marginBottom: 20, elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }}>
+                        <ImageBackground 
+                          source={{ uri: resolvedCover }} 
+                          style={{ height: 210, justifyContent: 'flex-end', padding: 16 }}
+                          resizeMode="cover"
+                        >
+                          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' }} />
+                          
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                            <Image 
+                              source={{ uri: resolvedLogo }} 
+                              style={{ width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: '#fff', backgroundColor: D.bg }} 
+                            />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 18, fontWeight: '900', color: '#fff' }}>{data.name}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                                <MapPin size={12} color="#cbd5e1" />
+                                <Text style={{ fontSize: 12, color: '#cbd5e1' }} numberOfLines={1}>
+                                  {data.landmark || data.address || 'Local Address'}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+
+                          <Text style={{ fontSize: 13, color: '#e2e8f0', marginBottom: 12, fontStyle: 'italic', fontWeight: '500' }}>
+                            {`"${data.description || 'Friendly and affordable restaurant'}"`}
+                          </Text>
+
+                          {/* Chips Row */}
+                          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                            <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '750', color: '#fff' }}>Restaurant</Text>
+                            </View>
+                            {data.restaurantType && (
+                              <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+                                <Text style={{ fontSize: 11, fontWeight: '750', color: '#fff' }}>
+                                  {data.restaurantType === 'veg' ? 'Pure Veg' : (data.restaurantType === 'both' ? 'Veg & Non-Veg' : 'Non-Veg')}
+                                </Text>
+                              </View>
+                            )}
+                            <View style={{ backgroundColor: isOpenNow ? '#10B981' : '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <Check size={10} color="#fff" />
+                              <Text style={{ fontSize: 11, fontWeight: '750', color: '#fff' }}>
+                                {isOpenNow ? 'Open Now' : 'Closed'}
+                              </Text>
+                            </View>
+                          </View>
+                        </ImageBackground>
+                      </View>
+
+                      {/* Restaurant Gallery Section */}
+                      {resolvedGallery.length > 0 && (
+                        <View style={{ marginBottom: 20 }}>
+                          <Text style={{ fontSize: 15, fontWeight: '850', color: D.text, marginBottom: 12 }}>Gallery</Text>
+                          <ScrollView 
+                            horizontal 
+                            showsHorizontalScrollIndicator={false} 
+                            contentContainerStyle={{ gap: 10 }}
+                            nestedScrollEnabled={true}
+                          >
+                            {resolvedGallery.slice(0, 3).map((imgUrl, idx) => {
+                              const isLastVisible = idx === 2 && resolvedGallery.length > 3;
+                              const remainingCount = resolvedGallery.length - 3;
+                              return (
+                                <TouchableOpacity 
+                                  key={idx} 
+                                  onPress={() => setViewerImageIndex(idx)}
+                                  style={{ width: 110, height: 140, borderRadius: 16, overflow: 'hidden', backgroundColor: D.bg }}
+                                >
+                                  <Image 
+                                    source={{ uri: imgUrl }} 
+                                    style={{ width: '100%', height: '100%' }} 
+                                    resizeMode="cover"
+                                  />
+                                  {isLastVisible && (
+                                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                                      <Text style={{ color: '#fff', fontSize: 16, fontWeight: '900' }}>{`+${remainingCount}`}</Text>
+                                      <Text style={{ color: '#fff', fontSize: 10, fontWeight: '750', marginTop: 2 }}>View All</Text>
+                                    </View>
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </ScrollView>
+                        </View>
+                      )}
+
+                      {/* Quick Information Cards */}
+                      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}>
+                        <View style={{ flex: 1, backgroundColor: D.card, borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, padding: 12, alignItems: 'center', elevation: 1, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 }}>
+                          <Clock size={18} color="#FF7A00" />
+                          <Text style={{ fontSize: 10, color: D.textSub, marginTop: 4, fontWeight: '600' }}>Preparation</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: D.text, marginTop: 2 }}>{`${data.averagePreparationTime || '30'} mins`}</Text>
+                        </View>
+                        <View style={{ flex: 1, backgroundColor: D.card, borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, padding: 12, alignItems: 'center', elevation: 1, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 }}>
+                          <ShoppingBag size={18} color="#FF7A00" />
+                          <Text style={{ fontSize: 10, color: D.textSub, marginTop: 4, fontWeight: '600' }}>Min Order</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: D.text, marginTop: 2 }}>{`₹${data.minimumOrderAmount || '0'}`}</Text>
+                        </View>
+                        <View style={{ flex: 1, backgroundColor: D.card, borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, padding: 12, alignItems: 'center', elevation: 1, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 }}>
+                          <Truck size={18} color="#FF7A00" />
+                          <Text style={{ fontSize: 10, color: D.textSub, marginTop: 4, fontWeight: '600' }}>Delivery Radius</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: D.text, marginTop: 2 }}>{`${data.deliveryRadiusKm || '10'} km`}</Text>
+                        </View>
+                      </View>
+
+                      {/* Contact & Location Details */}
+                      <View style={{ marginBottom: 20 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '850', color: D.text, marginBottom: 12 }}>Contact & Location</Text>
+                        <View style={{ backgroundColor: D.card, borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, padding: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 }}>
+                          {data.ownerName && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF0E6', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                                <User size={18} color="#FF7A00" />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 11, color: D.textSub, fontWeight: '500' }}>Owner</Text>
+                                <Text style={{ fontSize: 13, fontWeight: '750', color: D.text, marginTop: 2 }}>{data.ownerName}</Text>
+                              </View>
+                            </View>
+                          )}
+
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF0E6', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                              <Phone size={18} color="#FF7A00" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 11, color: D.textSub, fontWeight: '500' }}>Phone</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '750', color: D.text, marginTop: 2 }}>{data.phoneNumber || 'N/A'}</Text>
+                            </View>
+                            {data.phoneNumber && (
+                              <TouchableOpacity 
+                                onPress={() => Linking.openURL(`tel:${data.phoneNumber}`)}
+                                style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#FFE0CC', alignItems: 'center', justifyContent: 'center' }}
+                              >
+                                <Phone size={16} color="#FF7A00" />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF0E6', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                              <Mail size={18} color="#FF7A00" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 11, color: D.textSub, fontWeight: '500' }}>Email</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '750', color: D.text, marginTop: 2 }} numberOfLines={1}>{data.email || 'N/A'}</Text>
+                            </View>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 }}>
+                            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF0E6', alignItems: 'center', justifyContent: 'center', marginRight: 12, marginTop: 2 }}>
+                              <MapPin size={18} color="#FF7A00" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 11, color: D.textSub, fontWeight: '500' }}>Address</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '750', color: D.text, marginTop: 2, lineHeight: 18 }}>{fullLocationStr}</Text>
+                            </View>
+                          </View>
+
+                          <TouchableOpacity 
+                            onPress={handleViewOnMap}
+                            style={{ 
+                              flexDirection: 'row', 
+                              alignItems: 'center', 
+                              justifyContent: 'center', 
+                              borderWidth: 1, 
+                              borderColor: '#FF7A00', 
+                              borderRadius: 12, 
+                              paddingVertical: 12, 
+                              marginTop: 8,
+                              gap: 6
+                            }}
+                          >
+                            <MapPin size={16} color="#FF7A00" />
+                            <Text style={{ fontSize: 13, fontWeight: '750', color: '#FF7A00' }}>View on Map</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      {/* Merchant Information */}
+                      <View style={{ marginBottom: 20 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '850', color: D.text, marginBottom: 12 }}>Merchant Information</Text>
+                        <View style={{ backgroundColor: D.card, borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, padding: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 }}>
+                          <View style={{ marginBottom: 12 }}>
+                            <Text style={{ fontSize: 11, color: D.textSub }}>Legal Name</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '750', color: D.text, marginTop: 2 }}>{data.legalName || data.name}</Text>
+                          </View>
+
+                          <View style={{ height: 1, backgroundColor: D.divider, marginVertical: 10 }} />
+
+                          <View style={{ marginBottom: 12 }}>
+                            <Text style={{ fontSize: 11, color: D.textSub }}>FSSAI License Number</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '750', color: D.text, marginTop: 2 }}>{data.fssaiNumber || 'Applied/Awaiting'}</Text>
+                          </View>
+
+                          <View style={{ height: 1, backgroundColor: D.divider, marginVertical: 10 }} />
+
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 11, color: D.textSub }}>FSSAI Status</Text>
+                            {data.fssaiNumber ? (
+                              <View style={{ backgroundColor: '#E6F7ED', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#10B981' }}>Verified</Text>
+                              </View>
+                            ) : (
+                              <View style={{ backgroundColor: '#FFFBEB', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#F59E0B' }}>Applied/Awaiting</Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Weekly Operating Hours Card */}
+                      {(() => {
+                        let operatingHours = [];
+                        let isJson = false;
+                        
+                        if (data.operatingHours) {
+                          try {
+                            const parsed = JSON.parse(data.operatingHours);
+                            if (Array.isArray(parsed) && parsed.length > 0) {
+                              operatingHours = parsed;
+                              isJson = true;
+                            }
+                          } catch (e) {
+                            // Plain string fallback
+                          }
+                        }
+
+                        // If empty, use default standard hours
+                        if (!data.operatingHours) {
+                          operatingHours = [
+                            { day: 'Monday', isOpen: true, openTime: '09:00 AM', closeTime: '11:00 PM' },
+                            { day: 'Tuesday', isOpen: true, openTime: '09:00 AM', closeTime: '11:00 PM' },
+                            { day: 'Wednesday', isOpen: true, openTime: '09:00 AM', closeTime: '11:00 PM' },
+                            { day: 'Thursday', isOpen: true, openTime: '09:00 AM', closeTime: '11:00 PM' },
+                            { day: 'Friday', isOpen: true, openTime: '09:00 AM', closeTime: '11:00 PM' },
+                            { day: 'Saturday', isOpen: true, openTime: '09:00 AM', closeTime: '11:00 PM' },
+                            { day: 'Sunday', isOpen: true, openTime: '09:00 AM', closeTime: '10:00 PM' },
+                          ];
+                          isJson = true;
+                        }
+
+                        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        const todayName = days[new Date().getDay()];
+
+                        return (
+                          <View style={{ marginBottom: 16 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                              <Text style={{ fontSize: 15, fontWeight: '850', color: D.text }}>Weekly Operating Hours</Text>
+                              {isOpenNow ? (
+                                <View style={{ backgroundColor: '#E6F7ED', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#10B981' }}>Open Now</Text>
+                                </View>
+                              ) : (
+                                <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#EF4444' }}>Closed</Text>
+                                </View>
+                              )}
+                            </View>
+
+                            <View style={{ backgroundColor: D.card, borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, padding: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 }}>
+                              {isJson ? (
+                                operatingHours.map((hour, idx) => {
+                                  const isToday = hour.day.toLowerCase() === todayName.toLowerCase();
+                                  const dayText = isToday ? `${hour.day} (Today)` : hour.day;
+                                  return (
+                                    <View 
+                                      key={idx} 
+                                      style={{ 
+                                        flexDirection: 'row', 
+                                        justifyContent: 'space-between', 
+                                        alignItems: 'center', 
+                                        paddingVertical: isToday ? 8 : 6,
+                                        paddingHorizontal: isToday ? 10 : 0,
+                                        backgroundColor: isToday ? '#FFF0E6' : 'transparent',
+                                        borderRadius: isToday ? 8 : 0,
+                                        marginVertical: 2
+                                      }}
+                                    >
+                                      <Text style={{ fontSize: 13, color: isToday ? '#FF7A00' : D.text, fontWeight: isToday ? '750' : '600' }}>{dayText}</Text>
+                                      <Text style={{ fontSize: 13, color: hour.isOpen ? (isToday ? '#FF7A00' : D.text) : '#EF4444', fontWeight: isToday ? '750' : '700' }}>
+                                        {hour.isOpen ? `${hour.openTime} - ${hour.closeTime}` : 'Closed'}
+                                      </Text>
+                                    </View>
+                                  );
+                                })
+                              ) : (
+                                <Text style={{ fontSize: 13, color: D.text, fontWeight: '600' }}>
+                                  {data.operatingHours}
+                                </Text>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })()}
+                    </ScrollView>
+                  )}
+                </View>
+              );
+            })()}
+          </Modal>
+
+          {/* Full Screen Image Viewer Modal */}
+          <Modal
+            visible={viewerImageIndex !== null}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setViewerImageIndex(null)}
+          >
+            {viewerImageIndex !== null && (() => {
+              const data = detailedRestaurant || selectedRestaurant || {};
+              
+              const resolveImageUrl = (imgStr) => {
+                if (!imgStr) return null;
+                if (imgStr.startsWith('http://') || imgStr.startsWith('https://')) {
+                  if (imgStr.includes('localhost:') || imgStr.includes('127.0.0.1:')) {
+                    return imgStr.replace(/http:\/\/(localhost|127\.0\.0\.1):5000/g, resolvedBackendUrl);
+                  }
+                  return imgStr;
+                }
+                return `${resolvedBackendUrl}/uploads/hotels/${imgStr}`;
+              };
+
+              let gallery = [];
+              if (data.gallery) {
+                try {
+                  gallery = typeof data.gallery === 'string' ? JSON.parse(data.gallery) : data.gallery;
+                } catch (e) {}
+              }
+              const resolvedGallery = (gallery || []).map(img => resolveImageUrl(img)).filter(Boolean);
+
+              return (
+                <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center' }}>
+                  <StatusBar barStyle="light-content" backgroundColor="#000000" />
+                  
+                  {/* Header Row */}
+                  <View style={{ position: 'absolute', top: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 40, left: 0, right: 0, height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, zIndex: 100 }}>
+                    <TouchableOpacity 
+                      onPress={() => setViewerImageIndex(null)}
+                      style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <X size={20} color="#ffffff" />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 16, fontWeight: '750', color: '#ffffff' }}>
+                      {`${viewerImageIndex + 1} / ${resolvedGallery.length}`}
+                    </Text>
+                    <View style={{ width: 36 }} />
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    contentOffset={{ x: viewerImageIndex * Dimensions.get('window').width, y: 0 }}
+                    onMomentumScrollEnd={(e) => {
+                      const idx = Math.round(e.nativeEvent.contentOffset.x / Dimensions.get('window').width);
+                      setViewerImageIndex(idx);
+                    }}
+                    style={{ flex: 1 }}
+                  >
+                    {resolvedGallery.map((imgUrl, idx) => (
+                      <View key={idx} style={{ width: Dimensions.get('window').width, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                        <Image
+                          source={{ uri: imgUrl }}
+                          style={{ width: '100%', height: '80%', resizeMode: 'contain' }}
+                        />
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              );
+            })()}
           </Modal>
 
           {/* FOOD PRODUCT DETAILS MODAL (FEATURE 1: STICKY TOP CART ICON) */}
