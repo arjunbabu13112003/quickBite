@@ -41,6 +41,8 @@ import {
   X,
   ChevronRight,
   Star,
+  AlertTriangle,
+  Store,
   Clock,
   ArrowLeft,
   Phone,
@@ -72,7 +74,8 @@ import {
   Mic,
   EllipsisVertical,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  RefreshCw
 } from 'lucide-react-native';
 
 import {
@@ -429,6 +432,8 @@ export default function App() {
 
   // Fetch backend data and map it into the UI's expected shape
   const fetchBackendData = async () => {
+    setIsSkeletonLoading(true);
+    setDbConnectionError(false);
     try {
       const backendUrl = await getActiveBackend();
       const res = await fetch(`${backendUrl}/hotels`);
@@ -498,11 +503,13 @@ export default function App() {
         }
       }
       
-      if (mappedRestaurants.length > 0) {
-        setRestaurants(mappedRestaurants);
-      }
+      setRestaurants(mappedRestaurants);
+      setDbConnectionError(false);
     } catch (error) {
       console.warn('Error fetching backend data:', error);
+      setDbConnectionError(true);
+    } finally {
+      setIsSkeletonLoading(false);
     }
   };
 
@@ -1067,6 +1074,7 @@ export default function App() {
 
   // Skeleton & Food Loading State
   const [isSkeletonLoading, setIsSkeletonLoading] = useState(false);
+  const [dbConnectionError, setDbConnectionError] = useState(false);
 
   const triggerSkeletonLoading = () => {
     setIsSkeletonLoading(true);
@@ -3229,6 +3237,36 @@ export default function App() {
                       <View style={{ paddingHorizontal: 16 }}>
                         <SkeletonCard darkMode={darkMode} />
                         <SkeletonCard darkMode={darkMode} />
+                      </View>
+                    ) : dbConnectionError ? (
+                      <View style={[styles.errorContainer, { backgroundColor: darkMode ? '#2D1B1B' : '#FEF2F2', borderColor: darkMode ? '#7F1D1D' : '#FCA5A5' }]}>
+                        <AlertTriangle size={24} color="#EF4444" />
+                        <Text style={[styles.errorTitle, { color: darkMode ? '#FCA5A5' : '#991B1B' }]}>Connection Error</Text>
+                        <Text style={[styles.errorText, { color: darkMode ? '#F87171' : '#B91C1C' }]}>
+                          Unable to connect to the backend server. Make sure the NestJS server is running on port 5000 and the port is reversed.
+                        </Text>
+                        <TouchableOpacity
+                          style={[styles.retryBtn, { backgroundColor: '#EF4444' }]}
+                          onPress={fetchBackendData}
+                        >
+                          <RefreshCw size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                          <Text style={styles.retryBtnText}>Retry Connection</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : filteredRestaurants.length === 0 ? (
+                      <View style={styles.emptyStateCenter}>
+                        <Store size={52} color={darkMode ? '#475569' : '#9CA3AF'} />
+                        <Text style={[styles.emptyTitle, { color: D.text }]}>No Restaurants Active</Text>
+                        <Text style={[styles.emptySubtitle, { color: D.textSub }]}>
+                          There are no active restaurants in the database right now. Add a restaurant from the Admin Panel to display it here.
+                        </Text>
+                        <TouchableOpacity
+                          style={[styles.retryBtn, { backgroundColor: darkMode ? '#38BDF8' : '#0284C7' }]}
+                          onPress={fetchBackendData}
+                        >
+                          <RefreshCw size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                          <Text style={styles.retryBtnText}>Refresh</Text>
+                        </TouchableOpacity>
                       </View>
                     ) : (
                       filteredRestaurants.map(restaurant => {
@@ -7188,6 +7226,43 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 6,
     paddingHorizontal: 20
+  },
+  errorContainer: {
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginVertical: 20,
+  },
+  errorTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  errorText: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 24,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.41,
+  },
+  retryBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
   },
   orderCompactRowCard: {
     flexDirection: 'row',
