@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   Pizza,
+  Tag,
 } from 'lucide-react';
 
 const NAVIGATION_ITEMS = [
@@ -20,11 +21,12 @@ const NAVIGATION_ITEMS = [
   { id: 'delivery-partners', name: 'Delivery Partners', icon: Bike, path: '/super-admin/delivery-partners' },
   { id: 'orders', name: 'Orders', icon: ClipboardList, path: '/super-admin/orders' },
   { id: 'payments', name: 'Payments', icon: CreditCard, path: '/super-admin/payments' },
+  { id: 'offers', name: 'Offers', icon: Tag, path: '/super-admin/offers' },
   { id: 'analytics', name: 'Analytics', icon: BarChart3, path: '/super-admin/analytics' },
   { id: 'settings', name: 'Settings', icon: Settings, path: '/super-admin/settings' },
 ];
 
-const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders'];
+const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders', 'offers'];
 
 export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate, onLogout }) {
   const handleItemClick = (e, item) => {

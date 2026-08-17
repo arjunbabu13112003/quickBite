@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "admin-attach",
+      "url": "http://localhost:5173"
+    },
+    {
+      "name": "quickbite-admin",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Projects/quickBite/admin/node_modules/vite/bin/vite.js", "C:/Projects/quickBite/admin"],
+      "port": 5173,
+      "autoPort": true
+    }
+  ]
+}

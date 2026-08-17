@@ -4227,10 +4227,6 @@ export default function App() {
                           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' }} />
                           
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                            <Image 
-                              source={{ uri: resolvedLogo }} 
-                              style={{ width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: '#fff', backgroundColor: D.bg }} 
-                            />
                             <View style={{ flex: 1 }}>
                               <Text style={{ fontSize: 18, fontWeight: '900', color: '#fff' }}>{data.name}</Text>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>

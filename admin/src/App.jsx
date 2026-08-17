@@ -23,6 +23,7 @@ import ManageDeliveryPartner from './pages/super-admin/ManageDeliveryPartner';
 import OrdersList from './pages/super-admin/OrdersList';
 import OrderDetails from './pages/super-admin/OrderDetails';
 import HomeFoodCategoriesList from './pages/super-admin/HomeFoodCategoriesList';
+import { SuperAdminOffersList, SuperAdminCampaignsList, SuperAdminCreateCampaign, SuperAdminChooseOfferType } from './pages/super-admin/OffersManagement';
 
 // Hotel Admin Pages
 import HotelAdminDashboard from './pages/hotel-admin/HotelAdminDashboard';
@@ -214,10 +215,30 @@ export default function App() {
     const isDeliveryPartnersRoute = currentPath === '/super-admin/delivery-partners' || currentPath === '/super-admin/delivery-partners/new' || (currentPath.startsWith('/super-admin/delivery-partners/') && (currentPath.split('/').length === 4 || (currentPath.split('/').length === 5 && (currentPath.split('/')[4] === 'edit' || currentPath.split('/')[4] === 'manage'))));
     const isOrdersRoute = currentPath === '/super-admin/orders' || (currentPath.startsWith('/super-admin/orders/') && currentPath.split('/').length === 4);
     const isFoodCategoriesRoute = currentPath === '/super-admin/food-categories';
+    const isOffersRoute = currentPath === '/super-admin/offers' || currentPath.startsWith('/super-admin/offers');
 
-    const currentTab = isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : 'dashboard'))));
+    const currentTab = isOffersRoute ? 'offers' : (isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : 'dashboard')))));
 
     const renderSuperAdminContent = () => {
+      if (currentPath === '/super-admin/offers') {
+        return <SuperAdminOffersList onNavigate={navigateTo} />;
+      }
+      if (currentPath === '/super-admin/offers/choose') {
+        return <SuperAdminChooseOfferType onNavigate={navigateTo} />;
+      }
+      if (currentPath === '/super-admin/offers/99store') {
+        return <SuperAdminCampaignsList onNavigate={navigateTo} />;
+      }
+      if (currentPath === '/super-admin/offers/99store/new') {
+        return <SuperAdminCreateCampaign onNavigate={navigateTo} />;
+      }
+      if (currentPath.startsWith('/super-admin/offers/99store/') && currentPath.endsWith('/edit')) {
+        const parts = currentPath.split('/');
+        const id = parseInt(parts[4], 10);
+        if (!isNaN(id)) {
+          return <SuperAdminCreateCampaign id={id} onNavigate={navigateTo} />;
+        }
+      }
       if (currentPath === '/super-admin/food-categories') {
         return <HomeFoodCategoriesList onNavigate={navigateTo} />;
       }

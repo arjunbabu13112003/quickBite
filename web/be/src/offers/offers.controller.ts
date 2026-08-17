@@ -25,7 +25,6 @@ import { HotelAdmin } from '../hotel-admins/hotel-admin.entity';
 import { Food } from '../foods/food.entity';
 
 @Controller('offers')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class OffersController {
   constructor(
     private readonly offersService: OffersService,
@@ -46,6 +45,7 @@ export class OffersController {
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Post()
   async create(@Body() createOfferDto: CreateOfferDto, @Request() req) {
     let hotelId: number | null = null;
@@ -58,6 +58,7 @@ export class OffersController {
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('hotel/me')
   async findAll(@Request() req) {
     if (req.user.role === UserRole.SUPER_ADMIN) {
@@ -68,6 +69,7 @@ export class OffersController {
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
     if (req.user.role === UserRole.SUPER_ADMIN) {
@@ -78,6 +80,7 @@ export class OffersController {
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
@@ -94,6 +97,7 @@ export class OffersController {
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
     if (req.user.role === UserRole.SUPER_ADMIN) {
@@ -104,6 +108,7 @@ export class OffersController {
   }
 
   @Roles(UserRole.HOTEL_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Post('hotel/me/:id/duplicate')
   async duplicate(@Param('id', ParseIntPipe) id: number, @Request() req) {
     if (req.user.role === UserRole.SUPER_ADMIN) {
@@ -118,6 +123,7 @@ export class OffersController {
    * Resolves actual category IDs from DB to prevent client-side security manipulation.
    */
   @Roles(UserRole.CUSTOMER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Post('validate')
   async validateOffer(
     @Request() req,
@@ -151,10 +157,132 @@ export class OffersController {
     );
   }
 
-  @Roles(UserRole.CUSTOMER)
   @Get('hotels/:hotelId/public-offers')
   async getOffersForCustomer(@Param('hotelId', ParseIntPipe) hotelId: number) {
     const now = new Date();
     return this.offersService.getOffersForCustomer(hotelId, now);
+  }
+
+  // ─── 99 Store Campaign Endpoints ───
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Get('store99/active-campaign')
+  async getActiveCampaign(@Request() req) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    const campaign = await this.offersService.getActiveCampaign();
+    if (!campaign) return null;
+
+    const isParticipating = await this.offersService.checkHotelParticipating(campaign.id, hotelId);
+    return {
+      ...campaign,
+      isParticipating,
+    };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Post('store99/campaigns/:campaignId/join')
+  async joinCampaign(@Param('campaignId', ParseIntPipe) campaignId: number, @Request() req) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    await this.offersService.joinCampaign(campaignId, hotelId);
+    return { success: true, message: 'Joined campaign successfully' };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Get('store99/campaigns/:campaignId/items')
+  async getCampaignItems(@Param('campaignId', ParseIntPipe) campaignId: number, @Request() req) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    return this.offersService.getCampaignItems(campaignId, hotelId);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Post('store99/campaigns/:campaignId/items')
+  async submitCampaignItems(
+    @Param('campaignId', ParseIntPipe) campaignId: number,
+    @Request() req,
+    @Body() body: { foodIds: number[] },
+  ) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    await this.offersService.submitCampaignItems(campaignId, hotelId, body.foodIds);
+    return { success: true, message: '99 Store items updated successfully' };
+  }
+
+  // ─── Super Admin 99 Store Campaign Endpoints ───
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('store99/campaigns')
+  async getAllCampaigns() {
+    return this.offersService.getAllCampaigns();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('store99/campaigns/:id')
+  async getCampaignById(@Param('id', ParseIntPipe) id: number) {
+    return this.offersService.getCampaignById(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('store99/campaigns')
+  async createCampaign(@Body() body: {
+    name: string;
+    description?: string;
+    bannerUrl?: string;
+    price: number;
+    startAt: string;
+    endAt: string;
+    hotelIds: number[];
+    foodIds: number[];
+    isActive: boolean;
+  }) {
+    return this.offersService.createCampaign({
+      ...body,
+      startAt: new Date(body.startAt),
+      endAt: new Date(body.endAt),
+    });
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @Patch('store99/campaigns/:id')
+  async updateCampaign(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: {
+      name?: string;
+      description?: string;
+      bannerUrl?: string;
+      price?: number;
+      startAt?: string;
+      endAt?: string;
+      hotelIds?: number[];
+      foodIds?: number[];
+      isActive?: boolean;
+    },
+  ) {
+    return this.offersService.updateCampaign(id, {
+      ...body,
+      startAt: body.startAt ? new Date(body.startAt) : undefined,
+      endAt: body.endAt ? new Date(body.endAt) : undefined,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @Delete('store99/campaigns/:id')
+  async deleteCampaign(@Param('id', ParseIntPipe) id: number) {
+    await this.offersService.deleteCampaign(id);
+    return { success: true, message: 'Campaign deleted successfully' };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('store99/campaigns/:id/toggle-active')
+  async toggleCampaignActive(@Param('id', ParseIntPipe) id: number) {
+    return this.offersService.toggleCampaignActive(id);
   }
 }

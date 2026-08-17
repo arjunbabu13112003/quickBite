@@ -2308,6 +2308,16 @@ function SettingsPage({ currentUser, hotel }) {
 // ─── Offers Management Page ───────────────────────────────────────────────────
 function OffersManagementPage({ hotel }) {
   const [offers, setOffers] = useState([]);
+  const [subTab, setSubTab] = useState('my-offers');
+  const [activeCampaign, setActiveCampaign] = useState(null);
+  const [loadingCampaign, setLoadingCampaign] = useState(false);
+  const [participatingItems, setParticipatingItems] = useState([]);
+  const [selectedCampaignFoodIds, setSelectedCampaignFoodIds] = useState([]);
+  const [campaignSubmitting, setCampaignSubmitting] = useState(false);
+  const [campaignMessage, setCampaignMessage] = useState('');
+  const [campaignSearch, setCampaignSearch] = useState('');
+  const [campaignCategoryFilter, setCampaignCategoryFilter] = useState('all');
+  const [campaignAvailabilityFilter, setCampaignAvailabilityFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
   const [foods, setFoods] = useState([]);
@@ -2366,6 +2376,72 @@ function OffersManagementPage({ hotel }) {
       console.error('Failed to fetch categories/foods', err);
     }
   }, [hotel.id]);
+
+  const fetchCampaignData = useCallback(async () => {
+    setLoadingCampaign(true);
+    try {
+      const camp = await api.getActive99Campaign();
+      setActiveCampaign(camp);
+      if (camp) {
+        const items = await api.get99CampaignItems(camp.id);
+        setParticipatingItems(items || []);
+        setSelectedCampaignFoodIds((items || []).map(item => item.foodId));
+      }
+    } catch (err) {
+      console.error('Failed to fetch active 99 store campaign data', err);
+    } finally {
+      setLoadingCampaign(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (subTab === '99-store') {
+      fetchCampaignData();
+    }
+  }, [subTab, fetchCampaignData]);
+
+  const handleJoinCampaign = async () => {
+    if (!activeCampaign) return;
+    setCampaignSubmitting(true);
+    try {
+      await api.join99Campaign(activeCampaign.id);
+      await fetchCampaignData();
+    } catch (err) {
+      console.error('Failed to join campaign', err);
+    } finally {
+      setCampaignSubmitting(false);
+    }
+  };
+
+  const handleSaveCampaignItems = async () => {
+    if (!activeCampaign) return;
+    setCampaignSubmitting(true);
+    setCampaignMessage('');
+    try {
+      await api.submit99CampaignItems(activeCampaign.id, selectedCampaignFoodIds);
+      setCampaignMessage(`${activeCampaign.name} items updated successfully`);
+      await fetchCampaignData();
+    } catch (err) {
+      console.error('Failed to submit campaign items', err);
+      setCampaignMessage(`Failed to update ${activeCampaign.name} items`);
+    } finally {
+      setCampaignSubmitting(false);
+    }
+  };
+
+  const handleToggleFood = (foodId) => {
+    setSelectedCampaignFoodIds(prev => {
+      if (prev.includes(foodId)) {
+        return prev.filter(id => id !== foodId);
+      } else {
+        return [...prev, foodId];
+      }
+    });
+  };
+
+  const handleRemoveFood = (foodId) => {
+    setSelectedCampaignFoodIds(prev => prev.filter(id => id !== foodId));
+  };
 
   useEffect(() => {
     fetchOffers();
@@ -2585,10 +2661,51 @@ function OffersManagementPage({ hotel }) {
             <strong style={{ color: 'var(--primary)' }}>{hotel.name}</strong> &bull; Manage your active campaigns and discounts.
           </p>
         </div>
-        <button onClick={openDrawerForCreate} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem', fontWeight: '800' }}>
-          <Plus size={18} /> Create Offer
+        {subTab === 'my-offers' && (
+          <button onClick={openDrawerForCreate} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem', fontWeight: '800' }}>
+            <Plus size={18} /> Create Offer
+          </button>
+        )}
+      </div>
+
+      {/* Sub-tabs Selection Row */}
+      <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.5rem' }}>
+        <button
+          onClick={() => setSubTab('my-offers')}
+          style={{
+            border: 'none',
+            background: 'none',
+            borderBottom: subTab === 'my-offers' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
+            color: subTab === 'my-offers' ? 'var(--primary)' : 'var(--text-muted)',
+            fontWeight: '800',
+            padding: '0.6rem 0.5rem',
+            cursor: 'pointer',
+            fontSize: '0.95rem',
+            transition: 'all var(--transition-fast)'
+          }}
+        >
+          My Offers
+        </button>
+        <button
+          onClick={() => setSubTab('99-store')}
+          style={{
+            border: 'none',
+            background: 'none',
+            borderBottom: subTab === '99-store' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
+            color: subTab === '99-store' ? 'var(--primary)' : 'var(--text-muted)',
+            fontWeight: '800',
+            padding: '0.6rem 0.5rem',
+            cursor: 'pointer',
+            fontSize: '0.95rem',
+            transition: 'all var(--transition-fast)'
+          }}
+        >
+          {activeCampaign ? activeCampaign.name : '99 Store'}
         </button>
       </div>
+
+      {subTab === 'my-offers' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
 
       {/* METRICS CARDS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem' }}>
@@ -3226,6 +3343,309 @@ function OffersManagementPage({ hotel }) {
             </form>
           </div>
         </>
+      )}
+        </div>
+      )}
+
+      {subTab === '99-store' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          <div>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '0.2rem' }}>{activeCampaign ? activeCampaign.name : 'Fixed Price Campaign'}</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Participate in platform-wide fixed selling price campaigns</p>
+          </div>
+
+          {loadingCampaign ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
+              <div className="spinner" style={{ border: '3px solid var(--border-color)', borderTop: '3px solid var(--primary)', borderRadius: '50%', width: '30px', height: '30px', animation: 'spin 1s linear infinite' }} />
+            </div>
+          ) : !activeCampaign ? (
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '4rem 2rem', textAlign: 'center', boxShadow: 'var(--shadow-sm)' }}>
+              <div style={{ display: 'inline-flex', width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(249,115,22,0.08)', color: 'var(--primary)', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem' }}>
+                <Tag size={28} />
+              </div>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '0.5rem' }}>No active campaigns</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '400px', margin: '0 auto' }}>
+                New platform campaigns will appear here when available.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Active Campaign Card */}
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
+                {activeCampaign.bannerUrl && (
+                  <div style={{ height: '180px', width: '100%', overflow: 'hidden' }}>
+                    <img src={activeCampaign.bannerUrl} alt="Campaign Banner" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                )}
+                <div style={{ padding: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem' }}>
+                  <div style={{ flex: 1, minWidth: '250px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
+                      <h3 style={{ fontSize: '1.3rem', fontWeight: '900', color: 'var(--text-main)' }}>{activeCampaign.name}</h3>
+                      <span style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontSize: '0.72rem', fontWeight: '800' }}>Active</span>
+                    </div>
+                    <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>{activeCampaign.description}</p>
+                    
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem 2rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      <div>
+                        <strong>Price setup:</strong> <span style={{ color: 'var(--primary)', fontWeight: '800', fontSize: '0.9rem' }}>₹{parseFloat(activeCampaign.price).toFixed(0)}</span>
+                      </div>
+                      <div>
+                        <strong>Start Date:</strong> {new Date(activeCampaign.startAt).toLocaleDateString()}
+                      </div>
+                      <div>
+                        <strong>End Date:</strong> {new Date(activeCampaign.endAt).toLocaleDateString()}
+                      </div>
+                      <div style={{ color: 'var(--accent-amber)', fontWeight: '750' }}>
+                        {(() => {
+                          const diff = new Date(activeCampaign.endAt) - new Date();
+                          if (diff <= 0) return 'Ended';
+                          const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+                          const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+                          return days > 0 ? `${days}d ${hours}h remaining` : `${hours}h remaining`;
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    {activeCampaign.isParticipating ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', padding: '0.6rem 1.2rem', borderRadius: 'var(--radius-md)', fontWeight: '800', fontSize: '0.88rem' }}>
+                        <Check size={16} /> Participating
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleJoinCampaign}
+                        disabled={campaignSubmitting}
+                        className="btn-primary"
+                        style={{ padding: '0.65rem 1.5rem', fontWeight: '800' }}
+                      >
+                        {campaignSubmitting ? 'Joining...' : 'Join Campaign'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Item Selection UI */}
+              {activeCampaign.isParticipating && (
+                <>
+                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '1rem' }}>Select Items for {activeCampaign ? activeCampaign.name : 'Campaign'}</h3>
+
+                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: '200px', position: 'relative' }}>
+                        <input
+                          type="text"
+                          placeholder="Search food items..."
+                          value={campaignSearch}
+                          onChange={e => setCampaignSearch(e.target.value)}
+                          className="premium-form-control"
+                          style={{ width: '100%', paddingLeft: '2.2rem' }}
+                        />
+                        <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '0.8rem', top: '50%', transform: 'translateY(-50%)' }} />
+                      </div>
+                      
+                      <select
+                        value={campaignCategoryFilter}
+                        onChange={e => setCampaignCategoryFilter(e.target.value)}
+                        className="premium-form-control"
+                        style={{ minWidth: '150px' }}
+                      >
+                        <option value="all">All Categories</option>
+                        {categories.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={campaignAvailabilityFilter}
+                        onChange={e => setCampaignAvailabilityFilter(e.target.value)}
+                        className="premium-form-control"
+                        style={{ minWidth: '150px' }}
+                      >
+                        <option value="all">All Availability</option>
+                        <option value="available">Available</option>
+                        <option value="unavailable">Unavailable</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '400px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                      {foods
+                        .filter(food => {
+                          const matchesSearch = food.name.toLowerCase().includes(campaignSearch.toLowerCase());
+                          const matchesCat = campaignCategoryFilter === 'all' || Number(food.categoryId) === Number(campaignCategoryFilter);
+                          const matchesAvail = campaignAvailabilityFilter === 'all' || 
+                            (campaignAvailabilityFilter === 'available' && food.isAvailable && food.isActive) ||
+                            (campaignAvailabilityFilter === 'unavailable' && !(food.isAvailable && food.isActive));
+                          return matchesSearch && matchesCat && matchesAvail;
+                        })
+                        .map(item => {
+                          const campaignPrice = activeCampaign ? Number(activeCampaign.price) : 99;
+                          const isEligiblePrice = Number(item.price) > campaignPrice;
+                          const isEligible = isAvailable && isEligiblePrice;
+                          
+                          let ineligibleReason = '';
+                          if (!isAvailable) ineligibleReason = 'Unavailable';
+                          else if (!isEligiblePrice) ineligibleReason = `Price <= ₹${campaignPrice}`;
+
+                          const isChecked = selectedCampaignFoodIds.includes(item.id);
+
+                          return (
+                            <div
+                              key={item.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                padding: '0.75rem 1rem',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: 'var(--radius-md)',
+                                background: isChecked ? 'rgba(255,85,32,0.02)' : 'transparent',
+                                opacity: isEligible ? 1 : 0.6
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={!isEligible}
+                                onChange={() => handleToggleFood(item.id)}
+                                style={{ width: '18px', height: '18px', cursor: isEligible ? 'pointer' : 'not-allowed', accentColor: 'var(--primary)' }}
+                              />
+
+                              {item.image && (
+                                <img src={item.image} alt={item.name} style={{ width: '48px', height: '48px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
+                              )}
+
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <strong style={{ color: 'var(--text-main)', fontSize: '0.9rem' }}>{item.name}</strong>
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', background: 'var(--bg-subtle)', padding: '0.1rem 0.35rem', borderRadius: '2px' }}>
+                                    {categories.find(c => c.id === item.categoryId)?.name || 'Food'}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Original Price: <span style={{ textDecoration: 'line-through' }}>₹{item.price}</span> &bull; Campaign Price: <strong style={{ color: 'var(--primary)' }}>₹{campaignPrice}</strong>
+                                </div>
+                              </div>
+
+                              <div>
+                                {isEligible ? (
+                                  <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: '800' }}>Eligible</span>
+                                ) : (
+                                  <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: '800', background: 'rgba(239,68,68,0.08)', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)' }}>
+                                    {ineligibleReason}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {/* My Selected Items */}
+                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '1rem' }}>My Selected Items</h3>
+
+                    {selectedCampaignFoodIds.length === 0 ? (
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No items selected yet. Choose items above to participate.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {foods
+                          .filter(f => selectedCampaignFoodIds.includes(f.id))
+                          .map(item => {
+                            const isAvailable = item.isAvailable && item.isActive;
+                            const backendItem = participatingItems.find(p => p.foodId === item.id);
+                            const status = backendItem ? backendItem.status : 'Active';
+
+                            return (
+                              <div
+                                key={item.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '1rem',
+                                  padding: '0.75rem 1rem',
+                                  border: '1px solid var(--border-color)',
+                                  borderRadius: 'var(--radius-md)'
+                                }}
+                              >
+                                {item.image && (
+                                  <img src={item.image} alt={item.name} style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
+                                )}
+
+                                <div style={{ flex: 1 }}>
+                                  <strong style={{ color: 'var(--text-main)', fontSize: '0.85rem' }}>{item.name}</strong>
+                                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                                    Original Price: ₹{item.price} &bull; Campaign Price: <strong style={{ color: 'var(--primary)' }}>₹{activeCampaign ? parseFloat(activeCampaign.price).toFixed(0) : '99'}</strong>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                                  <span style={{ fontSize: '0.75rem', color: isAvailable ? '#10b981' : '#ef4444', fontWeight: '750' }}>
+                                    {isAvailable ? 'Available' : 'Unavailable'}
+                                  </span>
+
+                                  <span style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: '800',
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: 'var(--radius-sm)',
+                                    color: status.toLowerCase() === 'approved' || status.toLowerCase() === 'active' ? '#10b981' : (status.toLowerCase() === 'pending' ? '#f59e0b' : '#ef4444'),
+                                    background: status.toLowerCase() === 'approved' || status.toLowerCase() === 'active' ? 'rgba(16,185,129,0.08)' : (status.toLowerCase() === 'pending' ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)'),
+                                    textTransform: 'capitalize'
+                                  }}>
+                                    {status}
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveFood(item.id)}
+                                    style={{ background: 'none', border: 'none', color: 'var(--text-danger)', cursor: 'pointer', padding: '4px' }}
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Submission Row */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-start' }}>
+                    {campaignMessage && (
+                      <div style={{
+                        padding: '0.75rem 1.25rem',
+                        borderRadius: 'var(--radius-md)',
+                        background: campaignMessage.includes('successfully') ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+                        color: campaignMessage.includes('successfully') ? '#10b981' : '#ef4444',
+                        border: '1px solid',
+                        borderColor: campaignMessage.includes('successfully') ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
+                        fontSize: '0.85rem',
+                        fontWeight: '700'
+                      }}>
+                        {campaignMessage}
+                      </div>
+                    )}
+                    
+                    <button
+                      type="button"
+                      onClick={handleSaveCampaignItems}
+                      disabled={campaignSubmitting}
+                      className="btn-primary"
+                      style={{ padding: '0.75rem 2rem', fontWeight: '800', fontSize: '0.95rem' }}
+                    >
+                      {campaignSubmitting ? 'Saving Items...' : `Submit Items for ${activeCampaign ? activeCampaign.name : 'Campaign'}`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   );

@@ -695,4 +695,97 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  getActive99Campaign: async () => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/active-campaign`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  join99Campaign: async (campaignId) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${campaignId}/join`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  get99CampaignItems: async (campaignId) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${campaignId}/items`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  submit99CampaignItems: async (campaignId, foodIds) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${campaignId}/items`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ foodIds }),
+    });
+    return handleResponse(res);
+  },
+
+  getAll99Campaigns: async () => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  get99CampaignDetails: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${id}`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  create99Campaign: async (data) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  update99Campaign: async (id, data) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${id}`, {
+      method: 'PATCH',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  delete99Campaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${id}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  toggle99CampaignActive: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${id}/toggle-active`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getSuperAdminHotels: async () => {
+    const res = await fetch(`${API_BASE_URL}/hotels`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getSuperAdminFoods: async (hotelId) => {
+    const res = await fetch(`${API_BASE_URL}/hotels/${hotelId}/foods`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
 };

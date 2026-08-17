@@ -4,11 +4,14 @@ import {
   ConflictException,
   BadRequestException,
   ForbiddenException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Offer } from './offer.entity';
 import { OfferRedemption } from './offer-redemption.entity';
+import { Store99Campaign } from './store99-campaign.entity';
+import { Store99Item } from './store99-item.entity';
 import { Category } from '../categories/category.entity';
 import { Food } from '../foods/food.entity';
 import { Hotel } from '../hotels/hotel.entity';
@@ -17,7 +20,7 @@ import { UpdateOfferDto } from './dto/update-offer.dto';
 import { Order } from '../orders/order.entity';
 
 @Injectable()
-export class OffersService {
+export class OffersService implements OnModuleInit {
   constructor(
     @InjectRepository(Offer)
     private readonly offerRepository: Repository<Offer>,
@@ -29,8 +32,33 @@ export class OffersService {
     private readonly foodRepository: Repository<Food>,
     @InjectRepository(Hotel)
     private readonly hotelRepository: Repository<Hotel>,
+    @InjectRepository(Store99Campaign)
+    private readonly campaignRepository: Repository<Store99Campaign>,
+    @InjectRepository(Store99Item)
+    private readonly campaignItemRepository: Repository<Store99Item>,
     private readonly dataSource: DataSource,
   ) {}
+
+  async onModuleInit() {
+    try {
+      const count = await this.campaignRepository.count();
+      if (count === 0) {
+        console.log('Seeding default active ₹99 Store Campaign...');
+        const campaign = this.campaignRepository.create({
+          name: 'Monsoon ₹99 Mega Deal',
+          description: 'Enjoy delicious food items from top restaurants at just ₹99!',
+          bannerUrl: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80',
+          price: 99.00,
+          startAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // Started yesterday
+          endAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // Ends in 14 days
+          isActive: true
+        });
+        await this.campaignRepository.save(campaign);
+      }
+    } catch (e) {
+      console.error('Error auto-seeding ₹99 campaign:', e);
+    }
+  }
 
   async createOffer(hotelId: number | null, dto: CreateOfferDto): Promise<Offer> {
     // 1. Verify hotel exists
@@ -346,5 +374,243 @@ export class OffersService {
       .andWhere('offer.endAt >= :now', { now })
       .orderBy('offer.createdAt', 'DESC')
       .getMany();
+  }
+
+  // ─── 99 Store Campaign Service Methods ───
+
+  async getActiveCampaign(): Promise<Store99Campaign | null> {
+    const now = new Date();
+    return await this.campaignRepository.createQueryBuilder('campaign')
+      .where('campaign.isActive = true')
+      .andWhere('campaign.endAt >= :now', { now })
+      .orderBy('campaign.startAt', 'ASC')
+      .getOne();
+  }
+
+  async checkHotelParticipating(campaignId: number, hotelId: number): Promise<boolean> {
+    const count = await this.campaignItemRepository.count({
+      where: { campaignId, hotelId }
+    });
+    return count > 0;
+  }
+
+  async joinCampaign(campaignId: number, hotelId: number): Promise<void> {
+    const campaign = await this.campaignRepository.findOne({ where: { id: campaignId } });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign with ID ${campaignId} not found`);
+    }
+
+    const existing = await this.campaignItemRepository.findOne({
+      where: { campaignId, hotelId }
+    });
+
+    if (!existing) {
+      const item = this.campaignItemRepository.create({
+        campaignId,
+        hotelId,
+        foodId: -1,
+        status: 'approved'
+      });
+      await this.campaignItemRepository.save(item);
+    }
+  }
+
+  async getCampaignItems(campaignId: number, hotelId: number): Promise<Store99Item[]> {
+    const items = await this.campaignItemRepository.find({
+      where: { campaignId, hotelId }
+    });
+    return items.filter(item => item.foodId !== -1);
+  }
+
+  async submitCampaignItems(campaignId: number, hotelId: number, foodIds: number[]): Promise<void> {
+    const campaign = await this.campaignRepository.findOne({ where: { id: campaignId } });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign with ID ${campaignId} not found`);
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.delete(Store99Item, { campaignId, hotelId });
+
+      if (foodIds.length === 0) {
+        const item = manager.create(Store99Item, {
+          campaignId,
+          hotelId,
+          foodId: -1,
+          status: 'approved'
+        });
+        await manager.save(Store99Item, item);
+      } else {
+        for (const foodId of foodIds) {
+          const item = manager.create(Store99Item, {
+            campaignId,
+            hotelId,
+            foodId,
+            status: 'approved'
+          });
+          await manager.save(Store99Item, item);
+        }
+      }
+    });
+  }
+
+  // ─── Super Admin Campaign Management Methods ───
+
+  async getAllCampaigns(): Promise<any[]> {
+    const campaigns = await this.campaignRepository.find({
+      order: { createdAt: 'DESC' }
+    });
+
+    const result = [];
+    for (const campaign of campaigns) {
+      const items = await this.campaignItemRepository.find({
+        where: { campaignId: campaign.id }
+      });
+      const hotelIds = [...new Set(items.map(item => item.hotelId))];
+      const foodIds = items.filter(item => item.foodId !== -1).map(item => item.foodId);
+
+      result.push({
+        ...campaign,
+        hotelCount: hotelIds.length,
+        foodCount: foodIds.length
+      });
+    }
+    return result;
+  }
+
+  async getCampaignById(id: number): Promise<any> {
+    const campaign = await this.campaignRepository.findOne({ where: { id } });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign with ID ${id} not found`);
+    }
+
+    const items = await this.campaignItemRepository.find({
+      where: { campaignId: id }
+    });
+
+    const hotelIds = [...new Set(items.map(item => item.hotelId))];
+    const foodIds = items.filter(item => item.foodId !== -1).map(item => item.foodId);
+
+    return {
+      ...campaign,
+      hotelIds,
+      foodIds
+    };
+  }
+
+  async createCampaign(dto: {
+    name: string;
+    description?: string;
+    bannerUrl?: string;
+    price: number;
+    startAt: Date;
+    endAt: Date;
+    hotelIds: number[];
+    foodIds: number[];
+    isActive: boolean;
+  }): Promise<Store99Campaign> {
+    const campaign = this.campaignRepository.create({
+      name: dto.name,
+      description: dto.description,
+      bannerUrl: dto.bannerUrl,
+      price: dto.price || 99.00,
+      startAt: new Date(dto.startAt),
+      endAt: new Date(dto.endAt),
+      isActive: dto.isActive !== undefined ? dto.isActive : true
+    });
+
+    const saved = await this.campaignRepository.save(campaign);
+    await this.saveCampaignMappings(saved.id, dto.hotelIds, dto.foodIds);
+    return saved;
+  }
+
+  async updateCampaign(id: number, dto: {
+    name?: string;
+    description?: string;
+    bannerUrl?: string;
+    price?: number;
+    startAt?: Date;
+    endAt?: Date;
+    hotelIds?: number[];
+    foodIds?: number[];
+    isActive?: boolean;
+  }): Promise<Store99Campaign> {
+    const campaign = await this.campaignRepository.findOne({ where: { id } });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign with ID ${id} not found`);
+    }
+
+    if (dto.name !== undefined) campaign.name = dto.name;
+    if (dto.description !== undefined) campaign.description = dto.description;
+    if (dto.bannerUrl !== undefined) campaign.bannerUrl = dto.bannerUrl;
+    if (dto.price !== undefined) campaign.price = dto.price;
+    if (dto.startAt !== undefined) campaign.startAt = new Date(dto.startAt);
+    if (dto.endAt !== undefined) campaign.endAt = new Date(dto.endAt);
+    if (dto.isActive !== undefined) campaign.isActive = dto.isActive;
+
+    const saved = await this.campaignRepository.save(campaign);
+
+    if (dto.hotelIds !== undefined || dto.foodIds !== undefined) {
+      const items = await this.campaignItemRepository.find({ where: { campaignId: id } });
+      const currentHotelIds = dto.hotelIds !== undefined ? dto.hotelIds : [...new Set(items.map(item => item.hotelId))];
+      const currentFoodIds = dto.foodIds !== undefined ? dto.foodIds : items.filter(item => item.foodId !== -1).map(item => item.foodId);
+
+      await this.saveCampaignMappings(id, currentHotelIds, currentFoodIds);
+    }
+
+    return saved;
+  }
+
+  async deleteCampaign(id: number): Promise<void> {
+    const campaign = await this.campaignRepository.findOne({ where: { id } });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign with ID ${id} not found`);
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.delete(Store99Item, { campaignId: id });
+      await manager.delete(Store99Campaign, { id });
+    });
+  }
+
+  async toggleCampaignActive(id: number): Promise<Store99Campaign> {
+    const campaign = await this.campaignRepository.findOne({ where: { id } });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign with ID ${id} not found`);
+    }
+
+    campaign.isActive = !campaign.isActive;
+    return await this.campaignRepository.save(campaign);
+  }
+
+  private async saveCampaignMappings(campaignId: number, hotelIds: number[], foodIds: number[]) {
+    await this.dataSource.transaction(async (manager) => {
+      await manager.delete(Store99Item, { campaignId });
+
+      for (const hotelId of hotelIds) {
+        const hotelFoods = await manager.find(Food, { where: { hotelId } });
+        const hotelFoodIds = hotelFoods.map(f => f.id);
+        const selectedFoodsForHotel = foodIds.filter(fid => hotelFoodIds.includes(fid));
+
+        if (selectedFoodsForHotel.length === 0) {
+          const item = manager.create(Store99Item, {
+            campaignId,
+            hotelId,
+            foodId: -1,
+            status: 'approved'
+          });
+          await manager.save(Store99Item, item);
+        } else {
+          for (const foodId of selectedFoodsForHotel) {
+            const item = manager.create(Store99Item, {
+              campaignId,
+              hotelId,
+              foodId,
+              status: 'approved'
+            });
+            await manager.save(Store99Item, item);
+          }
+        }
+      }
+    });
   }
 }
