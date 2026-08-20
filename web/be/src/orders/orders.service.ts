@@ -41,44 +41,47 @@ export class OrdersService {
     private readonly offersService: OffersService,
   ) {}
 
-  private async calculateEffectiveFoodPrice(food: Food, now = new Date()): Promise<number> {
-    let dynamicOfferPrice = food.offerPrice ? Number(food.offerPrice) : null;
-    const activeCampaignItems = await this.dataSource.query(`
-      SELECT item."foodId", camp.id as "campaignId", camp.name, camp.price, camp."offerType",
-             camp."flatDiscountAmount", camp."percentageDiscount", camp."maxDiscount"
-      FROM store_99_items item
-      JOIN store_99_campaigns camp ON item."campaignId" = camp.id
-      JOIN hotel_campaign_participations part ON part."campaignId" = camp.id AND part."hotelId" = item."hotelId"
-      WHERE item."foodId" = $1
-        AND item."hotelId" = $2
-        AND camp."isActive" = true
-        AND camp."startAt" <= $3
-        AND camp."endAt" >= $4
-        AND part.status = 'participating'
-    `, [food.id, food.hotelId, now, now]);
+  private async calculateEffectiveFoodPrice(food: Food, selectedCampaignId?: number, now = new Date()): Promise<number> {
+    let dynamicOfferPrice = null;
+    if (selectedCampaignId) {
+      const activeCampaignItems = await this.dataSource.query(`
+        SELECT item."foodId", camp.id as "campaignId", camp.name, camp.price, camp."offerType",
+               camp."flatDiscountAmount", camp."percentageDiscount", camp."maxDiscount"
+        FROM store_99_items item
+        JOIN store_99_campaigns camp ON item."campaignId" = camp.id
+        JOIN hotel_campaign_participations part ON part."campaignId" = camp.id AND part."hotelId" = item."hotelId"
+        WHERE item."foodId" = $1
+          AND item."hotelId" = $2
+          AND camp.id = $3
+          AND camp."isActive" = true
+          AND camp."startAt" <= $4
+          AND camp."endAt" >= $5
+          AND part.status = 'participating'
+      `, [food.id, food.hotelId, selectedCampaignId, now, now]);
 
-    if (activeCampaignItems && activeCampaignItems.length > 0) {
-      let bestPrice = Number(food.price);
-      activeCampaignItems.forEach((c: any) => {
-        const orig = Number(food.price) || 0;
-        const type = c.offerType || 'FIXED_PRICE';
-        let discountPrice = orig;
-        if (type === 'FIXED_PRICE') {
-          discountPrice = Number(c.price) || 0;
-        } else if (type === 'FLAT_DISCOUNT') {
-          discountPrice = Math.max(0, orig - (Number(c.flatDiscountAmount) || 0));
-        } else if (type === 'PERCENTAGE_DISCOUNT') {
-          let disc = orig * (Number(c.percentageDiscount) || 0) / 100;
-          if (c.maxDiscount) {
-            disc = Math.min(disc, Number(c.maxDiscount));
+      if (activeCampaignItems && activeCampaignItems.length > 0) {
+        let bestPrice = Number(food.price);
+        activeCampaignItems.forEach((c: any) => {
+          const orig = Number(food.price) || 0;
+          const type = c.offerType || 'FIXED_PRICE';
+          let discountPrice = orig;
+          if (type === 'FIXED_PRICE') {
+            discountPrice = Number(c.price) || 0;
+          } else if (type === 'FLAT_DISCOUNT') {
+            discountPrice = Math.max(0, orig - (Number(c.flatDiscountAmount) || 0));
+          } else if (type === 'PERCENTAGE_DISCOUNT') {
+            let disc = orig * (Number(c.percentageDiscount) || 0) / 100;
+            if (c.maxDiscount) {
+              disc = Math.min(disc, Number(c.maxDiscount));
+            }
+            discountPrice = Math.max(0, orig - disc);
           }
-          discountPrice = Math.max(0, orig - disc);
-        }
-        if (discountPrice < bestPrice) {
-          bestPrice = discountPrice;
-        }
-      });
-      dynamicOfferPrice = bestPrice;
+          if (discountPrice < bestPrice) {
+            bestPrice = discountPrice;
+          }
+        });
+        dynamicOfferPrice = bestPrice;
+      }
     }
 
     const hotelOffer = await resolveHotelOfferForFood(this.dataSource, food, now);
@@ -216,7 +219,7 @@ export class OrdersService {
       }
 
       // Price calculation
-      const unitPrice = await this.calculateEffectiveFoodPrice(food);
+      const unitPrice = await this.calculateEffectiveFoodPrice(food, dto.campaignId);
       let customizationPrice = 0;
       const customizationsSnapshots = [];
 
@@ -339,21 +342,35 @@ export class OrdersService {
         throw new BadRequestException('❌ Restaurant is not participating in this campaign.');
       }
 
+      console.log(`[DEBUG] Campaign ID: ${campaign.id}`);
+      console.log(`[DEBUG] Campaign offerType: ${campaign.offerType}`);
+      console.log(`[DEBUG] Campaign minimumOrder: ${campaign.minimumOrder}`);
+      console.log(`[DEBUG] Order food IDs: ${orderItemsData.map(i => i.foodId).join(', ')}`);
+      console.log(`[DEBUG] Quantities: ${orderItemsData.map(i => `${i.foodId}: x${i.quantity}`).join(', ')}`);
+      console.log(`[DEBUG] Calculated backend subtotal: ${subtotal}`);
+
       if (campaign.offerType === 'FREE_DELIVERY') {
         const minOrder = Number(campaign.minimumOrder) || 0;
-        if (subtotal < minOrder) {
-          throw new BadRequestException(`❌ Minimum order of ₹${minOrder} is required for Campaign Free Delivery.`);
-        }
-        if (orderItemsData.length > 0) {
+        let isEligible = subtotal >= minOrder;
+        if (isEligible && orderItemsData.length > 0) {
           const eligibleItemsCount = await this.dataSource.query(`
             SELECT COUNT(id) as count FROM store_99_items 
             WHERE "campaignId" = $1 AND "hotelId" = $2 AND "foodId" IN (${orderItemsData.map(i => i.foodId).join(', ')})
           `, [campaign.id, hotel.id]);
           if (!eligibleItemsCount || Number(eligibleItemsCount[0].count) !== orderItemsData.length) {
-            throw new BadRequestException('❌ All items in the cart must belong to the active Free Delivery campaign.');
+            isEligible = false;
           }
+        } else {
+          isEligible = false;
         }
-        finalDeliveryFee = 0;
+
+        console.log(`[DEBUG] Campaign minimum: ${minOrder}`);
+        console.log(`[DEBUG] Qualifying Campaign subtotal: ${subtotal}`);
+        console.log(`[DEBUG] Campaign Free Delivery eligible: ${isEligible}`);
+
+        if (isEligible) {
+          finalDeliveryFee = 0;
+        }
       }
     }
 
