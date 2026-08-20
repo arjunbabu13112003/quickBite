@@ -355,7 +355,7 @@ export default function HotelsList({ onNavigate }) {
         </div>
 
         <button 
-          onClick={() => onNavigate('/hotels/new')}
+          onClick={() => onNavigate('/super-admin/hotels/new')}
           className="btn-primary"
           style={{ padding: '0.75rem 1.5rem', gap: '0.5rem', fontSize: '0.9rem' }}
         >
@@ -754,7 +754,7 @@ export default function HotelsList({ onNavigate }) {
                           <button
                             onClick={() => {
                               setActiveMenuId(null);
-                              onNavigate(`/hotels/${hotel.id}`);
+                              onNavigate(`/super-admin/hotels/${hotel.id}`);
                             }}
                             style={{
                               display: 'flex',

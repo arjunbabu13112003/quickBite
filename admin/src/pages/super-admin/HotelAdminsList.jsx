@@ -67,7 +67,7 @@ export default function HotelAdminsList({ onNavigate }) {
   // --- ACTIONS & PLACEHOLDERS ---
 
   const handleAddAdminClick = () => {
-    onNavigate('/hotel-admins/new');
+    onNavigate('/super-admin/hotel-admins/new');
   };
 
   const handleActionClick = (actionName, adminName) => {
@@ -702,7 +702,7 @@ export default function HotelAdminsList({ onNavigate }) {
                             <button
                               onClick={() => {
                                 setActiveMenuId(null);
-                                onNavigate(`/hotel-admins/${admin.id}`);
+                                onNavigate(`/super-admin/hotel-admins/${admin.id}`);
                               }}
                               style={{
                                 display: 'flex',

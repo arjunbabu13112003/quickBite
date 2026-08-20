@@ -132,7 +132,7 @@ export default function AddHotelAdmin({ onNavigate }) {
       await api.createHotelAdmin(payload);
       
       alert('Hotel administrator created successfully.');
-      onNavigate('/hotel-admins');
+      onNavigate('/super-admin/hotel-admins');
     } catch (err) {
       console.error(err);
       setApiError(err.message || 'Failed to create hotel administrator account. Please check inputs.');
@@ -145,7 +145,7 @@ export default function AddHotelAdmin({ onNavigate }) {
     if (isDirty) {
       setShowCancelModal(true);
     } else {
-      onNavigate('/hotel-admins');
+      onNavigate('/super-admin/hotel-admins');
     }
   };
 
@@ -162,7 +162,7 @@ export default function AddHotelAdmin({ onNavigate }) {
           color: 'var(--text-subtle)',
           fontWeight: '700'
         }}>
-          <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/hotel-admins')}>Hotel Admins</span>
+          <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/super-admin/hotel-admins')}>Hotel Admins</span>
           <ChevronRight size={12} />
           <span style={{ color: 'var(--primary)' }}>Add Hotel Admin</span>
         </div>
@@ -705,7 +705,7 @@ export default function AddHotelAdmin({ onNavigate }) {
                 type="button"
                 onClick={() => {
                   setShowCancelModal(false);
-                  onNavigate('/hotel-admins');
+                  onNavigate('/super-admin/hotel-admins');
                 }}
                 className="btn-primary"
                 style={{

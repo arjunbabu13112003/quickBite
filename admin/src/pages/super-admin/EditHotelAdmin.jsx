@@ -180,7 +180,7 @@ export default function EditHotelAdmin({ id, onNavigate }) {
     if (isDirty) {
       setShowCancelModal(true);
     } else {
-      onNavigate(`/hotel-admins/${id}`);
+      onNavigate(`/super-admin/hotel-admins/${id}`);
     }
   };
 
@@ -223,7 +223,7 @@ export default function EditHotelAdmin({ id, onNavigate }) {
 
       await api.updateHotelAdmin(id, payload);
       alert('Hotel administrator updated successfully.');
-      onNavigate(`/hotel-admins/${id}`);
+      onNavigate(`/super-admin/hotel-admins/${id}`);
     } catch (err) {
       console.error(err);
       setApiError(err.message || 'Failed to save changes. Please try again.');
@@ -302,7 +302,7 @@ export default function EditHotelAdmin({ id, onNavigate }) {
           The requested administrator account does not exist or has been removed.
         </p>
         <button
-          onClick={() => onNavigate('/hotel-admins')}
+          onClick={() => onNavigate('/super-admin/hotel-admins')}
           className="btn-primary"
           style={{ padding: '0.75rem 2rem' }}
         >
@@ -333,7 +333,7 @@ export default function EditHotelAdmin({ id, onNavigate }) {
         </p>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
           <button
-            onClick={() => onNavigate(`/hotel-admins/${id}`)}
+            onClick={() => onNavigate(`/super-admin/hotel-admins/${id}`)}
             className="btn-secondary"
             style={{ padding: '0.75rem 1.5rem' }}
           >
@@ -366,9 +366,9 @@ export default function EditHotelAdmin({ id, onNavigate }) {
             color: 'var(--text-subtle)',
             fontWeight: '700'
           }}>
-            <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/hotel-admins')}>Hotel Admins</span>
+            <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/super-admin/hotel-admins')}>Hotel Admins</span>
             <ChevronRight size={12} />
-            <span style={{ cursor: 'pointer' }} onClick={() => onNavigate(`/hotel-admins/${id}`)}>{originalAdmin.name}</span>
+            <span style={{ cursor: 'pointer' }} onClick={() => onNavigate(`/super-admin/hotel-admins/${id}`)}>{originalAdmin.name}</span>
             <ChevronRight size={12} />
             <span style={{ color: 'var(--primary)' }}>Edit</span>
           </div>
@@ -1038,7 +1038,7 @@ export default function EditHotelAdmin({ id, onNavigate }) {
                 type="button"
                 onClick={() => {
                   setShowCancelModal(false);
-                  onNavigate(`/hotel-admins/${id}`);
+                  onNavigate(`/super-admin/hotel-admins/${id}`);
                 }}
                 className="btn-primary"
                 style={{

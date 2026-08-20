@@ -160,7 +160,7 @@ export default function HotelAdminDetails({ id, onNavigate }) {
           The requested administrator account does not exist or does not hold the hotel admin role.
         </p>
         <button
-          onClick={() => onNavigate('/hotel-admins')}
+          onClick={() => onNavigate('/super-admin/hotel-admins')}
           className="btn-primary"
           style={{ padding: '0.75rem 2rem' }}
         >
@@ -191,7 +191,7 @@ export default function HotelAdminDetails({ id, onNavigate }) {
         </p>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
           <button
-            onClick={() => onNavigate('/hotel-admins')}
+            onClick={() => onNavigate('/super-admin/hotel-admins')}
             className="btn-secondary"
             style={{ padding: '0.75rem 1.5rem' }}
           >
@@ -222,7 +222,7 @@ export default function HotelAdminDetails({ id, onNavigate }) {
         color: 'var(--text-subtle)',
         fontWeight: '700'
       }}>
-        <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/hotel-admins')}>Hotel Admins</span>
+        <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/super-admin/hotel-admins')}>Hotel Admins</span>
         <ChevronRight size={12} />
         <span style={{ color: 'var(--primary)' }}>{admin.name}</span>
       </div>
@@ -292,7 +292,7 @@ export default function HotelAdminDetails({ id, onNavigate }) {
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           <button
-            onClick={() => onNavigate(`/hotel-admins/${id}/edit`)}
+            onClick={() => onNavigate(`/super-admin/hotel-admins/${id}/edit`)}
             className="btn-secondary"
             style={{ padding: '0.65rem 1.25rem', gap: '0.5rem', fontSize: '0.88rem' }}
           >

@@ -303,7 +303,7 @@ export default function App() {
           }
         }
       }
-      return <Dashboard />;
+      return <Dashboard onNavigate={navigateTo} />;
     };
 
     return (

@@ -89,6 +89,10 @@ export class CreateFoodDto {
   isActive?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  customizable?: boolean;
+
+  @IsOptional()
   @IsInt()
   homeFoodCategoryId?: number;
 }

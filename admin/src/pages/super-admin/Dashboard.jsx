@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 
-export default function Dashboard() {
+export default function Dashboard({ onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
@@ -149,7 +149,13 @@ export default function Dashboard() {
   // --- ACTIONS ---
 
   const handleQuickAction = (actionName) => {
-    alert(`"${actionName}" action is not available yet. It will be implemented in the next step.`);
+    if (actionName === 'Add Hotel') {
+      onNavigate('/super-admin/hotels/new');
+    } else if (actionName === 'Assign Hotel Admin') {
+      onNavigate('/super-admin/hotel-admins/new');
+    } else {
+      alert(`"${actionName}" action is not available yet. It will be implemented in the next step.`);
+    }
   };
 
   // Status badges helpers

@@ -72,6 +72,9 @@ export class Food {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'boolean', default: true })
+  customizable: boolean;
+
   @ManyToOne(() => Hotel, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'hotelId' })
   hotel: Hotel;

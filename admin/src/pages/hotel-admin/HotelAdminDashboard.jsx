@@ -932,6 +932,7 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
 
     if (food) {
       setEditingFood(food);
+      setSkipCustomization(food.customizable === false);
       setModalName(food.name || '');
       setModalDesc(food.description || '');
       setModalCategory(String(food.categoryId || ''));
@@ -1242,7 +1243,8 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
         ingredientsList: modalIngredients,
         ingredients: modalIngredients.join(', '),
         isAvailable: modalAvailable,
-        isActive: modalActive
+        isActive: modalActive,
+        customizable: !skipCustomization
       };
 
       let savedFood;
@@ -1254,7 +1256,22 @@ function FoodItemsSection({ hotel, openAddFoodOnMount, setOpenAddFoodOnMount }) 
 
       const targetFoodId = savedFood.id;
 
-      if (!skipCustomization) {
+      if (skipCustomization) {
+        if (singleGroupId) {
+          try {
+            await api.patch(`/customization-groups/${singleGroupId}`, { isActive: false });
+          } catch (e) {
+            console.warn('Failed to deactivate single customization group:', e);
+          }
+        }
+        if (addonsGroupId) {
+          try {
+            await api.patch(`/customization-groups/${addonsGroupId}`, { isActive: false });
+          } catch (e) {
+            console.warn('Failed to deactivate addons customization group:', e);
+          }
+        }
+      } else {
         let existingDbGroups = [];
         try {
           const existingRes = await api.get(`/foods/${targetFoodId}/customizations`);

@@ -2398,6 +2398,13 @@ export default function App() {
 
   // Item Customization Modal
   const openCustomizer = (item, restaurant) => {
+    const nameLower = (item?.name || '').toLowerCase();
+    const isCustomizable = item.customizable !== false && ((item.customizationGroups && item.customizationGroups.length > 0) || (item.customizations && item.customizations.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani'));
+    if (!isCustomizable) {
+      quickAddToCart(item, restaurant);
+      return;
+    }
+
     setViewingProduct(null);
     const resolvedHotelId = item.hotelId || (restaurant ? restaurant.id : null);
     setCustomizingItem({
@@ -2409,7 +2416,6 @@ export default function App() {
     });
     setItemQuantity(1);
 
-    const nameLower = (item?.name || '').toLowerCase();
     if (nameLower.includes('mandi')) {
       setItemSpice('Quarter');
     } else if (nameLower.includes('biriyani') || nameLower.includes('biryani')) {
@@ -5354,7 +5360,7 @@ export default function App() {
                   }
                 : viewingProduct;
               const nameLower = (currentProduct.name || '').toLowerCase();
-              const isCustomizable = (currentProduct.customizationGroups && currentProduct.customizationGroups.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani');
+              const isCustomizable = currentProduct.customizable !== false && ((currentProduct.customizationGroups && currentProduct.customizationGroups.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani'));
 
               return (
                 <View style={{ height, width, backgroundColor: D.modalBg, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }}>
@@ -5639,6 +5645,9 @@ export default function App() {
                       </Text>
                     </TouchableOpacity>
                   </View>
+
+                  {/* Floating View Cart bar */}
+                  {renderFloatingCartBar(74 + Math.max(12, bottomInset), true)}
                 </View>
               );
             })()}

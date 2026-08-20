@@ -29,7 +29,24 @@ export default function AddHotel({ onNavigate }) {
     longitude: '',
     isActive: true,
     isOpen: true,
-    acceptsOrders: true
+    acceptsOrders: true,
+    cuisines: '',
+    restaurantType: '',
+    averagePreparationTime: '',
+    ownerName: '',
+    alternatePhoneNumber: '',
+    landmark: '',
+    district: '',
+    legalName: '',
+    fssaiNumber: '',
+    gstNumber: '',
+    isDeliveryAvailable: true,
+    deliveryRadiusKm: '',
+    minimumOrderAmount: '',
+    deliveryFee: '',
+    estimatedDeliveryTime: '',
+    openingTime: '08:00',
+    closingTime: '22:00'
   });
 
   // Track modification for dirty-check on cancel
@@ -177,6 +194,37 @@ export default function AddHotel({ onNavigate }) {
       }
     }
 
+    if (formData.deliveryFee) {
+      const val = parseFloat(formData.deliveryFee);
+      if (isNaN(val) || val < 0) {
+        errors.deliveryFee = 'Delivery Fee must be a non-negative number.';
+      }
+    }
+    if (formData.minimumOrderAmount) {
+      const val = parseFloat(formData.minimumOrderAmount);
+      if (isNaN(val) || val < 0) {
+        errors.minimumOrderAmount = 'Minimum Order Amount must be a non-negative number.';
+      }
+    }
+    if (formData.deliveryRadiusKm) {
+      const val = parseFloat(formData.deliveryRadiusKm);
+      if (isNaN(val) || val < 0) {
+        errors.deliveryRadiusKm = 'Delivery Radius must be a non-negative number.';
+      }
+    }
+    if (formData.averagePreparationTime) {
+      const val = parseFloat(formData.averagePreparationTime);
+      if (isNaN(val) || val < 0) {
+        errors.averagePreparationTime = 'Average Preparation Time must be a non-negative number.';
+      }
+    }
+    if (formData.estimatedDeliveryTime) {
+      const val = parseFloat(formData.estimatedDeliveryTime);
+      if (isNaN(val) || val < 0) {
+        errors.estimatedDeliveryTime = 'Estimated Delivery Time must be a non-negative number.';
+      }
+    }
+
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -188,7 +236,6 @@ export default function AddHotel({ onNavigate }) {
 
     setErrorBanner('');
     if (!validateForm()) {
-      const firstErr = Object.keys(validationErrors)[0];
       setErrorBanner('Please resolve all validation errors highlighted below before saving.');
       return;
     }
@@ -205,21 +252,52 @@ export default function AddHotel({ onNavigate }) {
         address: formData.address.trim(),
         area: formData.area.trim(),
         city: formData.city.trim(),
-        state: formData.state.trim(),
-        pincode: formData.pincode.trim(),
+        state: formData.state.trim() || undefined,
+        pincode: formData.pincode.trim() || undefined,
         latitude: formData.latitude ? parseFloat(formData.latitude) : null,
         longitude: formData.longitude ? parseFloat(formData.longitude) : null,
         isActive: formData.isActive,
         isOpen: formData.isOpen,
         acceptsOrders: formData.acceptsOrders,
-        deliveryFee: 0,
-        minimumOrderAmount: 0
+        
+        // New fields
+        cuisines: formData.cuisines.trim() || undefined,
+        restaurantType: formData.restaurantType.trim() || undefined,
+        averagePreparationTime: formData.averagePreparationTime ? parseInt(formData.averagePreparationTime, 10) : undefined,
+        ownerName: formData.ownerName.trim() || undefined,
+        alternatePhoneNumber: formData.alternatePhoneNumber.trim() || undefined,
+        landmark: formData.landmark.trim() || undefined,
+        district: formData.district.trim() || undefined,
+        legalName: formData.legalName.trim() || undefined,
+        fssaiNumber: formData.fssaiNumber.trim() || undefined,
+        gstNumber: formData.gstNumber.trim() || undefined,
+        isDeliveryAvailable: formData.isDeliveryAvailable,
+        deliveryRadiusKm: formData.deliveryRadiusKm ? parseFloat(formData.deliveryRadiusKm) : undefined,
+        minimumOrderAmount: formData.minimumOrderAmount ? parseFloat(formData.minimumOrderAmount) : undefined,
+        deliveryFee: formData.deliveryFee ? parseFloat(formData.deliveryFee) : 0,
+        estimatedDeliveryTime: formData.estimatedDeliveryTime ? parseInt(formData.estimatedDeliveryTime, 10) : undefined,
+        openingTime: formData.openingTime || undefined,
+        closingTime: formData.closingTime || undefined
       };
 
-      await api.createHotel(payload);
+      const newHotel = await api.createHotel(payload);
       
-      // Navigate to /hotels with success feedback
-      onNavigate('/hotels');
+      if (logoFile) {
+        try {
+          await api.uploadHotelLogo(newHotel.id, logoFile);
+        } catch (e) {
+          console.warn('Failed to upload logo:', e);
+        }
+      }
+      if (coverFile) {
+        try {
+          await api.uploadHotelCover(newHotel.id, coverFile);
+        } catch (e) {
+          console.warn('Failed to upload cover:', e);
+        }
+      }
+      
+      onNavigate('/super-admin/hotels');
     } catch (err) {
       console.error(err);
       setErrorBanner(err.message || 'Failed to create new hotel record. Server returned validation error.');
@@ -241,7 +319,7 @@ export default function AddHotel({ onNavigate }) {
           color: 'var(--text-subtle)',
           fontWeight: '700'
         }}>
-          <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/hotels')}>Hotels</span>
+          <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/super-admin/hotels')}>Hotels</span>
           <ChevronRight size={12} />
           <span style={{ color: 'var(--primary)' }}>Add Hotel</span>
         </div>
@@ -341,6 +419,54 @@ export default function AddHotel({ onNavigate }) {
                 resize: 'vertical'
               }}
             />
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gap: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+                Cuisine Types
+              </label>
+              <input
+                type="text"
+                name="cuisines"
+                placeholder="North Indian, Chinese, Italian"
+                value={formData.cuisines}
+                onChange={handleChange}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  background: 'var(--bg-main)'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+                Category
+              </label>
+              <input
+                type="text"
+                name="restaurantType"
+                placeholder="Fine Dining, Cafe, Quick Service"
+                value={formData.restaurantType}
+                onChange={handleChange}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  background: 'var(--bg-main)'
+                }}
+              />
+            </div>
           </div>
 
           {/* Logo & Cover Selection Containers */}
@@ -560,6 +686,54 @@ export default function AddHotel({ onNavigate }) {
               )}
             </div>
           </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gap: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+                Owner Name
+              </label>
+              <input 
+                type="text"
+                name="ownerName"
+                placeholder="Enter owner's name"
+                value={formData.ownerName}
+                onChange={handleChange}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  background: 'var(--bg-main)'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+                Alternate Phone Number
+              </label>
+              <input 
+                type="text"
+                name="alternatePhoneNumber"
+                placeholder="Alternate phone number"
+                value={formData.alternatePhoneNumber}
+                onChange={handleChange}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  background: 'var(--bg-main)'
+                }}
+              />
+            </div>
+          </div>
         </div>
 
         {/* SECTION 3: Location */}
@@ -725,6 +899,54 @@ export default function AddHotel({ onNavigate }) {
           }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               <label style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+                Landmark
+              </label>
+              <input 
+                type="text"
+                name="landmark"
+                placeholder="Near central park"
+                value={formData.landmark}
+                onChange={handleChange}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  background: 'var(--bg-main)'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+                District
+              </label>
+              <input 
+                type="text"
+                name="district"
+                placeholder="District name"
+                value={formData.district}
+                onChange={handleChange}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  background: 'var(--bg-main)'
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-muted)' }}>
                 Latitude
               </label>
               <input 
@@ -777,7 +999,7 @@ export default function AddHotel({ onNavigate }) {
           </div>
         </div>
 
-        {/* SECTION 4: Restaurant Settings */}
+        {/* SECTION 7: Restaurant Settings */}
         <div style={{
           background: 'var(--bg-card)',
           borderRadius: 'var(--radius-xl)',
@@ -788,7 +1010,7 @@ export default function AddHotel({ onNavigate }) {
           gap: '1.5rem'
         }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: '850', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginBottom: '0.5rem' }}>
-            4. Restaurant Settings
+            7. Restaurant Settings
           </h3>
 
           <div style={{
@@ -1070,7 +1292,7 @@ export default function AddHotel({ onNavigate }) {
                 type="button"
                 onClick={() => {
                   setShowCancelModal(false);
-                  onNavigate('/hotels');
+                  onNavigate('/super-admin/hotels');
                 }}
                 className="btn-primary"
                 style={{
