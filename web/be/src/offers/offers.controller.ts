@@ -165,6 +165,21 @@ export class OffersController {
     return this.offersService.getOffersForCustomer(hotelId, now);
   }
 
+  @Get('public/all-active')
+  async getAllActiveOffers() {
+    return this.offersService.getAllActiveOffers();
+  }
+
+  @Get('store99/public-campaigns/:id')
+  async getPublicCampaignDetails(@Param('id', ParseIntPipe) id: number) {
+    return this.offersService.getPublicCampaignDetails(id);
+  }
+
+  @Get('store99/public-campaigns')
+  async getPublicCampaigns() {
+    return this.offersService.getPublicCampaigns();
+  }
+
   // ─── 99 Store Campaign Endpoints ───
 
   @UseGuards(JwtAuthGuard, RolesGuard)

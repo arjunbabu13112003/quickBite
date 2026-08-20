@@ -14,6 +14,7 @@ import { FoodCustomizationChoice } from '../food-customizations/food-customizati
 import { FoodCustomizationGroup } from '../food-customizations/food-customization-group.entity';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { UpdateCartItemQuantityDto } from './dto/update-cart-item-quantity.dto';
+import { resolveHotelOfferForFood } from '../offers/offer-pricing.helper';
 
 @Injectable()
 export class CartService {
@@ -32,6 +33,55 @@ export class CartService {
     private readonly groupRepository: Repository<FoodCustomizationGroup>,
     private readonly dataSource: DataSource,
   ) {}
+
+  private async calculateEffectiveFoodPrice(food: Food, now = new Date()): Promise<number> {
+    let dynamicOfferPrice = food.offerPrice ? Number(food.offerPrice) : null;
+    const activeCampaignItems = await this.dataSource.query(`
+      SELECT item."foodId", camp.id as "campaignId", camp.name, camp.price, camp."offerType",
+             camp."flatDiscountAmount", camp."percentageDiscount", camp."maxDiscount"
+      FROM store_99_items item
+      JOIN store_99_campaigns camp ON item."campaignId" = camp.id
+      JOIN hotel_campaign_participations part ON part."campaignId" = camp.id AND part."hotelId" = item."hotelId"
+      WHERE item."foodId" = $1
+        AND item."hotelId" = $2
+        AND camp."isActive" = true
+        AND camp."startAt" <= $3
+        AND camp."endAt" >= $4
+        AND part.status = 'participating'
+    `, [food.id, food.hotelId, now, now]);
+
+    if (activeCampaignItems && activeCampaignItems.length > 0) {
+      let bestPrice = Number(food.price);
+      activeCampaignItems.forEach((c: any) => {
+        const orig = Number(food.price) || 0;
+        const type = c.offerType || 'FIXED_PRICE';
+        let discountPrice = orig;
+        if (type === 'FIXED_PRICE') {
+          discountPrice = Number(c.price) || 0;
+        } else if (type === 'FLAT_DISCOUNT') {
+          discountPrice = Math.max(0, orig - (Number(c.flatDiscountAmount) || 0));
+        } else if (type === 'PERCENTAGE_DISCOUNT') {
+          let disc = orig * (Number(c.percentageDiscount) || 0) / 100;
+          if (c.maxDiscount) {
+            disc = Math.min(disc, Number(c.maxDiscount));
+          }
+          discountPrice = Math.max(0, orig - disc);
+        }
+        if (discountPrice < bestPrice) {
+          bestPrice = discountPrice;
+        }
+      });
+      dynamicOfferPrice = bestPrice;
+    }
+
+    const hotelOffer = await resolveHotelOfferForFood(this.dataSource, food, now);
+    if (hotelOffer.offerId !== null) {
+      if (dynamicOfferPrice === null || (hotelOffer.offerPrice !== null && hotelOffer.offerPrice < dynamicOfferPrice)) {
+        dynamicOfferPrice = hotelOffer.offerPrice;
+      }
+    }
+    return dynamicOfferPrice !== null ? dynamicOfferPrice : parseFloat(food.price.toString());
+  }
 
   async addToCart(userId: number, dto: AddToCartDto) {
     // 1. Verify active food, category and hotel
@@ -126,7 +176,7 @@ export class CartService {
     }
 
     // 3. Price calculations
-    let unitPrice = food.offerPrice !== undefined && food.offerPrice !== null ? parseFloat(food.offerPrice.toString()) : parseFloat(food.price.toString());
+    const unitPrice = await this.calculateEffectiveFoodPrice(food);
     let customizationPrice = 0;
     
     submittedChoiceIds.forEach((choiceId) => {
@@ -534,7 +584,7 @@ export class CartService {
     }
 
     // 3. Recalculate price using current database state
-    const unitPrice = food.offerPrice !== undefined && food.offerPrice !== null ? parseFloat(food.offerPrice.toString()) : parseFloat(food.price.toString());
+    const unitPrice = await this.calculateEffectiveFoodPrice(food);
     let customizationPrice = 0;
     selectedChoiceIds.forEach((choiceId) => {
       const choiceObj = choiceIdToObj.get(choiceId);

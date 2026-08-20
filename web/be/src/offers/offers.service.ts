@@ -18,6 +18,7 @@ import { Food } from '../foods/food.entity';
 import { Hotel } from '../hotels/hotel.entity';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { UpdateOfferDto } from './dto/update-offer.dto';
+import { resolveHotelOfferForFood } from './offer-pricing.helper';
 import { Order } from '../orders/order.entity';
 
 @Injectable()
@@ -116,6 +117,15 @@ export class OffersService implements OnModuleInit {
       endAt: end,
     });
 
+    // Validate flat discount >= food price for applicable foods
+    if (offer.discountType === 'flat' && offer.applicabilityType === 'foods') {
+      for (const food of offer.applicableFoods) {
+        if (Number(offer.discountValue) >= Number(food.price)) {
+          throw new BadRequestException('Flat discount must be less than the eligible food price.');
+        }
+      }
+    }
+
     return await this.offerRepository.save(offer);
   }
 
@@ -154,12 +164,14 @@ export class OffersService implements OnModuleInit {
     }
 
     if (offer.applicabilityType === 'categories') {
-      const catIds = dto.applicableCategoryIds || [];
-      offer.applicableCategories = await this.categoryRepository.findByIds(catIds);
+      if (dto.applicableCategoryIds !== undefined) {
+        offer.applicableCategories = await this.categoryRepository.findByIds(dto.applicableCategoryIds);
+      }
       offer.applicableFoods = [];
     } else if (offer.applicabilityType === 'foods') {
-      const foodIds = dto.applicableFoodIds || [];
-      offer.applicableFoods = await this.foodRepository.findByIds(foodIds);
+      if (dto.applicableFoodIds !== undefined) {
+        offer.applicableFoods = await this.foodRepository.findByIds(dto.applicableFoodIds);
+      }
       offer.applicableCategories = [];
     } else if (offer.applicabilityType === 'all') {
       offer.applicableCategories = [];
@@ -169,6 +181,15 @@ export class OffersService implements OnModuleInit {
     // Merge other fields
     const { code, startAt, endAt, applicableCategoryIds, applicableFoodIds, ...rest } = dto;
     Object.assign(offer, rest);
+
+    // Validate flat discount >= food price for applicable foods
+    if (offer.discountType === 'flat' && offer.applicableFoods && offer.applicableFoods.length > 0) {
+      for (const food of offer.applicableFoods) {
+        if (Number(offer.discountValue) >= Number(food.price)) {
+          throw new BadRequestException('Flat discount must be less than the eligible food price.');
+        }
+      }
+    }
 
     return await this.offerRepository.save(offer);
   }
@@ -319,7 +340,7 @@ export class OffersService implements OnModuleInit {
     } else if (offer.discountType === 'flat') {
       discountAmount = Math.min(Number(offer.discountValue), eligibleSubtotal);
     } else if (offer.discountType === 'free_delivery') {
-      discountAmount = deliveryFee;
+      discountAmount = 0;
       finalDeliveryFee = 0;
     }
 
@@ -450,6 +471,15 @@ export class OffersService implements OnModuleInit {
       throw new NotFoundException(`Campaign with ID ${campaignId} not found`);
     }
 
+    // Safety validation: Verify all selected foodIds belong to this hotel!
+    if (foodIds.length > 0) {
+      const foods = await this.foodRepository.findByIds(foodIds);
+      const invalidFood = foods.find(f => f.hotelId !== hotelId);
+      if (invalidFood || foods.length !== foodIds.length) {
+        throw new BadRequestException(`One or more selected food items do not belong to this hotel`);
+      }
+    }
+
     await this.dataSource.transaction(async (manager) => {
       // Update participation status
       const participation = await manager.findOne(HotelCampaignParticipation, {
@@ -504,6 +534,322 @@ export class OffersService implements OnModuleInit {
       }
     }
     return result;
+  }
+
+  async getPublicCampaignDetails(campaignId: number): Promise<any> {
+    const campaign = await this.campaignRepository.findOne({
+      where: { id: campaignId, isActive: true }
+    });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign with ID ${campaignId} not found or inactive`);
+    }
+
+    const now = new Date();
+    if (now < campaign.startAt || now > campaign.endAt) {
+      return {
+        ...campaign,
+        isExpired: true,
+        participatingHotels: [],
+        items: []
+      };
+    }
+
+    // Find participating hotels
+    const participations = await this.participationRepository.find({
+      where: { campaignId: campaign.id, status: 'participating' }
+    });
+
+    const participatingHotels = [];
+    const campaignItems = [];
+
+    for (const p of participations) {
+      const selectedItems = await this.campaignItemRepository.find({
+        where: { campaignId: campaign.id, hotelId: p.hotelId }
+      });
+
+      const validItems = selectedItems.filter(item => item.foodId !== -1);
+
+      const hotel = await this.hotelRepository.findOne({ where: { id: p.hotelId } });
+      if (!hotel) {
+        continue;
+      }
+
+      participatingHotels.push({
+        id: hotel.id,
+        name: hotel.name,
+        image: hotel.image,
+        rating: 4.8,
+        deliveryTime: `${hotel.deliveryTimeMin || 20}-${hotel.deliveryTimeMax || 35} min`,
+      });
+
+      for (const validItem of validItems) {
+        const food = await this.foodRepository.findOne({
+          where: { id: validItem.foodId },
+          relations: ['category']
+        });
+        if (!food || !food.isActive || !food.isAvailable) {
+          continue;
+        }
+
+        const campaignPrice = this.calculateCampaignDiscountedPrice(food.price, campaign);
+        let dynamicOfferPrice = campaignPrice;
+        let appliedOfferId = null;
+        let appliedOfferLabel = null;
+
+        const hotelOffer = await resolveHotelOfferForFood(this.dataSource, food, now);
+        if (hotelOffer.offerId !== null) {
+          if (hotelOffer.offerPrice !== null && hotelOffer.offerPrice < campaignPrice) {
+            dynamicOfferPrice = hotelOffer.offerPrice;
+            appliedOfferId = hotelOffer.offerId;
+            appliedOfferLabel = hotelOffer.offerLabel;
+          } else {
+            appliedOfferId = hotelOffer.offerId;
+            appliedOfferLabel = hotelOffer.offerLabel;
+          }
+        }
+
+        campaignItems.push({
+          id: food.id,
+          itemId: food.id,
+          name: food.name,
+          price: food.price,
+          offerPrice: dynamicOfferPrice,
+          originalPrice: food.price,
+          image: food.image,
+          isVeg: food.isVeg,
+          categoryId: food.categoryId,
+          categoryName: food.category?.name || 'Specials',
+          hotelId: hotel.id,
+          hotelName: hotel.name,
+          is99StoreItem: true,
+          campaignId: campaign.id,
+          offerId: appliedOfferId,
+          offerLabel: appliedOfferLabel,
+        });
+      }
+    }
+
+    return {
+      ...campaign,
+      isExpired: false,
+      participatingHotels,
+      items: campaignItems
+    };
+  }
+
+  async getAllActiveOffers(): Promise<{ offers: Offer[], hotels: Hotel[], foods: any[] }> {
+    const now = new Date();
+    
+    // 1. Get all active hotel-specific offers
+    const activeOffers = await this.offerRepository.createQueryBuilder('offer')
+      .leftJoinAndSelect('offer.hotel', 'hotel')
+      .leftJoinAndSelect('offer.applicableCategories', 'category')
+      .leftJoinAndSelect('offer.applicableFoods', 'food')
+      .where('offer.isActive = true')
+      .andWhere('offer.hotelId IS NOT NULL')
+      .andWhere('offer.startAt <= :now', { now })
+      .andWhere('offer.endAt >= :now', { now })
+      .orderBy('offer.createdAt', 'DESC')
+      .getMany();
+
+    // 2. Extract unique hotels
+    const hotelsMap = new Map<number, Hotel>();
+    activeOffers.forEach(o => {
+      if (o.hotel) {
+        hotelsMap.set(o.hotel.id, o.hotel);
+      }
+    });
+    const hotels = Array.from(hotelsMap.values());
+
+    // 3. Extract foods with active offers (applicabilityType = 'foods' or 'all')
+    const foodsList = [];
+    for (const offer of activeOffers) {
+      if (offer.applicabilityType === 'foods' && offer.applicableFoods && offer.applicableFoods.length > 0) {
+        for (const food of offer.applicableFoods) {
+          const detailedFood = await this.foodRepository.findOne({
+            where: { id: food.id },
+            relations: ['category', 'hotel']
+          });
+          if (detailedFood && detailedFood.isActive && detailedFood.isAvailable) {
+            let offerPrice = Number(detailedFood.price);
+            if (offer.discountType === 'percentage') {
+              const disc = (offerPrice * Number(offer.discountValue)) / 100;
+              offerPrice = Math.max(0, offerPrice - (offer.maxDiscount ? Math.min(disc, Number(offer.maxDiscount)) : disc));
+            } else if (offer.discountType === 'flat') {
+              offerPrice = Math.max(0, offerPrice - Number(offer.discountValue));
+            }
+
+            foodsList.push({
+              id: detailedFood.id,
+              itemId: detailedFood.id,
+              name: detailedFood.name,
+              price: detailedFood.price,
+              offerPrice: parseFloat(offerPrice.toFixed(2)),
+              originalPrice: detailedFood.price,
+              image: detailedFood.image,
+              isVeg: detailedFood.isVeg,
+              categoryName: detailedFood.category?.name || 'Specials',
+              hotelId: offer.hotelId,
+              hotelName: offer.hotel?.name || 'QuickBite',
+              offerLabel: offer.discountType === 'percentage'
+                ? `${Math.round(offer.discountValue)}% OFF`
+                : offer.discountType === 'flat'
+                  ? `₹${Math.round(offer.discountValue)} OFF`
+                  : 'FREE DELIVERY',
+              offerId: offer.id,
+              offerName: offer.name,
+              discountType: offer.discountType,
+            });
+          }
+        }
+      } else if (offer.applicabilityType === 'all') {
+        const bestSeller = await this.foodRepository.findOne({
+          where: { hotelId: offer.hotelId, isActive: true, isAvailable: true },
+          relations: ['category', 'hotel']
+        });
+        if (bestSeller) {
+          let offerPrice = Number(bestSeller.price);
+          if (offer.discountType === 'percentage') {
+            const disc = (offerPrice * Number(offer.discountValue)) / 100;
+            offerPrice = Math.max(0, offerPrice - (offer.maxDiscount ? Math.min(disc, Number(offer.maxDiscount)) : disc));
+          } else if (offer.discountType === 'flat') {
+            offerPrice = Math.max(0, offerPrice - Number(offer.discountValue));
+          }
+          foodsList.push({
+            id: bestSeller.id,
+            itemId: bestSeller.id,
+            name: bestSeller.name,
+            price: bestSeller.price,
+            offerPrice: parseFloat(offerPrice.toFixed(2)),
+            originalPrice: bestSeller.price,
+            image: bestSeller.image,
+            isVeg: bestSeller.isVeg,
+            categoryName: bestSeller.category?.name || 'Specials',
+            hotelId: offer.hotelId,
+            hotelName: offer.hotel?.name || 'QuickBite',
+            offerLabel: offer.discountType === 'percentage'
+              ? `${Math.round(offer.discountValue)}% OFF`
+              : offer.discountType === 'flat'
+                ? `₹${Math.round(offer.discountValue)} OFF`
+                : 'FREE DELIVERY',
+            offerId: offer.id,
+            offerName: offer.name,
+            discountType: offer.discountType,
+          });
+        }
+      }
+    }
+
+    return {
+      offers: activeOffers,
+      hotels,
+      foods: foodsList
+    };
+  }
+
+  async getPublicCampaigns(): Promise<any[]> {
+    const now = new Date();
+    // 1. Get all active campaigns
+    const campaigns = await this.campaignRepository.createQueryBuilder('campaign')
+      .where('campaign.isActive = true')
+      .andWhere('campaign.startAt <= :now', { now })
+      .andWhere('campaign.endAt >= :now', { now })
+      .orderBy('campaign.createdAt', 'DESC')
+      .getMany();
+
+    const result = [];
+
+    for (const campaign of campaigns) {
+      // 2. Find participating participations for this campaign
+      const participations = await this.participationRepository.find({
+        where: { campaignId: campaign.id, status: 'participating' }
+      });
+
+      const participatingHotels = [];
+      const campaignItems = [];
+
+      for (const p of participations) {
+        // Find selected items for this hotel in this campaign
+        const selectedItems = await this.campaignItemRepository.find({
+          where: { campaignId: campaign.id, hotelId: p.hotelId }
+        });
+
+        // Filter out placeholders
+        const validItems = selectedItems.filter(item => item.foodId !== -1);
+
+        // Get hotel details
+        const hotel = await this.hotelRepository.findOne({ where: { id: p.hotelId } });
+        if (!hotel) {
+          continue;
+        }
+
+        participatingHotels.push({
+          id: hotel.id,
+          name: hotel.name,
+          image: hotel.image,
+          rating: 4.8,
+          deliveryTime: `${hotel.deliveryTimeMin || 20}-${hotel.deliveryTimeMax || 35} min`,
+        });
+
+        // Get food items details
+        for (const validItem of validItems) {
+          const food = await this.foodRepository.findOne({
+            where: { id: validItem.foodId },
+            relations: ['category']
+          });
+          if (!food || !food.isActive || !food.isAvailable) {
+            continue;
+          }
+
+          // Calculate dynamic offer price for this food based on this campaign
+          const offerPrice = this.calculateCampaignDiscountedPrice(food.price, campaign);
+
+          campaignItems.push({
+            id: food.id,
+            itemId: food.id,
+            name: food.name,
+            price: food.price,
+            offerPrice: offerPrice,
+            originalPrice: food.price,
+            image: food.image,
+            isVeg: food.isVeg,
+            categoryId: food.categoryId,
+            categoryName: food.category?.name || 'Specials',
+            hotelId: hotel.id,
+            hotelName: hotel.name,
+            is99StoreItem: true,
+          });
+        }
+      }
+
+      // Always include active campaigns
+      result.push({
+        ...campaign,
+        participatingHotels,
+        items: campaignItems
+      });
+    }
+
+    return result;
+  }
+
+  calculateCampaignDiscountedPrice(originalPrice: number, campaign: Store99Campaign): number {
+    const orig = Number(originalPrice) || 0;
+    const type = campaign.offerType || 'FIXED_PRICE';
+    if (type === 'FIXED_PRICE') {
+      return Number(campaign.price) || 0;
+    }
+    if (type === 'FLAT_DISCOUNT') {
+      return Math.max(0, orig - (Number(campaign.flatDiscountAmount) || 0));
+    }
+    if (type === 'PERCENTAGE_DISCOUNT') {
+      let disc = orig * (Number(campaign.percentageDiscount) || 0) / 100;
+      if (campaign.maxDiscount) {
+        disc = Math.min(disc, Number(campaign.maxDiscount));
+      }
+      return Math.max(0, orig - disc);
+    }
+    return orig;
   }
 
   async participateInCampaign(campaignId: number, hotelId: number, foodIds: number[]): Promise<void> {

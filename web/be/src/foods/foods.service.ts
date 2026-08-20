@@ -11,6 +11,7 @@ import { Category } from '../categories/category.entity';
 import { HomeFoodCategory } from '../home-food-categories/home-food-category.entity';
 import { CreateFoodDto } from './dto/create-food.dto';
 import { UpdateFoodDto } from './dto/update-food.dto';
+import { resolveHotelOfferForFood } from '../offers/offer-pricing.helper';
 
 @Injectable()
 export class FoodsService {
@@ -204,28 +205,46 @@ export class FoodsService {
       campaignMap.get(fid).push(row);
     });
 
-    return foods.map((food) => {
-      const stats = statsMap.get(food.id);
-      const campaigns = campaignMap.get(food.id);
-      let dynamicOfferPrice = food.offerPrice ? Number(food.offerPrice) : null;
-      if (campaigns && campaigns.length > 0) {
-        let bestPrice = Number(food.price);
-        campaigns.forEach(c => {
-          const discountPrice = calculateDiscountedPrice(food.price, c);
-          if (discountPrice < bestPrice) {
-            bestPrice = discountPrice;
-          }
-        });
-        dynamicOfferPrice = bestPrice;
-      }
+    const now = new Date();
+    const mappedFoods = await Promise.all(
+      foods.map(async (food) => {
+        const stats = statsMap.get(food.id);
+        const campaigns = campaignMap.get(food.id);
+        let campaignId = null;
+        if (campaigns && campaigns.length > 0) {
+          let bestPrice = Number(food.price);
+          campaigns.forEach((c) => {
+            const discountPrice = calculateDiscountedPrice(food.price, c);
+            if (discountPrice < bestPrice) {
+              bestPrice = discountPrice;
+              campaignId = c.campaignId;
+            }
+          });
+          dynamicOfferPrice = bestPrice;
+        }
 
-      return {
-        ...food,
-        offerPrice: dynamicOfferPrice,
-        averageRating: stats ? stats.average : 0,
-        ratingCount: stats ? stats.count : 0,
-      };
-    }) as any;
+        const hotelOffer = await resolveHotelOfferForFood(this.dataSource, food, now);
+        if (hotelOffer.offerId !== null) {
+          if (dynamicOfferPrice === null || (hotelOffer.offerPrice !== null && hotelOffer.offerPrice < dynamicOfferPrice)) {
+            dynamicOfferPrice = hotelOffer.offerPrice;
+            appliedOfferId = hotelOffer.offerId;
+            appliedOfferLabel = hotelOffer.offerLabel;
+          }
+        }
+
+        return {
+          ...food,
+          offerPrice: dynamicOfferPrice,
+          offerId: appliedOfferId,
+          offerLabel: appliedOfferLabel,
+          campaignId: campaignId,
+          averageRating: stats ? stats.average : 0,
+          ratingCount: stats ? stats.count : 0,
+        };
+      })
+    );
+
+    return mappedFoods as any;
   }
 
   async findOne(id: number): Promise<Food> {
@@ -249,11 +268,12 @@ export class FoodsService {
       JOIN store_99_campaigns camp ON item."campaignId" = camp.id
       JOIN hotel_campaign_participations part ON part."campaignId" = camp.id AND part."hotelId" = item."hotelId"
       WHERE item."foodId" = $1
+        AND item."hotelId" = $2
         AND camp."isActive" = true
-        AND camp."startAt" <= $2
-        AND camp."endAt" >= $3
+        AND camp."startAt" <= $3
+        AND camp."endAt" >= $4
         AND part.status = 'participating'
-    `, [food.id, now, now]);
+    `, [food.id, food.hotelId, now, now]);
 
     const calculateDiscountedPrice = (originalPrice: number, campaign: any): number => {
       const orig = Number(originalPrice) || 0;
@@ -274,16 +294,35 @@ export class FoodsService {
       return orig;
     };
 
+    let dynamicOfferPrice = food.offerPrice ? Number(food.offerPrice) : null;
+    let campaignId = null;
     if (activeCampaignItems && activeCampaignItems.length > 0) {
       let bestPrice = Number(food.price);
       activeCampaignItems.forEach(c => {
         const discountPrice = calculateDiscountedPrice(food.price, c);
         if (discountPrice < bestPrice) {
           bestPrice = discountPrice;
+          campaignId = c.campaignId;
         }
       });
+      dynamicOfferPrice = bestPrice;
       food.offerPrice = bestPrice;
     }
+
+    const hotelOffer = await resolveHotelOfferForFood(this.dataSource, food, now);
+    let appliedOfferId = null;
+    let appliedOfferLabel = null;
+    if (hotelOffer.offerId !== null) {
+      if (dynamicOfferPrice === null || (hotelOffer.offerPrice !== null && hotelOffer.offerPrice < dynamicOfferPrice)) {
+        dynamicOfferPrice = hotelOffer.offerPrice;
+        food.offerPrice = hotelOffer.offerPrice;
+        appliedOfferId = hotelOffer.offerId;
+        appliedOfferLabel = hotelOffer.offerLabel;
+      }
+    }
+    food['offerId'] = appliedOfferId;
+    food['offerLabel'] = appliedOfferLabel;
+    food['campaignId'] = campaignId;
 
     return food;
   }
@@ -408,10 +447,31 @@ export class FoodsService {
       });
     }
 
-    queryBuilder
-      .orderBy('food.displayOrder', 'ASC')
-      .addOrderBy('food.id', 'ASC');
+    const foods = await queryBuilder.getMany();
+    const now = new Date();
+    const mappedFoods = await Promise.all(
+      foods.map(async (food) => {
+        const hotelOffer = await resolveHotelOfferForFood(this.dataSource, food, now);
+        let dynamicOfferPrice = food.offerPrice ? Number(food.offerPrice) : null;
+        let appliedOfferId = null;
+        let appliedOfferLabel = null;
 
-    return await queryBuilder.getMany();
+        if (hotelOffer.offerId !== null) {
+          if (dynamicOfferPrice === null || (hotelOffer.offerPrice !== null && hotelOffer.offerPrice < dynamicOfferPrice)) {
+            dynamicOfferPrice = hotelOffer.offerPrice;
+            appliedOfferId = hotelOffer.offerId;
+            appliedOfferLabel = hotelOffer.offerLabel;
+          }
+        }
+        return {
+          ...food,
+          offerPrice: dynamicOfferPrice,
+          offerId: appliedOfferId,
+          offerLabel: appliedOfferLabel,
+        } as any;
+      }),
+    );
+
+    return mappedFoods;
   }
 }

@@ -380,6 +380,15 @@ export default function App() {
 
   // App Data & Filter States
   const [restaurants, setRestaurants] = useState(INITIAL_RESTAURANTS);
+  const [platformCampaigns, setPlatformCampaigns] = useState([]);
+  const [activeCampaignId, setActiveCampaignId] = useState(null);
+  const [campaignDetails, setCampaignDetails] = useState(null);
+  const [loadingCampaignDetails, setLoadingCampaignDetails] = useState(false);
+  const [activeHotelOffers, setActiveHotelOffers] = useState([]);
+  const [activeHotelOfferFoods, setActiveHotelOfferFoods] = useState([]);
+  const [loadingHotelOffers, setLoadingHotelOffers] = useState(false);
+
+  const resolveImage = (imgStr) => resolveProductImage(imgStr, resolvedBackendUrl);
 
   // Helper to dynamically detect active backend endpoint
   const getActiveBackend = async () => {
@@ -440,6 +449,7 @@ export default function App() {
     setDbConnectionError(false);
     try {
       const backendUrl = await getActiveBackend();
+      const resolveImage = (imgStr) => resolveProductImage(imgStr, backendUrl);
       const res = await fetch(`${backendUrl}/hotels`);
       if (!res.ok) throw new Error('Failed to fetch hotels');
       const fetchedHotels = await res.json();
@@ -459,17 +469,6 @@ export default function App() {
             });
             const categories = Array.from(categoriesMap.values());
             
-            const resolveImage = (imgStr) => {
-              if (!imgStr) return null;
-              if (imgStr.startsWith('http://') || imgStr.startsWith('https://')) {
-                if (imgStr.includes('localhost:') || imgStr.includes('127.0.0.1:')) {
-                  return imgStr.replace(/http:\/\/(localhost|127\.0\.0\.1):5000/g, backendUrl);
-                }
-                return imgStr;
-              }
-              return `${backendUrl}/uploads/foods/${imgStr}`;
-            };
-
             const mappedRest = {
               id: hotel.id,
               name: hotel.name,
@@ -513,6 +512,90 @@ export default function App() {
       }
       
       setRestaurants(mappedRestaurants);
+
+      // Fetch public campaigns
+      try {
+        const campaignsRes = await fetch(`${backendUrl}/offers/store99/public-campaigns`);
+        if (campaignsRes.ok) {
+          const campaigns = await campaignsRes.json();
+          const mappedCampaigns = campaigns.map(camp => ({
+            ...camp,
+            bannerUrl: resolveImage(camp.bannerUrl),
+            items: (camp.items || []).map(item => ({
+              ...item,
+              image: resolveImage(item.image)
+            }))
+          }));
+          setPlatformCampaigns(mappedCampaigns);
+        }
+      } catch (err) {
+        console.warn('Error fetching platform campaigns:', err);
+      }
+
+      // Fetch public active hotel offers
+      setLoadingHotelOffers(true);
+      try {
+        const offersRes = await fetch(`${backendUrl}/offers/public/all-active`);
+        if (offersRes.ok) {
+          const data = await offersRes.json();
+           const mappedHotels = (data.hotels || []).map(h => {
+            const hotelOffersList = (data.offers || []).filter(o => o.hotelId === h.id);
+            let label = '';
+            if (hotelOffersList.length > 0) {
+              const mainOffer = hotelOffersList[0];
+              if (mainOffer.discountType === 'percentage') {
+                label = `${Math.round(mainOffer.discountValue)}% OFF`;
+              } else if (mainOffer.discountType === 'flat') {
+                label = `₹${Math.round(mainOffer.discountValue)} OFF`;
+              } else if (mainOffer.discountType === 'free_delivery') {
+                label = 'FREE DELIVERY';
+              }
+            }
+            return {
+              ...h,
+              id: h.id,
+              name: h.name,
+              image: resolveImage(h.image) || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80',
+              rating: 4.8,
+              reviewsCount: 150,
+              deliveryTime: `${h.deliveryTimeMin || 20}-${h.deliveryTimeMax || 35} min`,
+              deliveryFee: Number(h.deliveryFee) || 0,
+              minOrder: Number(h.minimumOrderAmount) || 0,
+              priceTier: h.deliveryFee > 40 ? '₹₹₹' : '₹₹',
+              isTopRated: h.featured || false,
+              isVeg: h.isPureVeg || false,
+              offerText: label || (h.featured ? 'Featured Deal' : ''),
+              address: h.address,
+              description: h.description || '',
+            };
+          });
+
+          const mappedFoods = (data.foods || []).map(f => ({
+            ...f,
+            image: resolveImage(f.image) || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+          }));
+
+          setActiveHotelOffers(mappedHotels);
+          setActiveHotelOfferFoods(mappedFoods);
+
+          // UPDATE MAIN RESTAURANTS LIST TO INCLUDE VALID OFFER LABELS
+          setRestaurants(prev => prev.map(r => {
+            const match = mappedHotels.find(mh => mh.id === r.id);
+            if (match) {
+              return {
+                ...r,
+                offerText: match.offerText
+              };
+            }
+            return r;
+          }));
+        }
+      } catch (err) {
+        console.warn('Error fetching active hotel offers:', err);
+      } finally {
+        setLoadingHotelOffers(false);
+      }
+
       setDbConnectionError(false);
     } catch (error) {
       console.warn('Error fetching backend data:', error);
@@ -540,6 +623,46 @@ export default function App() {
       }
     }
   }, [restaurants]);
+
+  const bannerRef = useRef(null);
+  const [activeBannerIndex, setActiveBannerIndex] = useState(0);
+  const activeBannerIndexRef = useRef(0);
+  activeBannerIndexRef.current = activeBannerIndex;
+
+  const banners = [];
+  if (platformCampaigns && platformCampaigns.length > 0) {
+    platformCampaigns.forEach((camp) => {
+      let badgeText = '';
+      if (camp.offerType === 'PERCENTAGE_DISCOUNT') {
+        badgeText = `${Math.round(camp.percentageDiscount)}% OFF`;
+      } else if (camp.offerType === 'FIXED_PRICE') {
+        badgeText = `₹${Math.round(camp.price)} DEAL`;
+      } else if (camp.offerType === 'FLAT_DISCOUNT') {
+        badgeText = `₹${Math.round(camp.flatDiscountAmount)} OFF`;
+      } else if (camp.offerType === 'FREE_DELIVERY') {
+        badgeText = 'FREE DELIVERY';
+      }
+      banners.push({
+        id: `campaign-${camp.id}`,
+        type: 'campaign',
+        campaignId: camp.id,
+        title: camp.name,
+        subtitle: camp.description || 'Special platform campaign',
+        image: camp.bannerUrl || null,
+        badge: badgeText
+      });
+    });
+  }
+
+  useEffect(() => {
+    if (banners.length <= 1) return;
+    const timer = setInterval(() => {
+      const nextIndex = (activeBannerIndexRef.current + 1) % banners.length;
+      setActiveBannerIndex(nextIndex);
+      bannerRef.current?.scrollTo({ x: nextIndex * width, animated: true });
+    }, 4500);
+    return () => clearInterval(timer);
+  }, [banners.length]);
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' or 'offers'
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
 
@@ -848,7 +971,110 @@ export default function App() {
   const [showReplaceCartModal, setShowReplaceCartModal] = useState(false);
   const [pendingCartAction, setPendingCartAction] = useState(null);
 
-  const handleAddCartItem = (newHotelId, newRestaurantName, addAction) => {
+  // Switch Offer conflict checking states
+  const [showSwitchOfferModal, setShowSwitchOfferModal] = useState(false);
+  const [pendingSwitchOfferAction, setPendingSwitchOfferAction] = useState(null);
+  const [switchOfferWarningText, setSwitchOfferWarningText] = useState('');
+  const [activeCartPromo, setActiveCartPromo] = useState(null);
+  const [cartHotelOffers, setCartHotelOffers] = useState([]);
+
+  useEffect(() => {
+    const hotelId = getCartHotelId();
+    if (!hotelId) {
+      setCartHotelOffers([]);
+      return;
+    }
+    let active = true;
+    const fetchCartOffers = async () => {
+      try {
+        const backendUrl = await getActiveBackend();
+        const token = currentUser?.token;
+        const response = await fetch(`${backendUrl}/offers/hotels/${hotelId}/public-offers`, {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok && active) {
+          const data = await response.json();
+          if (Array.isArray(data)) {
+            setCartHotelOffers(data);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching cart offers:', err);
+      }
+    };
+    fetchCartOffers();
+    return () => {
+      active = false;
+    };
+  }, [getCartHotelId()]);
+
+  const determineActiveCartPromo = (items) => {
+    if (!items || items.length === 0) return null;
+    const campaignItem = items.find(i => i.campaignId !== null && i.campaignId !== undefined);
+    if (campaignItem) {
+      return { type: 'campaign', id: campaignItem.campaignId, name: 'Campaign' };
+    }
+    const offerItem = items.find(i => i.offerId !== null && i.offerId !== undefined);
+    if (offerItem) {
+      return { type: 'offer', id: offerItem.offerId, name: offerItem.offerLabel || 'Hotel Offer' };
+    }
+    return null;
+  };
+
+  const checkPromotionConflict = (itemToAdd, currentItems = cartItems) => {
+    let newPromo = null;
+    if (itemToAdd.campaignId) {
+      newPromo = { type: 'campaign', id: itemToAdd.campaignId, name: 'Campaign' };
+    } else if (itemToAdd.offerId) {
+      newPromo = { type: 'offer', id: itemToAdd.offerId, name: itemToAdd.offerLabel || 'Hotel Offer' };
+    }
+
+    if (!newPromo || currentItems.length === 0) {
+      return null;
+    }
+
+    let existingPromo = activeCartPromo;
+    if (!existingPromo) {
+      existingPromo = determineActiveCartPromo(currentItems);
+    }
+
+    if (!existingPromo) {
+      return null;
+    }
+
+    if (existingPromo.type !== newPromo.type || Number(existingPromo.id) !== Number(newPromo.id)) {
+      return {
+        existingPromo,
+        newPromo
+      };
+    }
+
+    return null;
+  };
+
+  // Sync activeCartPromo with cartItems changes dynamically
+  useEffect(() => {
+    if (cartItems.length === 0) {
+      setActiveCartPromo(null);
+    } else {
+      if (activeCartPromo) {
+        const stillExists = cartItems.some(i => 
+          (activeCartPromo.type === 'campaign' && Number(i.campaignId) === Number(activeCartPromo.id)) ||
+          (activeCartPromo.type === 'offer' && Number(i.offerId) === Number(activeCartPromo.id))
+        );
+        if (!stillExists) {
+          setActiveCartPromo(determineActiveCartPromo(cartItems));
+        }
+      } else {
+        setActiveCartPromo(determineActiveCartPromo(cartItems));
+      }
+    }
+  }, [cartItems]);
+
+  const handleAddCartItem = (newHotelId, newRestaurantName, addAction, itemToAdd = null) => {
     const firstItem = cartItems.length > 0 ? cartItems[0] : null;
     if (firstItem) {
       const activeHotelId = firstItem.hotelId;
@@ -862,9 +1088,50 @@ export default function App() {
         setShowReplaceCartModal(true);
         return;
       }
+
+      if (itemToAdd) {
+        const conflict = checkPromotionConflict(itemToAdd);
+        if (conflict) {
+          setPendingSwitchOfferAction(() => () => {
+            let newPromo = null;
+            if (itemToAdd.campaignId) {
+              newPromo = { type: 'campaign', id: itemToAdd.campaignId, name: 'Campaign' };
+            } else if (itemToAdd.offerId) {
+              newPromo = { type: 'offer', id: itemToAdd.offerId, name: itemToAdd.offerLabel || 'Hotel Offer' };
+            }
+            setActiveCartPromo(newPromo);
+            setAppliedPromo(null);
+            addAction();
+          });
+
+          const oldName = conflict.existingPromo.name === 'Campaign' ? 'Free Delivery' : conflict.existingPromo.name;
+          const newName = conflict.newPromo.name === 'Campaign' ? 'Free Delivery' : conflict.newPromo.name;
+          const oldText = oldName === 'FREE DELIVERY' ? 'Free Delivery' : oldName;
+          const newText = newName === 'FREE DELIVERY' ? 'Free Delivery' : newName;
+
+          setSwitchOfferWarningText(
+            `Your cart currently uses ${oldText}. Adding this item will switch the active offer and ${oldText} will be removed.`
+          );
+          setShowSwitchOfferModal(true);
+          return;
+        }
+      }
+    }
+
+    if (itemToAdd) {
+      let newPromo = null;
+      if (itemToAdd.campaignId) {
+        newPromo = { type: 'campaign', id: itemToAdd.campaignId, name: 'Campaign' };
+      } else if (itemToAdd.offerId) {
+        newPromo = { type: 'offer', id: itemToAdd.offerId, name: itemToAdd.offerLabel || 'Hotel Offer' };
+      }
+      if (newPromo && !activeCartPromo) {
+        setActiveCartPromo(newPromo);
+      }
     }
     addAction();
   };
+
 
   const handleClearCartAndAdd = () => {
     setCartItems([]);
@@ -881,6 +1148,19 @@ export default function App() {
   const handleCancelReplace = () => {
     setShowReplaceCartModal(false);
     setPendingCartAction(null);
+  };
+
+  const handleConfirmSwitchOffer = () => {
+    if (pendingSwitchOfferAction) {
+      pendingSwitchOfferAction();
+    }
+    setShowSwitchOfferModal(false);
+    setPendingSwitchOfferAction(null);
+  };
+
+  const handleCancelSwitchOffer = () => {
+    setShowSwitchOfferModal(false);
+    setPendingSwitchOfferAction(null);
   };
 
   const getCartHotelId = () => {
@@ -1993,6 +2273,38 @@ export default function App() {
     triggerToastNotification('👋 Logged out successfully');
   };
 
+  const handleOpenCampaign = async (campaignId) => {
+    setActiveCampaignId(campaignId);
+    setLoadingCampaignDetails(true);
+    try {
+      const res = await fetch(`${resolvedBackendUrl}/offers/store99/public-campaigns/${campaignId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const mappedCampaign = {
+          ...data,
+          bannerUrl: resolveImage(data.bannerUrl),
+          participatingHotels: (data.participatingHotels || []).map(h => ({
+            ...h,
+            image: resolveImage(h.image)
+          })),
+          items: (data.items || []).map(item => ({
+            ...item,
+            image: resolveImage(item.image)
+          }))
+        };
+        setCampaignDetails(mappedCampaign);
+      } else {
+        console.warn(`Failed to fetch campaign details: HTTP ${res.status}`);
+        setCampaignDetails({ isExpired: true });
+      }
+    } catch (e) {
+      console.warn('Error fetching campaign details:', e);
+      setCampaignDetails({ isExpired: true });
+    } finally {
+      setLoadingCampaignDetails(false);
+    }
+  };
+
   // Toggle Wishlist
   const toggleFavorite = (restId) => {
     setFavorites(prev =>
@@ -2075,6 +2387,10 @@ export default function App() {
           spice: itemSpice,
           addons: itemAddons.map(a => a.name),
           is99StoreItem: customizingItem.is99StoreItem || false,
+          campaignId: customizingItem.campaignId || null,
+          originalPrice: customizingItem.originalPrice || null,
+          offerId: customizingItem.offerId || null,
+          offerLabel: customizingItem.offerLabel || null,
           isVeg: customizingItem.isVeg || false
         };
         return [...prev, cartItem];
@@ -2084,7 +2400,7 @@ export default function App() {
       setCustomizingItem(null);
     };
 
-    handleAddCartItem(customizingItem.hotelId, customizingItem.restaurantName, action);
+    handleAddCartItem(customizingItem.hotelId, customizingItem.restaurantName, action, customizingItem);
   };
 
   // Quick Add Item directly to cart with animation
@@ -2115,7 +2431,12 @@ export default function App() {
           quantity: 1,
           spice: 'Medium',
           addons: [],
-          is99StoreItem: item.is99StoreItem || false
+          is99StoreItem: item.is99StoreItem || false,
+          campaignId: item.campaignId || null,
+          originalPrice: item.originalPrice || null,
+          offerId: item.offerId || null,
+          offerLabel: item.offerLabel || null,
+          isVeg: item.isVeg || false
         };
         return [...prev, newCartItem];
       });
@@ -2123,7 +2444,7 @@ export default function App() {
       triggerAddToCartAnimation(item.name);
     };
 
-    handleAddCartItem(itemHotelId, itemRestName, action);
+    handleAddCartItem(itemHotelId, itemRestName, action, item);
   };
 
   const getGroupedCartItems = (items) => {
@@ -2183,13 +2504,105 @@ export default function App() {
     setIsCartScrollAtBottom(isCloseToBottom);
   };
 
+  // Helper to calculate campaign discounted price on client side
+  const calculateCampaignDiscountedPrice = (originalPrice, campaign) => {
+    const orig = Number(originalPrice) || 0;
+    if (!campaign) return orig;
+    const type = campaign.offerType || 'FIXED_PRICE';
+    if (type === 'FIXED_PRICE') {
+      return Number(campaign.price) || 0;
+    }
+    if (type === 'FLAT_DISCOUNT') {
+      return Math.max(0, orig - (Number(campaign.flatDiscountAmount) || 0));
+    }
+    if (type === 'PERCENTAGE_DISCOUNT') {
+      let disc = (orig * (Number(campaign.percentageDiscount) || 0)) / 100;
+      if (campaign.maxDiscount) {
+        disc = Math.min(disc, Number(campaign.maxDiscount));
+      }
+      return Math.max(0, orig - disc);
+    }
+    return orig;
+  };
+
+  const getVerifiedCartItemPrice = (item) => {
+    if (item.campaignId) {
+      if (activeCartPromo?.type === 'campaign' && Number(activeCartPromo.id) === Number(item.campaignId)) {
+        const activeCampaign = platformCampaigns.find(camp => 
+          Number(camp.id) === Number(item.campaignId)
+        );
+        if (activeCampaign) {
+          return calculateCampaignDiscountedPrice(item.originalPrice || item.price, activeCampaign);
+        }
+      }
+      return item.originalPrice || item.price;
+    }
+    if (item.offerId) {
+      if (activeCartPromo?.type === 'offer' && Number(activeCartPromo.id) === Number(item.offerId)) {
+        return item.price;
+      }
+      return item.originalPrice || item.price;
+    }
+    return item.price;
+  };
+
+  // Check if any active campaign item in cart has free delivery
+  const isCampaignFreeDelivery = () => {
+    const hotelId = getCartHotelId();
+    if (!hotelId) return false;
+    const activeCampaign = platformCampaigns.find(camp =>
+      camp.offerType === 'FREE_DELIVERY' &&
+      camp.participatingHotels.some(h => h.id === Number(hotelId)) &&
+      cartItems.some(i => camp.items.some(ci => ci.hotelId === Number(hotelId) && ci.id === i.itemId))
+    );
+    return !!activeCampaign;
+  };
+
+  const getActiveFreeDeliveryOffer = () => {
+    const hotelId = getCartHotelId();
+    if (!hotelId || cartHotelOffers.length === 0) return null;
+
+    const fdOffer = cartHotelOffers.find(offer => 
+      offer.discountType === 'free_delivery' && 
+      offer.isActive
+    );
+
+    if (!fdOffer) return null;
+
+    const minOrder = Number(fdOffer.minimumOrderValue) || 0;
+    if (subtotal < minOrder) {
+      return null;
+    }
+
+    if (fdOffer.applicabilityType === 'foods') {
+      const hasAppFood = cartItems.some(i => 
+        fdOffer.applicableFoods && fdOffer.applicableFoods.some(af => af.id === i.itemId)
+      );
+      if (!hasAppFood) return null;
+    } else if (fdOffer.applicabilityType === 'categories') {
+      const rest = restaurants.find(r => r.id === Number(hotelId));
+      const hasAppCat = cartItems.some(i => {
+        const menuFood = rest?.menu?.find(f => f.id === i.itemId);
+        return menuFood && fdOffer.applicableCategories && fdOffer.applicableCategories.some(ac => ac.id === menuFood.categoryId);
+      });
+      if (!hasAppCat) return null;
+    }
+
+    return fdOffer;
+  };
+
+  const isFreeDeliveryEligible = () => {
+    if (isCampaignFreeDelivery()) return true;
+    return !!getActiveFreeDeliveryOffer();
+  };
+
   // Cart Totals & Discount Calculations
-  const subtotal = cartItems.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+  const subtotal = cartItems.reduce((acc, i) => acc + (getVerifiedCartItemPrice(i) * i.quantity), 0);
   const has99StoreItem = cartItems.some(i => i.is99StoreItem);
   const rawDeliveryFee = (subtotal > 0 && !has99StoreItem) ? 35 : 0;
 
   let discountAmount = 0;
-  let finalDeliveryFee = rawDeliveryFee;
+  let finalDeliveryFee = isFreeDeliveryEligible() ? 0 : rawDeliveryFee;
 
   if (appliedPromo) {
     if (appliedPromo.discountAmount !== undefined) {
@@ -2231,7 +2644,7 @@ export default function App() {
         items: cartItems.map(i => ({
           foodId: Number(i.itemId),
           quantity: Number(i.quantity),
-          finalUnitPrice: Number(i.price),
+          finalUnitPrice: Number(getVerifiedCartItemPrice(i)),
         })),
         subtotal: Number(subtotal),
         deliveryFee: Number(rawDeliveryFee),
@@ -2292,7 +2705,7 @@ export default function App() {
             items: cartItems.map(i => ({
               foodId: Number(i.itemId),
               quantity: Number(i.quantity),
-              finalUnitPrice: Number(i.price),
+              finalUnitPrice: Number(getVerifiedCartItemPrice(i)),
             })),
             subtotal: Number(subtotal),
             deliveryFee: Number(rawDeliveryFee),
@@ -3015,105 +3428,145 @@ export default function App() {
                 {/* INDEX 2: MAIN SCROLLABLE CONTENT */}
                 {selectedCategory === 'offers' && searchQuery.trim() === '' ? (
                   <View style={{ marginTop: 10, paddingTop: 0 }}>
-                    {/* Offers Page Header */}
-                    <View style={{ backgroundColor: '#FF4500', padding: 16, marginHorizontal: 14, borderRadius: 18 }}>
-                      <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '900' }}>🏷️ Exclusive Offers & Steal Deals</Text>
-                      <Text style={{ color: '#FEF2F2', fontSize: 12, marginTop: 4, fontWeight: '600' }}>Curated discounted food items & special deal restaurants</Text>
-                    </View>
-
                     {/* Section 1: Offer Food Items */}
-                    <View style={{ paddingHorizontal: 14, marginTop: 16 }}>
+                    <View style={{ paddingHorizontal: 14, marginTop: 8 }}>
                       <View style={styles.sectionHeader}>
-                        <Text style={[styles.sectionTitle, { color: D.heading }]}>🔥 Steal Deal Food Items</Text>
-                        <Text style={[styles.sectionCount, { color: D.textSub }]}>Up to 50% OFF</Text>
+                        <Text style={[styles.sectionTitle, { color: D.heading }]}>🔥 Best Food Offers</Text>
+                        <Text style={[styles.sectionCount, { color: D.textSub }]}>
+                          {activeHotelOfferFoods
+                            .filter(f => !onlyVeg || f.isVeg)
+                            .filter(f => searchQuery.trim() === '' || f.name.toLowerCase().includes(searchQuery.toLowerCase())).length} items
+                        </Text>
                       </View>
 
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 }}>
-                        {allDishes.filter(d => d.restaurant && d.restaurant.offerText).map((item, idx) => {
-                          const origPrice = Math.round(item.price * 1.5);
-                          const discPercent = Math.round(((origPrice - item.price) / origPrice) * 100);
-                          const inCart = cartItems.some(c => c.id === item.id);
-                          return (
-                            <TouchableOpacity
-                              key={`offer-dish-${item.id}-${idx}`}
-                              style={[styles.offerFoodGridCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
-                              activeOpacity={0.85}
-                              onPress={() => openProductDetails(item, item.restaurant)}
-                            >
-                              <View style={{ position: 'relative' }}>
-                                <Image source={{ uri: item.image }} style={styles.offerFoodImg} />
-                                <View style={{ position: 'absolute', top: 6, left: 6, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                                  <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '900' }}>{discPercent}% OFF</Text>
-                                </View>
-                              </View>
+                      {loadingHotelOffers ? (
+                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                          <ActivityIndicator size="small" color="#FF5252" />
+                          <Text style={{ fontSize: 11, color: D.textSub, marginTop: 8 }}>Loading food offers...</Text>
+                        </View>
+                      ) : activeHotelOfferFoods.length === 0 ? (
+                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                          <Tag size={32} color={D.textSub} style={{ marginBottom: 8 }} />
+                          <Text style={{ fontSize: 13, color: D.textSub, fontWeight: '600' }}>No active food offers found today.</Text>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 }}>
+                          {activeHotelOfferFoods
+                            .filter(f => !onlyVeg || f.isVeg)
+                            .filter(f => searchQuery.trim() === '' || f.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                            .map((item, idx) => {
+                              const inCart = cartItems.some(c => c.itemId === item.id);
+                              const restaurantObj = restaurants.find(r => r.id === item.hotelId) || { id: item.hotelId, name: item.hotelName };
 
-                              <Text style={[styles.gridCardTitle, { color: D.text, marginTop: 8 }]} numberOfLines={1}>{item.name}</Text>
-                              <Text style={[styles.gridCardSub, { color: D.textSub }]} numberOfLines={1}>by {item.restaurant?.name}</Text>
-
-                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                  <Text style={{ fontSize: 14, fontWeight: '900', color: '#FF5252' }}>₹{item.price}</Text>
-                                  <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginLeft: 4 }}>₹{origPrice}</Text>
-                                </View>
-
+                              return (
                                 <TouchableOpacity
-                                  style={[styles.addBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
-                                  onPress={(e) => { e.stopPropagation(); openCustomizer(item, item.restaurant); }}
+                                  key={`offer-dish-${item.id}-${idx}`}
+                                  style={[styles.offerFoodGridCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
+                                  activeOpacity={0.85}
+                                  onPress={() => openProductDetails(item, restaurantObj)}
                                 >
-                                  <Text style={[styles.addBtnText, inCart && { color: '#ffffff' }]}>{inCart ? 'ADDED ✓' : 'ADD +'}</Text>
+                                  <View style={{ position: 'relative' }}>
+                                    <Image source={{ uri: item.image }} style={styles.offerFoodImg} />
+                                    {item.offerLabel ? (
+                                      <View style={{ position: 'absolute', top: 6, left: 6, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                        <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '900' }}>{item.offerLabel}</Text>
+                                      </View>
+                                    ) : null}
+                                  </View>
+
+                                  <Text style={[styles.gridCardTitle, { color: D.text, marginTop: 8 }]} numberOfLines={1}>{item.name}</Text>
+                                  <Text style={[styles.gridCardSub, { color: D.textSub }]} numberOfLines={1}>by {item.hotelName}</Text>
+
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                      <Text style={{ fontSize: 14, fontWeight: '900', color: '#FF5252' }}>₹{item.offerPrice}</Text>
+                                      {item.price !== item.offerPrice ? (
+                                        <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginLeft: 4 }}>₹{item.price}</Text>
+                                      ) : null}
+                                    </View>
+
+                                    <TouchableOpacity
+                                      style={[styles.addBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
+                                      onPress={(e) => { e.stopPropagation(); openCustomizer(item, restaurantObj); }}
+                                    >
+                                      <Text style={[styles.addBtnText, inCart && { color: '#ffffff' }]}>{inCart ? 'ADDED ✓' : 'ADD +'}</Text>
+                                    </TouchableOpacity>
+                                  </View>
                                 </TouchableOpacity>
-                              </View>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
+                              );
+                            })}
+                        </View>
+                      )}
                     </View>
 
                     {/* Section 2: Offer Hotels */}
                     <View style={{ paddingHorizontal: 14, marginTop: 20 }}>
                       <View style={styles.sectionHeader}>
-                        <Text style={[styles.sectionTitle, { color: D.heading }]}>🏨 Top Offer Restaurants</Text>
-                        <Text style={[styles.sectionCount, { color: D.textSub }]}>{filteredRestaurants.length} places</Text>
+                        <Text style={[styles.sectionTitle, { color: D.heading }]}>🏨 Restaurants With Offers</Text>
+                        <Text style={[styles.sectionCount, { color: D.textSub }]}>
+                          {(() => {
+                            const count = activeHotelOffers
+                              .filter(h => !onlyVeg || h.isVeg)
+                              .filter(h => searchQuery.trim() === '' || h.name.toLowerCase().includes(searchQuery.toLowerCase())).length;
+                            return `${count} ${count === 1 ? 'place' : 'places'}`;
+                          })()}
+                        </Text>
                       </View>
 
-                      {filteredRestaurants.map(restaurant => {
-                        const isFav = favorites.includes(restaurant.id);
-                        return (
-                          <TouchableOpacity
-                            key={`offer-rest-${restaurant.id}`}
-                            style={[styles.restaurantCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
-                            activeOpacity={0.9}
-                            onPress={() => setSelectedRestaurant(restaurant)}
-                          >
-                            <View style={{ position: 'relative' }}>
-                              <Image source={{ uri: restaurant.image }} style={styles.restaurantImg} />
-                              {restaurant.offerText ? (
-                                <View style={styles.offerBadge}>
-                                  <Text style={styles.offerText}>{restaurant.offerText}</Text>
-                                </View>
-                              ) : null}
+                      {loadingHotelOffers ? (
+                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                          <ActivityIndicator size="small" color="#FF5252" />
+                        </View>
+                      ) : activeHotelOffers.length === 0 ? (
+                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                          <Store size={32} color={D.textSub} style={{ marginBottom: 8 }} />
+                          <Text style={{ fontSize: 13, color: D.textSub, fontWeight: '600' }}>No active restaurant offers found today.</Text>
+                        </View>
+                      ) : (
+                        activeHotelOffers
+                          .filter(h => !onlyVeg || h.isVeg)
+                          .filter(h => searchQuery.trim() === '' || h.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                          .map(restaurant => {
+                            const isFav = favorites.includes(restaurant.id);
+                            const fullRest = restaurants.find(r => r.id === restaurant.id) || restaurant;
 
+                            return (
                               <TouchableOpacity
-                                style={styles.favFloatingBtn}
-                                onPress={() => toggleFavorite(restaurant.id)}
+                                key={`offer-rest-${restaurant.id}`}
+                                style={[styles.restaurantCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
+                                activeOpacity={0.9}
+                                onPress={() => setSelectedRestaurant(fullRest)}
                               >
-                                <Heart size={18} color={isFav ? '#FF5252' : '#ffffff'} fill={isFav ? '#FF5252' : 'transparent'} />
-                              </TouchableOpacity>
-                            </View>
+                                <View style={{ position: 'relative' }}>
+                                  <Image source={{ uri: restaurant.image }} style={styles.restaurantImg} />
+                                  {restaurant.offerText ? (
+                                    <View style={styles.offerBadge}>
+                                      <Text style={styles.offerText}>{restaurant.offerText}</Text>
+                                    </View>
+                                  ) : null}
 
-                            <View style={styles.cardContent}>
-                              <View style={styles.cardRow}>
-                                <Text style={[styles.restaurantTitle, { color: D.heading }]} numberOfLines={1}>{restaurant.name}</Text>
-                                <View style={styles.ratingBadge}>
-                                  <Star size={12} color="#ffffff" fill="#ffffff" />
-                                  <Text style={styles.ratingText}>{restaurant.rating}</Text>
+                                  <TouchableOpacity
+                                    style={styles.favFloatingBtn}
+                                    onPress={() => toggleFavorite(restaurant.id)}
+                                  >
+                                    <Heart size={18} color={isFav ? '#FF5252' : '#ffffff'} fill={isFav ? '#FF5252' : 'transparent'} />
+                                  </TouchableOpacity>
                                 </View>
-                              </View>
-                              <Text style={[styles.restaurantDesc, { color: D.textSub }]} numberOfLines={2}>{restaurant.description}</Text>
-                            </View>
-                          </TouchableOpacity>
-                        );
-                      })}
+
+                                <View style={styles.cardContent}>
+                                  <View style={styles.cardRow}>
+                                    <Text style={[styles.restaurantTitle, { color: D.heading }]} numberOfLines={1}>{restaurant.name}</Text>
+                                    <View style={styles.ratingBadge}>
+                                      <Star size={12} color="#ffffff" fill="#ffffff" />
+                                      <Text style={styles.ratingText}>{restaurant.rating || '4.8'}</Text>
+                                    </View>
+                                  </View>
+                                  <Text style={[styles.restaurantDesc, { color: D.textSub }]} numberOfLines={2}>{restaurant.description || 'Special deals and delicious food'}</Text>
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })
+                      )}
                     </View>
                   </View>
                 ) : (
@@ -3169,29 +3622,63 @@ export default function App() {
                           </View>
                         )}
                       </View>
-                    ) : (
-                      <View style={{ paddingHorizontal: 16, marginVertical: 8 }}>
-                        <ImageBackground
-                          source={{ uri: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80' }}
-                          style={styles.khaoGullyBanner}
-                          imageStyle={{ borderRadius: 16 }}
+                    ) : banners.length === 0 ? null : (
+                      <View style={{ marginVertical: 8 }}>
+                        <ScrollView
+                          ref={bannerRef}
+                          horizontal
+                          pagingEnabled
+                          showsHorizontalScrollIndicator={false}
+                          onMomentumScrollEnd={(e) => {
+                            const offset = e.nativeEvent.contentOffset.x;
+                            const index = Math.round(offset / width);
+                            if (index !== activeBannerIndex) {
+                              setActiveBannerIndex(index);
+                            }
+                          }}
+                          contentContainerStyle={{ paddingHorizontal: 0 }}
                         >
-                          <View style={styles.khaoGullyOverlay}>
-                            <Text style={styles.khaoGullyTitle}>KHAO GULLY</Text>
-                            <Text style={styles.khaoGullySubtitle}>All your street food faves, in one place</Text>
-                            <TouchableOpacity
-                              style={styles.khaoGullyBtn}
-                              onPress={() => {
-                                const targetHotel = restaurants.find(r => r.id === 1) || restaurants[0];
-                                if (targetHotel) {
-                                  setSelectedRestaurant(targetHotel);
-                                }
-                              }}
-                            >
-                              <Text style={styles.khaoGullyBtnText}>ORDER NOW</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </ImageBackground>
+                          {banners.map((banner, idx) => {
+                            return (
+                              <TouchableOpacity
+                                key={`banner-${banner.id}-${idx}`}
+                                activeOpacity={0.9}
+                                onPress={() => handleOpenCampaign(banner.campaignId)}
+                                style={{
+                                  width: width - 32,
+                                  height: 130,
+                                  marginHorizontal: 16,
+                                  borderRadius: 16,
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                {banner.image ? (
+                                  <Image
+                                    source={{ uri: banner.image }}
+                                    style={{ width: '100%', height: '100%', borderRadius: 16 }}
+                                    resizeMode="cover"
+                                  />
+                                ) : (
+                                  <View style={{ width: '100%', height: '100%', backgroundColor: darkMode ? '#1E293B' : '#FEF2F2', padding: 16, justifyContent: 'center', borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16 }}>
+                                    {banner.badge ? (
+                                      <View style={{ alignSelf: 'flex-start', backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginBottom: 6 }}>
+                                        <Text style={{ color: '#ffffff', fontSize: 9, fontWeight: '900' }}>{banner.badge}</Text>
+                                      </View>
+                                    ) : null}
+                                    <Text style={[styles.khaoGullyTitle, { color: D.heading }]} numberOfLines={1}>{banner.title}</Text>
+                                    <Text style={[styles.khaoGullySubtitle, { color: D.textSub }]} numberOfLines={1}>{banner.subtitle}</Text>
+                                    
+                                    <View
+                                      style={[styles.khaoGullyBtn, { marginTop: 8, width: 140, backgroundColor: '#FF5252' }]}
+                                    >
+                                      <Text style={[styles.khaoGullyBtnText, { color: '#ffffff' }]}>EXPLORE NOW</Text>
+                                    </View>
+                                  </View>
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
                       </View>
                     )}
 
@@ -5673,6 +6160,185 @@ export default function App() {
               </ScrollView>
             </SafeAreaView>
           </Modal>
+
+          {/* PLATFORM CAMPAIGN DETAILS MODAL */}
+          <Modal visible={activeCampaignId !== null} animationType="slide" statusBarTranslucent onRequestClose={() => { setActiveCampaignId(null); setCampaignDetails(null); }}>
+            <SafeAreaView style={{ flex: 1, backgroundColor: D.bg }}>
+              {/* HEADER */}
+              <View style={[styles.modalHeader, { borderBottomWidth: 1, borderBottomColor: D.divider, backgroundColor: D.card, paddingTop: Platform.OS === 'android' ? 12 : 8, paddingBottom: 10 }]}>
+                <TouchableOpacity onPress={() => { setActiveCampaignId(null); setCampaignDetails(null); }} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
+                  <ArrowLeft size={20} color={D.text} />
+                </TouchableOpacity>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.modalHeaderTitle, { color: D.text, fontSize: 16 }]} numberOfLines={1}>
+                    {loadingCampaignDetails ? 'Loading Campaign...' : campaignDetails?.name || 'Campaign Details'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }} numberOfLines={1}>
+                    {loadingCampaignDetails ? 'Please wait' : campaignDetails?.description || 'Special platform campaign'}
+                  </Text>
+                </View>
+              </View>
+
+              {loadingCampaignDetails ? (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <ActivityIndicator size="large" color="#FF5252" />
+                  <Text style={{ marginTop: 12, color: D.textSub, fontSize: 13, fontWeight: '600' }}>Fetching latest campaign details...</Text>
+                </View>
+              ) : campaignDetails?.isExpired ? (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+                  <AlertTriangle size={48} color="#EF4444" style={{ marginBottom: 16 }} />
+                  <Text style={{ fontSize: 18, fontWeight: '900', color: D.heading, textAlign: 'center' }}>This campaign has ended.</Text>
+                  <Text style={{ fontSize: 13, color: D.textSub, textAlign: 'center', marginTop: 8 }}>The promotional offer is no longer active. Browse other offers on our homepage!</Text>
+                  <TouchableOpacity
+                    style={{ marginTop: 24, backgroundColor: '#FF5252', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 }}
+                    onPress={() => { setActiveCampaignId(null); setCampaignDetails(null); }}
+                  >
+                    <Text style={{ color: '#ffffff', fontWeight: '800', fontSize: 13 }}>GO BACK</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 + (initialWindowMetrics?.insets?.bottom || 0) }}>
+                  {campaignDetails?.bannerUrl && (
+                    <View style={{ width: '100%', height: 200, backgroundColor: darkMode ? '#0F172A' : '#F1F5F9', justifyContent: 'center', alignItems: 'center' }}>
+                      <Image
+                        source={{ uri: campaignDetails.bannerUrl }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="contain"
+                      />
+                    </View>
+                  )}
+
+                  <View style={{ padding: 14 }}>
+                    {/* Validity Info */}
+                    {campaignDetails?.startAt && campaignDetails?.endAt && (
+                      <View style={{ backgroundColor: darkMode ? '#1E293B' : '#FEF2F2', padding: 12, borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: D.cardBorder }}>
+                        <Text style={{ color: '#FF5252', fontSize: 11, fontWeight: '800' }}>
+                          📅 VALID FROM {new Date(campaignDetails.startAt).toLocaleDateString()} TO {new Date(campaignDetails.endAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Check if no hotels joined */}
+                    {!campaignDetails?.participatingHotels || campaignDetails.participatingHotels.length === 0 ? (
+                      <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                        <Store size={48} color={D.textSub} style={{ marginBottom: 12 }} />
+                        <Text style={{ fontSize: 15, fontWeight: '800', color: D.heading, textAlign: 'center' }}>Restaurants are joining this campaign.</Text>
+                        <Text style={{ fontSize: 12, color: D.textSub, textAlign: 'center', marginTop: 4 }}>Check back soon.</Text>
+                      </View>
+                    ) : (
+                      campaignDetails.participatingHotels.map((hotel) => {
+                        const hotelItems = (campaignDetails.items || []).filter(item => item.hotelId === hotel.id);
+
+                        return (
+                          <View key={`camp-hotel-${hotel.id}`} style={{ marginBottom: 20 }}>
+                            {/* Hotel Header */}
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: D.divider, paddingBottom: 6 }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 15, fontWeight: '800', color: D.heading }}>🏨 {hotel.name}</Text>
+                                <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }}>{hotel.deliveryTime} • ⭐ {hotel.rating || '4.8'}</Text>
+                              </View>
+                            </View>
+
+                            {/* Hotel campaign items list */}
+                            {hotelItems.length === 0 ? (
+                              <View style={{ padding: 16, backgroundColor: D.chipBg, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: D.cardBorder }}>
+                                <Text style={{ fontSize: 12, color: D.textSub, fontWeight: '600' }}>Campaign items will be available soon.</Text>
+                              </View>
+                            ) : (
+                              hotelItems.map((item, idx) => {
+                                const inCart = cartItems.some(c => c.itemId === item.id);
+                                const restaurantObj = restaurants.find(r => r.id === item.hotelId) || { id: hotel.id, name: hotel.name };
+
+                                let itemBadge = '';
+                                if (campaignDetails.offerType === 'PERCENTAGE_DISCOUNT') {
+                                  itemBadge = `${Math.round(campaignDetails.percentageDiscount)}% OFF`;
+                                } else if (campaignDetails.offerType === 'FIXED_PRICE') {
+                                  itemBadge = 'DEAL PRICE';
+                                } else if (campaignDetails.offerType === 'FLAT_DISCOUNT') {
+                                  itemBadge = `₹${Math.round(campaignDetails.flatDiscountAmount)} OFF`;
+                                } else if (campaignDetails.offerType === 'FREE_DELIVERY') {
+                                  itemBadge = 'FREE DEL';
+                                }
+
+                                return (
+                                  <TouchableOpacity
+                                    key={`camp-item-${item.id}-${idx}`}
+                                    activeOpacity={0.9}
+                                    onPress={() => {
+                                      setActiveCampaignId(null);
+                                      setCampaignDetails(null);
+                                      openProductDetails(item, restaurantObj);
+                                    }}
+                                    style={{
+                                      flexDirection: 'row',
+                                      backgroundColor: D.card,
+                                      borderWidth: 1,
+                                      borderColor: D.cardBorder,
+                                      borderRadius: 12,
+                                      padding: 10,
+                                      marginBottom: 10,
+                                      alignItems: 'center'
+                                    }}
+                                  >
+                                    {item.image ? (
+                                      <Image
+                                        source={{ uri: item.image }}
+                                        style={{ width: 68, height: 68, borderRadius: 8 }}
+                                        resizeMode="cover"
+                                      />
+                                    ) : (
+                                      <View style={{ width: 68, height: 68, borderRadius: 8, backgroundColor: D.chipBg, justifyContent: 'center', alignItems: 'center' }}>
+                                        <Utensils size={24} color={D.textSub} />
+                                      </View>
+                                    )}
+                                    <View style={{ flex: 1, marginLeft: 12 }}>
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                        <View style={[styles.vegBadgeIcon, { borderColor: item.isVeg ? '#10B981' : '#EF4444', width: 12, height: 12, borderWidth: 1, borderRadius: 2, marginRight: 4 }]}>
+                                          <View style={[styles.vegBadgeDot, { backgroundColor: item.isVeg ? '#10B981' : '#EF4444', width: 6, height: 6, borderRadius: 3 }]} />
+                                        </View>
+                                        <Text style={{ fontSize: 13, fontWeight: '800', color: D.text }} numberOfLines={1}>{item.name}</Text>
+                                      </View>
+                                      
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '900', color: '#FF5252' }}>₹{item.offerPrice}</Text>
+                                        {item.price !== item.offerPrice ? (
+                                          <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginLeft: 4 }}>₹{item.price}</Text>
+                                        ) : null}
+                                        {itemBadge ? (
+                                          <View style={{ backgroundColor: '#FEF2F2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 0.5, borderColor: '#FECDD3', marginLeft: 6 }}>
+                                            <Text style={{ color: '#EF4444', fontSize: 9, fontWeight: '800' }}>{itemBadge}</Text>
+                                          </View>
+                                        ) : null}
+                                      </View>
+                                    </View>
+
+                                    <TouchableOpacity
+                                      style={[styles.addBtn, { width: 72, height: 32, paddingVertical: 0, justifyContent: 'center', alignItems: 'center' }, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
+                                      onPress={(e) => {
+                                        e.stopPropagation();
+                                        openCustomizer(item, restaurantObj);
+                                      }}
+                                    >
+                                      <Text style={[styles.addBtnText, { fontSize: 10, fontWeight: '800' }, inCart && { color: '#ffffff' }]}>
+                                        {inCart ? 'ADDED ✓' : 'ADD +'}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  </TouchableOpacity>
+                                );
+                              })
+                            )}
+                          </View>
+                        );
+                      })
+                    )}
+                  </View>
+                </ScrollView>
+              )}
+              {/* Floating View Cart bar on Campaign Details */}
+              {renderFloatingCartBar(Math.max(12, bottomInset) + 12, true)}
+            </SafeAreaView>
+          </Modal>
+
           {/* CHECKOUT & PAYMENT MODAL */}
           <Modal visible={isCheckoutOpen} animationType="slide" statusBarTranslucent onRequestClose={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setTimeout(() => setIsCartOpen(true), 150); } }} onShow={() => { setTimeout(() => setCheckoutLayoutKey(k => k + 1), 60); }}>
             <View key={checkoutLayoutKey} style={{ flex: 1, backgroundColor: '#F5F7FA', paddingTop: STATUSBAR_HEIGHT }}>
