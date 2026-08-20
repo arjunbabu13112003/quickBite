@@ -3176,7 +3176,12 @@ export default function App() {
                             <Text style={styles.khaoGullySubtitle}>All your street food faves, in one place</Text>
                             <TouchableOpacity
                               style={styles.khaoGullyBtn}
-                              onPress={() => { }}
+                              onPress={() => {
+                                const targetHotel = restaurants.find(r => r.id === 1) || restaurants[0];
+                                if (targetHotel) {
+                                  setSelectedRestaurant(targetHotel);
+                                }
+                              }}
                             >
                               <Text style={styles.khaoGullyBtnText}>ORDER NOW</Text>
                             </TouchableOpacity>
