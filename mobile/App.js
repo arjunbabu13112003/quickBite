@@ -274,15 +274,14 @@ const AVAILABLE_COUPONS = [
 const getBasePrice = (item, spiceLevel) => {
   if (!item) return 0;
   const base = item.price || 0;
-  const nameLower = (item.name || '').toLowerCase();
 
-  if (nameLower.includes('mandi')) {
-    if (spiceLevel === 'Half') return Math.round(base * 1.8);
-    if (spiceLevel === 'Full') return Math.round(base * 3.5);
-    return base; // Quarter
-  } else if (nameLower.includes('biriyani') || nameLower.includes('biryani')) {
-    if (spiceLevel === 'Full') return Math.round(base * 1.8);
-    return base; // Half
+  const groups = item.customizationGroups || item.customizations || [];
+  const singleGroup = groups.find(g => g.selectionType === 'single' && g.isActive !== false);
+  if (singleGroup) {
+    const matchedChoice = (singleGroup.choices || []).find(c => c.name === spiceLevel && c.isActive !== false);
+    if (matchedChoice) {
+      return base + Number(matchedChoice.additionalPrice || 0);
+    }
   }
   return base;
 };
@@ -2398,8 +2397,7 @@ export default function App() {
 
   // Item Customization Modal
   const openCustomizer = (item, restaurant) => {
-    const nameLower = (item?.name || '').toLowerCase();
-    const isCustomizable = item.customizable !== false && ((item.customizationGroups && item.customizationGroups.length > 0) || (item.customizations && item.customizations.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani'));
+    const isCustomizable = item.customizable !== false && ((item.customizationGroups && item.customizationGroups.filter(g => g.isActive !== false).length > 0) || (item.customizations && item.customizations.filter(g => g.isActive !== false).length > 0));
     if (!isCustomizable) {
       quickAddToCart(item, restaurant);
       return;
@@ -2416,13 +2414,12 @@ export default function App() {
     });
     setItemQuantity(1);
 
-    if (nameLower.includes('mandi')) {
-      setItemSpice('Quarter');
-    } else if (nameLower.includes('biriyani') || nameLower.includes('biryani')) {
-      setItemSpice('Half');
-    } else {
-      setItemSpice('Medium');
-    }
+    const groups = item.customizationGroups || item.customizations || [];
+    const singleGroup = groups.find(g => g.selectionType === 'single' && g.isActive !== false);
+    const defaultSpice = singleGroup && singleGroup.choices && singleGroup.choices.filter(c => c.isActive !== false && c.isAvailable !== false).length > 0
+      ? singleGroup.choices.filter(c => c.isActive !== false && c.isAvailable !== false)[0].name
+      : '';
+    setItemSpice(defaultSpice);
 
     setItemAddons([]);
   };
@@ -5359,8 +5356,7 @@ export default function App() {
                     promoType: viewingProduct.promoType
                   }
                 : viewingProduct;
-              const nameLower = (currentProduct.name || '').toLowerCase();
-              const isCustomizable = currentProduct.customizable !== false && ((currentProduct.customizationGroups && currentProduct.customizationGroups.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani'));
+              const isCustomizable = currentProduct.customizable !== false && ((currentProduct.customizationGroups && currentProduct.customizationGroups.filter(g => g.isActive !== false).length > 0) || (currentProduct.customizations && currentProduct.customizations.filter(g => g.isActive !== false).length > 0));
 
               return (
                 <View style={{ height, width, backgroundColor: D.modalBg, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }}>
@@ -5888,53 +5884,57 @@ export default function App() {
 
                 <Text style={styles.customizerSub}>₹{getBasePrice(customizingItem, itemSpice)}</Text>
 
-                {/* Spice Level / Portion Size */}
-                <Text style={[styles.customSectionTitle, { color: D.heading }]}>
-                  {customizingItem?.name?.toLowerCase().includes('biriyani') || customizingItem?.name?.toLowerCase().includes('biryani') || customizingItem?.name?.toLowerCase().includes('mandi') ? 'Choose Portion Size' : 'Choose Spice Level'}
-                </Text>
-                <View style={styles.optionRow}>
-                  {(() => {
-                    let options = ['Mild', 'Medium', 'Extra Spicy'];
-                    const nameLower = (customizingItem?.name || '').toLowerCase();
-                    if (nameLower.includes('mandi')) {
-                      options = ['Quarter', 'Half', 'Full'];
-                    } else if (nameLower.includes('biriyani') || nameLower.includes('biryani')) {
-                      options = ['Half', 'Full'];
-                    }
-                    return options.map(sp => (
-                      <TouchableOpacity
-                        key={sp}
-                        style={[styles.optionChip, { backgroundColor: itemSpice === sp ? '#FF5252' : D.chipBg, borderColor: D.cardBorder }]}
-                        onPress={() => setItemSpice(sp)}
-                      >
-                        <Text style={[styles.optionChipText, { color: itemSpice === sp ? '#ffffff' : D.text }]}>{sp}</Text>
-                      </TouchableOpacity>
-                    ));
-                  })()}
-                </View>
-
-                {/* Add-ons */}
-                <Text style={[styles.customSectionTitle, { color: D.heading }]}>Popular Add-ons</Text>
-
-                {[
-                  { name: 'Extra Cheese', price: 40 },
-                  { name: 'Extra Sauce Dip', price: 25 },
-                  { name: 'Cold Beverage', price: 45 }
-                ].map(addon => {
-                  const selected = itemAddons.some(a => a.name === addon.name);
-                  return (
-                    <TouchableOpacity
-                      key={addon.name}
-                      style={[styles.addonRow, { borderBottomColor: D.divider }]}
-                      onPress={() => toggleAddon(addon.name, addon.price)}
-                    >
-                      <Text style={[styles.addonName, { color: D.text }]}>{addon.name} (+₹{addon.price})</Text>
-                      <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
-                        {selected && <Check size={12} color="#ffffff" />}
+                {/* Dynamic DB Customizations */}
+                {(customizingItem?.customizationGroups || customizingItem?.customizations || [])
+                  .filter(group => group.isActive !== false)
+                  .map(group => {
+                    return (
+                      <View key={group.id} style={{ marginBottom: 16 }}>
+                        <Text style={[styles.customSectionTitle, { color: D.heading, marginBottom: 8 }]}>
+                          {group.name} {group.isRequired ? '*' : ''}
+                        </Text>
+                        
+                        {group.selectionType === 'single' ? (
+                          <View style={styles.optionRow}>
+                            {(group.choices || []).filter(c => c.isActive !== false && c.isAvailable !== false).map(choice => {
+                              const isSelected = itemSpice === choice.name;
+                              return (
+                                <TouchableOpacity
+                                  key={choice.id}
+                                  style={[styles.optionChip, { backgroundColor: isSelected ? '#FF5252' : D.chipBg, borderColor: D.cardBorder }]}
+                                  onPress={() => setItemSpice(choice.name)}
+                                >
+                                  <Text style={[styles.optionChipText, { color: isSelected ? '#ffffff' : D.text }]}>
+                                    {choice.name} {choice.additionalPrice > 0 ? `(+₹${choice.additionalPrice})` : ''}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        ) : (
+                          <View>
+                            {(group.choices || []).filter(c => c.isActive !== false && c.isAvailable !== false).map(choice => {
+                              const selected = itemAddons.some(a => a.name === choice.name);
+                              return (
+                                <TouchableOpacity
+                                  key={choice.id}
+                                  style={[styles.addonRow, { borderBottomColor: D.divider }]}
+                                  onPress={() => toggleAddon(choice.name, Number(choice.additionalPrice))}
+                                >
+                                  <Text style={[styles.addonName, { color: D.text }]}>
+                                    {choice.name} (+₹{choice.additionalPrice})
+                                  </Text>
+                                  <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
+                                    {selected && <Check size={12} color="#ffffff" />}
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        )}
                       </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                    );
+                  })}
 
                 {/* Quantity Control */}
                 <View style={styles.qtyRow}>

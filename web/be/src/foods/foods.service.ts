@@ -113,6 +113,8 @@ export class FoodsService {
     const queryBuilder = this.foodRepository
       .createQueryBuilder('food')
       .leftJoinAndSelect('food.category', 'category')
+      .leftJoinAndSelect('food.customizationGroups', 'customizationGroups')
+      .leftJoinAndSelect('customizationGroups.choices', 'choices')
       .where('food.hotelId = :hotelId', { hotelId });
 
     if (activeOnly) {
@@ -438,6 +440,8 @@ export class FoodsService {
       .createQueryBuilder('food')
       .leftJoinAndSelect('food.category', 'category')
       .leftJoinAndSelect('food.hotel', 'hotel')
+      .leftJoinAndSelect('food.customizationGroups', 'customizationGroups')
+      .leftJoinAndSelect('customizationGroups.choices', 'choices')
       .where('food.isActive = :foodActive', { foodActive: query.isActive !== false })
       .andWhere('food.isAvailable = :foodAvailable', { foodAvailable: query.isAvailable !== false })
       .andWhere('category.isActive = :catActive', { catActive: true })
