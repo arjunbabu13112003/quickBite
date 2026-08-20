@@ -500,7 +500,11 @@ export default function App() {
                   image: resolveImage(f.image) || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
                   isVeg: f.isVeg || false,
                   isPopular: f.isBestseller || false,
-                  hotelId: hotel.id
+                  hotelId: hotel.id,
+                  campaignId: f.campaignId || null,
+                  offerId: f.offerId || null,
+                  offerLabel: f.offerLabel || null,
+                  promoType: f.campaignId ? 'campaign' : (f.offerId ? 'offer' : null)
                 };
               })
             };
@@ -975,6 +979,7 @@ export default function App() {
   const [showSwitchOfferModal, setShowSwitchOfferModal] = useState(false);
   const [pendingSwitchOfferAction, setPendingSwitchOfferAction] = useState(null);
   const [switchOfferWarningText, setSwitchOfferWarningText] = useState('');
+  const [switchOfferTitle, setSwitchOfferTitle] = useState('Switch offer?');
   const [activeCartPromo, setActiveCartPromo] = useState(null);
   const [cartHotelOffers, setCartHotelOffers] = useState([]);
 
@@ -1035,7 +1040,7 @@ export default function App() {
       newPromo = { type: 'offer', id: itemToAdd.offerId, name: itemToAdd.offerLabel || 'Hotel Offer' };
     }
 
-    if (!newPromo || currentItems.length === 0) {
+    if (currentItems.length === 0) {
       return null;
     }
 
@@ -1054,11 +1059,20 @@ export default function App() {
       return null;
     }
 
-    if (existingPromo.type !== newPromo.type || Number(existingPromo.id) !== Number(newPromo.id)) {
-      return {
-        existingPromo,
-        newPromo
-      };
+    if (existingPromo.type === 'campaign') {
+      if (!newPromo || newPromo.type !== 'campaign' || Number(newPromo.id) !== Number(existingPromo.id)) {
+        return {
+          existingPromo,
+          newPromo: newPromo || { type: 'normal', id: null, name: 'Normal Item' }
+        };
+      }
+    } else {
+      if (newPromo && (existingPromo.type !== newPromo.type || Number(existingPromo.id) !== Number(newPromo.id))) {
+        return {
+          existingPromo,
+          newPromo
+        };
+      }
     }
 
     return null;
@@ -1116,6 +1130,16 @@ export default function App() {
             } else if (itemToAdd.offerId) {
               newPromo = { type: 'offer', id: itemToAdd.offerId, name: itemToAdd.offerLabel || 'Hotel Offer' };
             }
+            // Remove old conflicting promotion items from cart
+            setCartItems(prev => prev.filter(c => {
+              if (conflict.existingPromo.type === 'campaign') {
+                return !(c.promoType === 'campaign' && Number(c.campaignId) === Number(conflict.existingPromo.id));
+              }
+              if (conflict.existingPromo.type === 'offer') {
+                return !(c.promoType === 'offer' && Number(c.offerId) === Number(conflict.existingPromo.id));
+              }
+              return true;
+            }));
             setActiveCartPromo(newPromo);
             setAppliedPromo(null);
             addAction();
@@ -1155,9 +1179,17 @@ export default function App() {
           oldText = normalizeLabel(oldText);
           newText = normalizeLabel(newText);
 
-          setSwitchOfferWarningText(
-            `Your cart currently uses ${oldText}. Adding this item will switch to ${newText} and ${oldText} will be removed.`
-          );
+          if (conflict.newPromo && conflict.newPromo.type === 'normal' && conflict.existingPromo.type === 'campaign') {
+            setSwitchOfferTitle('Leave campaign offer?');
+            setSwitchOfferWarningText(
+              `Your cart is using a Free Delivery campaign. This item is not part of that campaign. Continuing will remove the campaign benefit and start a normal cart.`
+            );
+          } else {
+            setSwitchOfferTitle('Switch offer?');
+            setSwitchOfferWarningText(
+              `Your cart currently uses ${oldText}. Adding this item will switch to ${newText} and ${oldText} will be removed.`
+            );
+          }
           setShowSwitchOfferModal(true);
           return;
         }
@@ -5310,7 +5342,17 @@ export default function App() {
                 return typeof rev.date === 'string' ? rev.date : getTimeAgo(rev.date || Date.now());
               };
 
-              const currentProduct = detailedFoodItem || viewingProduct;
+              const currentProduct = detailedFoodItem
+                ? {
+                    ...detailedFoodItem,
+                    price: viewingProduct.price,
+                    originalPrice: viewingProduct.originalPrice,
+                    campaignId: viewingProduct.campaignId,
+                    offerId: viewingProduct.offerId,
+                    offerLabel: viewingProduct.offerLabel,
+                    promoType: viewingProduct.promoType
+                  }
+                : viewingProduct;
               const nameLower = (currentProduct.name || '').toLowerCase();
               const isCustomizable = (currentProduct.customizationGroups && currentProduct.customizationGroups.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani');
 
@@ -5756,7 +5798,7 @@ export default function App() {
                   marginBottom: 8,
                   textAlign: 'center'
                 }}>
-                  Switch offer?
+                  {switchOfferTitle}
                 </Text>
 
                 {/* Subtitle */}
@@ -6536,7 +6578,12 @@ export default function App() {
                               </View>
                             ) : (
                               hotelItems.map((item, idx) => {
-                                const inCart = cartItems.some(c => Number(c.itemId) === Number(item.id) && Number(c.hotelId) === Number(item.hotelId));
+                                const inCart = cartItems.some(c => 
+                                  Number(c.itemId) === Number(item.id) && 
+                                  Number(c.hotelId) === Number(item.hotelId) &&
+                                  c.promoType === 'campaign' &&
+                                  Number(c.campaignId) === Number(activeCampaignId)
+                                );
                                 const restaurantObj = restaurants.find(r => Number(r.id) === Number(item.hotelId)) || { id: hotel.id, name: hotel.name };
 
                                 let itemBadge = '';
@@ -6607,7 +6654,12 @@ export default function App() {
                                       onPress={(e) => {
                                         e.stopPropagation();
                                         if (inCart) {
-                                          setCartItems(prev => prev.filter(c => !(Number(c.itemId) === Number(item.id) && Number(c.hotelId) === Number(item.hotelId))));
+                                          setCartItems(prev => prev.filter(c => !(
+                                             Number(c.itemId) === Number(item.id) && 
+                                             Number(c.hotelId) === Number(item.hotelId) &&
+                                             c.promoType === 'campaign' &&
+                                             Number(c.campaignId) === Number(activeCampaignId)
+                                           )));
                                         } else {
                                           const offerType = campaignDetails?.offerType;
                                           let resolvedPrice = item.price;

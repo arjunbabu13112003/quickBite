@@ -345,13 +345,12 @@ export class OrdersService {
           throw new BadRequestException(`❌ Minimum order of ₹${minOrder} is required for Campaign Free Delivery.`);
         }
         if (orderItemsData.length > 0) {
-          const hasCampaignItem = await this.dataSource.query(`
-            SELECT 1 FROM store_99_items 
+          const eligibleItemsCount = await this.dataSource.query(`
+            SELECT COUNT(id) as count FROM store_99_items 
             WHERE "campaignId" = $1 AND "hotelId" = $2 AND "foodId" IN (${orderItemsData.map(i => i.foodId).join(', ')})
-            LIMIT 1
           `, [campaign.id, hotel.id]);
-          if (!hasCampaignItem || hasCampaignItem.length === 0) {
-            throw new BadRequestException('❌ No eligible items in cart for this campaign.');
+          if (!eligibleItemsCount || Number(eligibleItemsCount[0].count) !== orderItemsData.length) {
+            throw new BadRequestException('❌ All items in the cart must belong to the active Free Delivery campaign.');
           }
         }
         finalDeliveryFee = 0;
