@@ -1013,22 +1013,25 @@ export default function App() {
 
   const determineActiveCartPromo = (items) => {
     if (!items || items.length === 0) return null;
-    const campaignItem = items.find(i => i.campaignId !== null && i.campaignId !== undefined);
-    if (campaignItem) {
-      return { type: 'campaign', id: campaignItem.campaignId, name: 'Campaign' };
-    }
-    const offerItem = items.find(i => i.offerId !== null && i.offerId !== undefined);
-    if (offerItem) {
-      return { type: 'offer', id: offerItem.offerId, name: offerItem.offerLabel || 'Hotel Offer' };
+    const promoItem = items.find(i => i.promoType !== null && i.promoType !== undefined);
+    if (promoItem) {
+      if (promoItem.promoType === 'campaign') {
+        return { type: 'campaign', id: promoItem.campaignId, name: 'Campaign' };
+      }
+      if (promoItem.promoType === 'offer') {
+        return { type: 'offer', id: promoItem.offerId, name: promoItem.offerLabel || 'Hotel Offer' };
+      }
     }
     return null;
   };
 
   const checkPromotionConflict = (itemToAdd, currentItems = cartItems) => {
     let newPromo = null;
-    if (itemToAdd.campaignId) {
+    const resolvedPromoType = itemToAdd.promoType || (itemToAdd.campaignId ? 'campaign' : (itemToAdd.offerId ? 'offer' : null));
+
+    if (resolvedPromoType === 'campaign') {
       newPromo = { type: 'campaign', id: itemToAdd.campaignId, name: 'Campaign' };
-    } else if (itemToAdd.offerId) {
+    } else if (resolvedPromoType === 'offer') {
       newPromo = { type: 'offer', id: itemToAdd.offerId, name: itemToAdd.offerLabel || 'Hotel Offer' };
     }
 
@@ -1039,6 +1042,12 @@ export default function App() {
     let existingPromo = activeCartPromo;
     if (!existingPromo) {
       existingPromo = determineActiveCartPromo(currentItems);
+    }
+    if (!existingPromo) {
+      const fdOffer = getActiveFreeDeliveryOffer();
+      if (fdOffer) {
+        existingPromo = { type: 'offer', id: fdOffer.id, name: fdOffer.name || 'FREE DELIVERY' };
+      }
     }
 
     if (!existingPromo) {
@@ -1075,15 +1084,23 @@ export default function App() {
   }, [cartItems]);
 
   const handleAddCartItem = (newHotelId, newRestaurantName, addAction, itemToAdd = null) => {
+    const parseHotelId = (id) => {
+      if (!id) return null;
+      if (typeof id === 'string') {
+        const match = id.match(/(\d+)/);
+        if (match) return Number(match[1]);
+      }
+      return Number(id) || id;
+    };
+
     const firstItem = cartItems.length > 0 ? cartItems[0] : null;
     if (firstItem) {
-      const activeHotelId = firstItem.hotelId;
-      const activeRestName = firstItem.restaurantName;
+      const activeHotelId = getCartHotelId();
+      const parsedNewHotelId = parseHotelId(newHotelId);
       
-      const isIdMismatch = activeHotelId && newHotelId && Number(activeHotelId) !== Number(newHotelId);
-      const isNameMismatch = activeRestName && newRestaurantName && activeRestName !== newRestaurantName;
+      const isIdMismatch = activeHotelId && parsedNewHotelId && Number(activeHotelId) !== Number(parsedNewHotelId);
       
-      if (isIdMismatch || isNameMismatch) {
+      if (isIdMismatch) {
         setPendingCartAction(() => addAction);
         setShowReplaceCartModal(true);
         return;
@@ -1104,13 +1121,42 @@ export default function App() {
             addAction();
           });
 
-          const oldName = conflict.existingPromo.name === 'Campaign' ? 'Free Delivery' : conflict.existingPromo.name;
-          const newName = conflict.newPromo.name === 'Campaign' ? 'Free Delivery' : conflict.newPromo.name;
-          const oldText = oldName === 'FREE DELIVERY' ? 'Free Delivery' : oldName;
-          const newText = newName === 'FREE DELIVERY' ? 'Free Delivery' : newName;
+          const formatPromoName = (promo, item) => {
+            if (!promo) return 'another offer';
+            if (promo.type === 'campaign') {
+              return 'Campaign';
+            }
+            if (promo.type === 'offer') {
+              if (item && Number(item.offerId) === Number(promo.id) && item.offerLabel) {
+                return item.offerLabel;
+              }
+              return promo.name || 'Hotel Offer';
+            }
+            return promo.name || 'Offer';
+          };
+          
+          const existingItemInCart = cartItems.find(i => 
+            (conflict.existingPromo.type === 'campaign' && Number(i.campaignId) === Number(conflict.existingPromo.id)) ||
+            (conflict.existingPromo.type === 'offer' && Number(i.offerId) === Number(conflict.existingPromo.id))
+          );
+          
+          let oldText = formatPromoName(conflict.existingPromo, existingItemInCart);
+          let newText = formatPromoName(conflict.newPromo, itemToAdd);
+          
+          const normalizeLabel = (label) => {
+            if (!label) return '';
+            const upper = label.toUpperCase();
+            if (upper === 'FREE_DELIVERY' || upper === 'FREE DELIVERY') {
+              return 'Free Delivery';
+            }
+            return label;
+          };
+          
+          oldText = normalizeLabel(oldText);
+          newText = normalizeLabel(newText);
 
           setSwitchOfferWarningText(
-            `Your cart currently uses ${oldText}. Adding this item will switch the active offer and ${oldText} will be removed.`
+            `Your cart currently uses ${oldText}. Adding this item will switch to ${newText} and ${oldText} will be removed.`
           );
           setShowSwitchOfferModal(true);
           return;
@@ -1163,7 +1209,7 @@ export default function App() {
     setPendingSwitchOfferAction(null);
   };
 
-  const getCartHotelId = () => {
+  function getCartHotelId() {
     if (cartItems.length === 0) return null;
     const item = cartItems[0];
     let id = item.hotelId;
@@ -1186,7 +1232,7 @@ export default function App() {
       }
     }
     return null;
-  };
+  }
 
   const activeCartHotelId = getCartHotelId();
 
@@ -2325,7 +2371,9 @@ export default function App() {
     setCustomizingItem({
       ...item,
       hotelId: resolvedHotelId,
-      restaurantName: restaurant ? restaurant.name : 'QuickBite'
+      restaurantName: restaurant ? restaurant.name : 'QuickBite',
+      campaignId: activeCampaignId !== null ? activeCampaignId : (item.campaignId || null),
+      promoType: activeCampaignId !== null ? 'campaign' : (item.promoType || null)
     });
     setItemQuantity(1);
 
@@ -2391,7 +2439,8 @@ export default function App() {
           originalPrice: customizingItem.originalPrice || null,
           offerId: customizingItem.offerId || null,
           offerLabel: customizingItem.offerLabel || null,
-          isVeg: customizingItem.isVeg || false
+          isVeg: customizingItem.isVeg || false,
+          promoType: customizingItem.promoType || (customizingItem.offerId ? 'offer' : null)
         };
         return [...prev, cartItem];
       });
@@ -2436,7 +2485,8 @@ export default function App() {
           originalPrice: item.originalPrice || null,
           offerId: item.offerId || null,
           offerLabel: item.offerLabel || null,
-          isVeg: item.isVeg || false
+          isVeg: item.isVeg || false,
+          promoType: item.promoType || (item.offerId ? 'offer' : null)
         };
         return [...prev, newCartItem];
       });
@@ -2526,36 +2576,44 @@ export default function App() {
   };
 
   const getVerifiedCartItemPrice = (item) => {
+    const originalPrice = item.originalPrice || item.price;
+
+    let campaignPrice = originalPrice;
     if (item.campaignId) {
-      if (activeCartPromo?.type === 'campaign' && Number(activeCartPromo.id) === Number(item.campaignId)) {
-        const activeCampaign = platformCampaigns.find(camp => 
-          Number(camp.id) === Number(item.campaignId)
-        );
-        if (activeCampaign) {
-          return calculateCampaignDiscountedPrice(item.originalPrice || item.price, activeCampaign);
-        }
+      const activeCampaign = platformCampaigns.find(camp => 
+        Number(camp.id) === Number(item.campaignId)
+      );
+      if (activeCampaign && activeCampaign.offerType !== 'FREE_DELIVERY') {
+        campaignPrice = calculateCampaignDiscountedPrice(originalPrice, activeCampaign);
       }
-      return item.originalPrice || item.price;
     }
-    if (item.offerId) {
-      if (activeCartPromo?.type === 'offer' && Number(activeCartPromo.id) === Number(item.offerId)) {
-        return item.price;
-      }
-      return item.originalPrice || item.price;
+
+    let hotelOfferPrice = originalPrice;
+    if (item.offerId && activeCartPromo?.type === 'offer' && Number(activeCartPromo.id) === Number(item.offerId)) {
+      hotelOfferPrice = item.price;
     }
-    return item.price;
+
+    return Math.min(campaignPrice, hotelOfferPrice);
   };
 
   // Check if any active campaign item in cart has free delivery
   const isCampaignFreeDelivery = () => {
     const hotelId = getCartHotelId();
     if (!hotelId) return false;
+    if (!activeCartPromo || activeCartPromo.type !== 'campaign') return false;
+
     const activeCampaign = platformCampaigns.find(camp =>
+      Number(camp.id) === Number(activeCartPromo.id) &&
       camp.offerType === 'FREE_DELIVERY' &&
       camp.participatingHotels.some(h => h.id === Number(hotelId)) &&
       cartItems.some(i => camp.items.some(ci => ci.hotelId === Number(hotelId) && ci.id === i.itemId))
     );
-    return !!activeCampaign;
+    if (!activeCampaign) return false;
+    const minOrder = Number(activeCampaign.minimumOrder) || 0;
+    if (subtotal < minOrder) {
+      return false;
+    }
+    return true;
   };
 
   const getActiveFreeDeliveryOffer = () => {
@@ -2568,6 +2626,10 @@ export default function App() {
     );
 
     if (!fdOffer) return null;
+
+    if (!activeCartPromo || activeCartPromo.type !== 'offer' || Number(activeCartPromo.id) !== Number(fdOffer.id)) {
+      return null;
+    }
 
     const minOrder = Number(fdOffer.minimumOrderValue) || 0;
     if (subtotal < minOrder) {
@@ -2596,10 +2658,122 @@ export default function App() {
     return !!getActiveFreeDeliveryOffer();
   };
 
+  const renderCartFreeDeliveryStatus = () => {
+    const hotelId = getCartHotelId();
+    if (!hotelId) return null;
+
+    // Platform Campaign Free Delivery Status
+    if (activeCartPromo && activeCartPromo.type === 'campaign') {
+      const activeCampaign = platformCampaigns.find(camp =>
+        Number(camp.id) === Number(activeCartPromo.id) &&
+        camp.offerType === 'FREE_DELIVERY' &&
+        camp.participatingHotels.some(h => h.id === Number(hotelId))
+      );
+      if (!activeCampaign) return null;
+
+      const minOrder = Number(activeCampaign.minimumOrder) || 0;
+      const remaining = minOrder - subtotal;
+
+      if (remaining > 0) {
+        return (
+          <View style={{
+            backgroundColor: darkMode ? '#1F2E28' : '#F0FDF4',
+            borderWidth: 1,
+            borderColor: darkMode ? '#065F46' : '#DCFCE7',
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 12
+          }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#16A34A' }}>
+              Add ₹{Math.round(remaining)} more to unlock Free Delivery
+            </Text>
+            <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }}>
+              Free delivery on campaign orders ₹{minOrder} and above
+            </Text>
+          </View>
+        );
+      } else {
+        return (
+          <View style={{
+            backgroundColor: darkMode ? '#1F2E28' : '#F0FDF4',
+            borderWidth: 1,
+            borderColor: darkMode ? '#065F46' : '#DCFCE7',
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 12
+          }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#16A34A' }}>
+              🎉 Free Delivery unlocked
+            </Text>
+          </View>
+        );
+      }
+    }
+
+    // Hotel Admin Free Delivery Offer Status
+    if (cartHotelOffers.length === 0) return null;
+
+    const fdOffer = cartHotelOffers.find(offer => 
+      offer.discountType === 'free_delivery' && 
+      offer.isActive
+    );
+
+    if (!fdOffer) return null;
+
+    const isFdActive = activeCartPromo && activeCartPromo.type === 'offer' && Number(activeCartPromo.id) === Number(fdOffer.id);
+    if (!isFdActive) return null;
+
+    const minOrder = Number(fdOffer.minimumOrderValue) || 0;
+    const remaining = minOrder - subtotal;
+
+    if (remaining > 0) {
+      return (
+        <View style={{
+          backgroundColor: darkMode ? '#1F2E28' : '#F0FDF4',
+          borderWidth: 1,
+          borderColor: darkMode ? '#065F46' : '#DCFCE7',
+          borderRadius: 12,
+          padding: 12,
+          marginBottom: 12
+        }}>
+          <Text style={{ fontSize: 13, fontWeight: '800', color: '#16A34A' }}>
+            Add ₹{Math.round(remaining)} more for Free Delivery
+          </Text>
+          <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }}>
+            Free delivery on orders ₹{minOrder} and above
+          </Text>
+        </View>
+      );
+    } else {
+      return (
+        <View style={{
+          backgroundColor: darkMode ? '#1F2E28' : '#F0FDF4',
+          borderWidth: 1,
+          borderColor: darkMode ? '#065F46' : '#DCFCE7',
+          borderRadius: 12,
+          padding: 12,
+          marginBottom: 12
+        }}>
+          <Text style={{ fontSize: 13, fontWeight: '800', color: '#16A34A' }}>
+            🎉 Free Delivery unlocked
+          </Text>
+        </View>
+      );
+    }
+  };
+
   // Cart Totals & Discount Calculations
+  const getCartHotelDeliveryFee = () => {
+    const hotelId = getCartHotelId();
+    if (!hotelId) return 0;
+    const hotel = restaurants.find(r => Number(r.id) === Number(hotelId));
+    if (!hotel) return 0;
+    return hotel.deliveryFee !== undefined && hotel.deliveryFee !== null ? Number(hotel.deliveryFee) : 0;
+  };
+
   const subtotal = cartItems.reduce((acc, i) => acc + (getVerifiedCartItemPrice(i) * i.quantity), 0);
-  const has99StoreItem = cartItems.some(i => i.is99StoreItem);
-  const rawDeliveryFee = (subtotal > 0 && !has99StoreItem) ? 35 : 0;
+  const has99StoreItem = cartItems.some(i => i.is99StoreItem && !i.campaignId);
+  const rawDeliveryFee = (subtotal > 0 && !has99StoreItem) ? getCartHotelDeliveryFee() : 0;
 
   let discountAmount = 0;
   let finalDeliveryFee = isFreeDeliveryEligible() ? 0 : rawDeliveryFee;
@@ -2849,6 +3023,8 @@ export default function App() {
           paymentMethod: paymentMethod === 'cod' ? 'cod' : 'online',
           customerNote: '',
           couponCode: appliedPromo ? appliedPromo.code : undefined,
+          offerId: activeCartPromo?.type === 'offer' ? Number(activeCartPromo.id) : undefined,
+          campaignId: activeCartPromo?.type === 'campaign' ? Number(activeCartPromo.id) : undefined,
         })
       });
 
@@ -4238,7 +4414,7 @@ export default function App() {
           </View>
 
           {/* Sticky Swiggy Green Floating Cart Bar (Appears on tabs where items are added) */}
-          {(activeTab === 'home' || activeTab === 'wishlist') && renderFloatingCartBar(66)}
+          {(activeTab === 'home' || activeTab === 'wishlist') && !selectedRestaurant && activeCampaignId === null && renderFloatingCartBar(66)}
 
           {/* FEATURE 4: Bottom Navigation Bar with Explore Click Reset */}
           <Animated.View style={[styles.bottomNav, { backgroundColor: D.navBg, borderTopColor: D.navBorder, transform: [{ translateY: bottomBarTranslateY }] }]}>
@@ -5537,6 +5713,117 @@ export default function App() {
             </View>
           </Modal>
 
+          {/* SWITCH OFFER CONFIRMATION MODAL */}
+          <Modal
+            visible={showSwitchOfferModal}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+            onRequestClose={handleCancelSwitchOffer}
+          >
+            <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', padding: 24 }]}>
+              <View style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 24,
+                padding: 24,
+                width: '100%',
+                maxWidth: 320,
+                alignItems: 'center',
+                elevation: 10,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.2,
+                shadowRadius: 8
+              }}>
+                {/* Yellow Tag Icon in Light Yellow Circle */}
+                <View style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 28,
+                  backgroundColor: '#FEF3C7',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 16
+                }}>
+                  <Tag size={24} color="#D97706" />
+                </View>
+
+                {/* Title */}
+                <Text style={{
+                  fontSize: 20,
+                  fontWeight: '900',
+                  color: '#111827',
+                  marginBottom: 8,
+                  textAlign: 'center'
+                }}>
+                  Switch offer?
+                </Text>
+
+                {/* Subtitle */}
+                <Text style={{
+                  fontSize: 14,
+                  color: '#6B7280',
+                  textAlign: 'center',
+                  marginBottom: 24,
+                  lineHeight: 20
+                }}>
+                  {switchOfferWarningText}
+                </Text>
+
+                {/* Action Buttons Row */}
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  width: '100%'
+                }}>
+                  {/* Cancel Button */}
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      borderWidth: 1,
+                      borderColor: '#E5E7EB',
+                      borderRadius: 14,
+                      paddingVertical: 12,
+                      marginRight: 10,
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onPress={handleCancelSwitchOffer}
+                  >
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: '750',
+                      color: '#4B5563'
+                    }}>
+                      CANCEL
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Continue/Confirm Button */}
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      backgroundColor: '#FF5252',
+                      borderRadius: 14,
+                      paddingVertical: 12,
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onPress={handleConfirmSwitchOffer}
+                  >
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: '800',
+                      color: '#FFFFFF'
+                    }}>
+                      CONTINUE
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
           {/* ITEM CUSTOMIZER MODAL */}
           <Modal visible={!!customizingItem} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setCustomizingItem(null)}>
             <View style={[styles.modalOverlay, { justifyContent: 'flex-end', margin: 0, padding: 0 }]}>
@@ -5909,6 +6196,8 @@ export default function App() {
                         )}
                       </View>
 
+                      {renderCartFreeDeliveryStatus()}
+
                       {/* BILL SUMMARY CARD */}
                       <View style={[styles.billCard, { 
                         backgroundColor: D.card, 
@@ -6162,8 +6451,9 @@ export default function App() {
           </Modal>
 
           {/* PLATFORM CAMPAIGN DETAILS MODAL */}
-          <Modal visible={activeCampaignId !== null} animationType="slide" statusBarTranslucent onRequestClose={() => { setActiveCampaignId(null); setCampaignDetails(null); }}>
-            <SafeAreaView style={{ flex: 1, backgroundColor: D.bg }}>
+          {activeCampaignId !== null && (
+            <View style={[StyleSheet.absoluteFill, { zIndex: 1000, backgroundColor: D.bg }]}>
+              <SafeAreaView style={{ flex: 1, backgroundColor: D.bg }}>
               {/* HEADER */}
               <View style={[styles.modalHeader, { borderBottomWidth: 1, borderBottomColor: D.divider, backgroundColor: D.card, paddingTop: Platform.OS === 'android' ? 12 : 8, paddingBottom: 10 }]}>
                 <TouchableOpacity onPress={() => { setActiveCampaignId(null); setCampaignDetails(null); }} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
@@ -6246,8 +6536,8 @@ export default function App() {
                               </View>
                             ) : (
                               hotelItems.map((item, idx) => {
-                                const inCart = cartItems.some(c => c.itemId === item.id);
-                                const restaurantObj = restaurants.find(r => r.id === item.hotelId) || { id: hotel.id, name: hotel.name };
+                                const inCart = cartItems.some(c => Number(c.itemId) === Number(item.id) && Number(c.hotelId) === Number(item.hotelId));
+                                const restaurantObj = restaurants.find(r => Number(r.id) === Number(item.hotelId)) || { id: hotel.id, name: hotel.name };
 
                                 let itemBadge = '';
                                 if (campaignDetails.offerType === 'PERCENTAGE_DISCOUNT') {
@@ -6316,11 +6606,36 @@ export default function App() {
                                       style={[styles.addBtn, { width: 72, height: 32, paddingVertical: 0, justifyContent: 'center', alignItems: 'center' }, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
                                       onPress={(e) => {
                                         e.stopPropagation();
-                                        openCustomizer(item, restaurantObj);
+                                        if (inCart) {
+                                          setCartItems(prev => prev.filter(c => !(Number(c.itemId) === Number(item.id) && Number(c.hotelId) === Number(item.hotelId))));
+                                        } else {
+                                          const offerType = campaignDetails?.offerType;
+                                          let resolvedPrice = item.price;
+                                          let resolvedOriginalPrice = item.price;
+                                          if (offerType === 'FREE_DELIVERY') {
+                                            if (item.offerId && item.offerPrice < item.price) {
+                                              resolvedPrice = item.offerPrice;
+                                              resolvedOriginalPrice = item.price;
+                                            } else {
+                                              resolvedPrice = item.price;
+                                              resolvedOriginalPrice = null;
+                                            }
+                                          } else if (offerType === 'PERCENTAGE_DISCOUNT' || offerType === 'FLAT_DISCOUNT' || offerType === 'FIXED_PRICE') {
+                                            resolvedPrice = item.offerPrice;
+                                            resolvedOriginalPrice = item.price;
+                                          }
+                                          quickAddToCart({
+                                            ...item,
+                                            price: resolvedPrice,
+                                            originalPrice: resolvedOriginalPrice,
+                                            campaignId: activeCampaignId,
+                                            promoType: 'campaign'
+                                          }, restaurantObj);
+                                        }
                                       }}
                                     >
                                       <Text style={[styles.addBtnText, { fontSize: 10, fontWeight: '800' }, inCart && { color: '#ffffff' }]}>
-                                        {inCart ? 'ADDED ✓' : 'ADD +'}
+                                        {inCart ? 'ADDED' : 'ADD +'}
                                       </Text>
                                     </TouchableOpacity>
                                   </TouchableOpacity>
@@ -6337,7 +6652,8 @@ export default function App() {
               {/* Floating View Cart bar on Campaign Details */}
               {renderFloatingCartBar(Math.max(12, bottomInset) + 12, true)}
             </SafeAreaView>
-          </Modal>
+          </View>
+        )}
 
           {/* CHECKOUT & PAYMENT MODAL */}
           <Modal visible={isCheckoutOpen} animationType="slide" statusBarTranslucent onRequestClose={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setTimeout(() => setIsCartOpen(true), 150); } }} onShow={() => { setTimeout(() => setCheckoutLayoutKey(k => k + 1), 60); }}>

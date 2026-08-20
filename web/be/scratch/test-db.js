@@ -10,11 +10,10 @@ const client = new Client({
 async function run() {
   await client.connect();
   const res = await client.query(`
-    SELECT table_name 
-    FROM information_schema.tables 
-    WHERE table_schema='public'
+    SELECT id, name, "offerType", "minimumOrder" 
+    FROM store_99_campaigns
   `);
-  console.log("Tables list:", res.rows.map(r => r.table_name));
+  console.log("Campaigns details:", res.rows);
   await client.end();
 }
 run().catch(console.error);

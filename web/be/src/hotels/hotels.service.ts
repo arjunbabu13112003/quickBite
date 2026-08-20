@@ -190,12 +190,19 @@ export class HotelsService {
       }
     }
 
+    if (updateProfileDto.deliveryFee !== undefined && updateProfileDto.deliveryFee !== null) {
+      const fee = parseFloat(updateProfileDto.deliveryFee);
+      if (isNaN(fee) || fee < 0) {
+        throw new BadRequestException('Delivery Fee must be greater than or equal to 0.');
+      }
+    }
+
     // Save fields
     const fields = [
       'name', 'description', 'cuisines', 'restaurantType', 'averagePreparationTime',
       'minimumOrderAmount', 'ownerName', 'phoneNumber', 'alternatePhoneNumber', 'email',
       'address', 'landmark', 'city', 'district', 'state', 'pincode', 'latitude', 'longitude',
-      'isDeliveryAvailable', 'estimatedDeliveryTime', 'deliveryRadiusKm', 'legalName',
+      'isDeliveryAvailable', 'estimatedDeliveryTime', 'deliveryRadiusKm', 'deliveryFee', 'legalName',
       'fssaiNumber', 'gstNumber', 'operatingHours', 'gallery', 'logo', 'image'
     ];
 

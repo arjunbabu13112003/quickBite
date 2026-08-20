@@ -83,6 +83,7 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
         longitude: hotel.longitude || 76.2999,
         isDeliveryAvailable: hotel.isDeliveryAvailable !== false,
         deliveryRadiusKm: hotel.deliveryRadiusKm || 10,
+        deliveryFee: hotel.deliveryFee !== undefined ? Number(hotel.deliveryFee) : 0,
         estimatedDeliveryTime: hotel.estimatedDeliveryTime || 30,
         legalName: hotel.legalName || '',
         fssaiNumber: hotel.fssaiNumber || '',
@@ -1057,6 +1058,17 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: '750', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Delivery Fee (₹)</label>
+                <input 
+                  type="number" 
+                  value={formData.deliveryFee === undefined ? '' : formData.deliveryFee} 
+                  onChange={(e) => handleChange('deliveryFee', parseFloat(e.target.value) || 0)}
+                  disabled={!isEditMode}
+                  style={{ width: '100%', background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.75rem', color: 'var(--text-main)', fontSize: '0.88rem', fontWeight: '600' }}
+                />
+              </div>
+
+              <div>
                 <label style={{ fontSize: '0.75rem', fontWeight: '750', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Est. Prep Time (mins)</label>
                 <input 
                   type="number" 
@@ -1065,7 +1077,9 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
                   style={{ width: '100%', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.75rem', color: 'var(--text-muted)', fontSize: '0.88rem', fontWeight: '600' }}
                 />
               </div>
+            </div>
 
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div>
                 <label style={{ fontSize: '0.75rem', fontWeight: '750', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Est. Delivery Time (mins)</label>
                 <input 
@@ -1076,6 +1090,7 @@ export default function RestaurantProfilePage({ hotel, setHotel }) {
                   style={{ width: '100%', background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.75rem', color: 'var(--text-main)', fontSize: '0.88rem', fontWeight: '600' }}
                 />
               </div>
+              <div />
             </div>
           </div>
         </div>

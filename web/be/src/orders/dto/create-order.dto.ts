@@ -26,4 +26,12 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   couponCode?: string;
+
+  @IsOptional()
+  @IsInt()
+  offerId?: number;
+
+  @IsOptional()
+  @IsInt()
+  campaignId?: number;
 }

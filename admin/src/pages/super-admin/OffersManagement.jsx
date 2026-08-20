@@ -56,6 +56,7 @@ export function SuperAdminOffersList({ onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [deletingId, setDeletingId] = useState(null);
   const itemsPerPage = 8;
 
   const fetchCampaigns = useCallback(async (isSilent = false) => {
@@ -120,15 +121,19 @@ export function SuperAdminOffersList({ onNavigate }) {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) return;
-    // Optimistic Update
-    setCampaigns(prev => prev.filter(c => c.id !== id));
-    try {
-      await api.delete99Campaign(id);
-      fetchCampaigns(true);
-    } catch (e) {
-      fetchCampaigns(false);
-      alert(e.message || 'Failed to delete campaign');
-    }
+    setDeletingId(id);
+    setTimeout(async () => {
+      // Optimistic Update
+      setCampaigns(prev => prev.filter(c => c.id !== id));
+      setDeletingId(null);
+      try {
+        await api.delete99Campaign(id);
+        fetchCampaigns(true);
+      } catch (e) {
+        fetchCampaigns(false);
+        alert(e.message || 'Failed to delete campaign');
+      }
+    }, 300);
   };
 
   // Pagination Calculations
@@ -303,8 +308,19 @@ export function SuperAdminOffersList({ onNavigate }) {
               <tbody>
                 {currentCampaigns.map(c => {
                   const status = getCampaignStatus(c);
+                  const isDeleting = deletingId === c.id;
                   return (
-                    <tr key={c.id} className="animated-tr" style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)' }}>
+                    <tr 
+                      key={c.id} 
+                      className="animated-tr" 
+                      style={{ 
+                        borderBottom: '1px solid var(--border-color)', 
+                        color: 'var(--text-main)',
+                        opacity: isDeleting ? 0 : 1,
+                        transform: isDeleting ? 'scale(0.95) translateY(-5px)' : 'none',
+                        transition: 'opacity 0.3s ease, transform 0.3s ease',
+                      }}
+                    >
                       <td style={{ padding: '1rem', fontWeight: '750' }}>{c.name}</td>
                       <td style={{ padding: '1rem' }}>{getOfferTypeLabel(c.offerType)}</td>
                       <td style={{ padding: '1rem', fontWeight: '800', color: 'var(--primary)' }}>{getOfferValueLabel(c)}</td>
@@ -422,6 +438,9 @@ export function SuperAdminCampaignsList({ onNavigate }) {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [deletingId, setDeletingId] = useState(null);
+  const itemsPerPage = 8;
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
@@ -451,13 +470,25 @@ export function SuperAdminCampaignsList({ onNavigate }) {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) return;
-    try {
-      await api.delete99Campaign(id);
-      fetchCampaigns();
-    } catch (e) {
-      alert(e.message || 'Failed to delete campaign');
-    }
+    setDeletingId(id);
+    setTimeout(async () => {
+      setCampaigns(prev => prev.filter(c => c.id !== id));
+      setDeletingId(null);
+      try {
+        await api.delete99Campaign(id);
+        fetchCampaigns();
+      } catch (e) {
+        alert(e.message || 'Failed to delete campaign');
+      }
+    }, 300);
   };
+
+  // Pagination Calculations
+  const totalPages = Math.ceil(campaigns.length / itemsPerPage);
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const indexOfLastItem = activePage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentCampaigns = campaigns.slice(indexOfFirstItem, indexOfLastItem);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', padding: '1rem 0' }}>
@@ -490,11 +521,27 @@ export function SuperAdminCampaignsList({ onNavigate }) {
           <button onClick={() => onNavigate('/super-admin/offers/99store/new')} className="btn-primary" style={{ padding: '0.6rem 1.5rem', fontWeight: '800' }}>Create Campaign</button>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
-          {campaigns.map(c => {
-            const status = getCampaignStatus(c);
-            return (
-              <div key={c.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-sm)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
+            {currentCampaigns.map(c => {
+              const status = getCampaignStatus(c);
+              const isDeleting = deletingId === c.id;
+              return (
+                <div 
+                  key={c.id} 
+                  style={{ 
+                    background: 'var(--bg-card)', 
+                    border: '1px solid var(--border-color)', 
+                    borderRadius: 'var(--radius-lg)', 
+                    overflow: 'hidden', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    boxShadow: 'var(--shadow-sm)',
+                    opacity: isDeleting ? 0 : 1,
+                    transform: isDeleting ? 'scale(0.95) translateY(-5px)' : 'none',
+                    transition: 'opacity 0.3s ease, transform 0.3s ease',
+                  }}
+                >
                 {c.bannerUrl && (
                   <div style={{ height: '140px', width: '100%', overflow: 'hidden' }}>
                     <img src={c.bannerUrl} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -555,8 +602,76 @@ export function SuperAdminCampaignsList({ onNavigate }) {
                   </div>
                 </div>
               </div>
-            );
-          })}
+              );
+            })}
+          </div>
+
+          {/* Pagination Footer */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-sidebar)', flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '700' }}>
+              Showing {campaigns.length === 0 ? 0 : indexOfFirstItem + 1} to {Math.min(indexOfLastItem, campaigns.length)} of {campaigns.length} entries
+            </div>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <button
+                disabled={activePage === 1}
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                style={{
+                  padding: '0.45rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-card)',
+                  color: activePage === 1 ? 'var(--text-subtle)' : 'var(--text-main)',
+                  cursor: activePage === 1 ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+
+              {[...Array(totalPages)].map((_, i) => {
+                const pageNum = i + 1;
+                const isSelected = pageNum === activePage;
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    style={{
+                      minWidth: '32px',
+                      height: '32px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                      background: isSelected ? 'var(--primary)' : 'var(--bg-card)',
+                      color: isSelected ? '#ffffff' : 'var(--text-main)',
+                      fontWeight: '800',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+
+              <button
+                disabled={activePage === totalPages}
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                style={{
+                  padding: '0.45rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-card)',
+                  color: activePage === totalPages ? 'var(--text-subtle)' : 'var(--text-main)',
+                  cursor: activePage === totalPages ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

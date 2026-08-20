@@ -205,12 +205,14 @@ export class FoodsService {
       campaignMap.get(fid).push(row);
     });
 
-    const now = new Date();
     const mappedFoods = await Promise.all(
       foods.map(async (food) => {
         const stats = statsMap.get(food.id);
         const campaigns = campaignMap.get(food.id);
         let campaignId = null;
+        let dynamicOfferPrice: number | null = null;
+        let appliedOfferId: number | null = null;
+        let appliedOfferLabel: string | null = null;
         if (campaigns && campaigns.length > 0) {
           let bestPrice = Number(food.price);
           campaigns.forEach((c) => {

@@ -21,6 +21,8 @@ import { OrderStatus } from './enums/order-status.enum';
 import { OffersService } from '../offers/offers.service';
 import { resolveHotelOfferForFood } from '../offers/offer-pricing.helper';
 import { Food } from '../foods/food.entity';
+import { Offer } from '../offers/offer.entity';
+import { Store99Campaign } from '../offers/store99-campaign.entity';
 
 @Injectable()
 export class OrdersService {
@@ -274,6 +276,86 @@ export class OrdersService {
       }
       discountAmount = validation.discountAmount;
       finalDeliveryFee = validation.finalDeliveryFee;
+    }
+
+    if (dto.offerId) {
+      const offer = await this.dataSource.getRepository(Offer).findOne({
+        where: { id: dto.offerId, hotelId: hotel.id, isActive: true },
+      });
+      if (!offer) {
+        throw new BadRequestException('❌ Selected offer is invalid or expired.');
+      }
+      const now = new Date();
+      if (offer.startAt > now || offer.endAt < now) {
+        throw new BadRequestException('❌ Offer is not currently active.');
+      }
+      if (offer.discountType === 'free_delivery') {
+        const minOrder = Number(offer.minimumOrderValue) || 0;
+        if (subtotal < minOrder) {
+          throw new BadRequestException(`❌ Minimum order of ₹${minOrder} is required for Free Delivery.`);
+        }
+        if (offer.applicabilityType === 'foods') {
+          const eligibleFoodIds = await this.dataSource.query(`
+            SELECT "foodId" FROM offer_foods WHERE "offerId" = $1
+          `, [offer.id]);
+          const hasAppFood = orderItemsData.some(item => 
+            eligibleFoodIds.some(f => Number(f.foodId) === Number(item.foodId))
+          );
+          if (!hasAppFood) {
+            throw new BadRequestException('❌ No eligible items for this Free Delivery offer.');
+          }
+        } else if (offer.applicabilityType === 'categories') {
+          const eligibleCatIds = await this.dataSource.query(`
+            SELECT "categoryId" FROM offer_categories WHERE "offerId" = $1
+          `, [offer.id]);
+          const hasAppCat = orderItemsData.some(item => 
+            eligibleCatIds.some(c => Number(c.categoryId) === Number(item.categoryId))
+          );
+          if (!hasAppCat) {
+            throw new BadRequestException('❌ No eligible category items for this Free Delivery offer.');
+          }
+        }
+        finalDeliveryFee = 0;
+      }
+    }
+
+    if (dto.campaignId) {
+      const campaign = await this.dataSource.getRepository(Store99Campaign).findOne({
+        where: { id: dto.campaignId, isActive: true },
+      });
+      if (!campaign) {
+        throw new BadRequestException('❌ Selected campaign is invalid or expired.');
+      }
+      const now = new Date();
+      if (campaign.startAt > now || campaign.endAt < now) {
+        throw new BadRequestException('❌ Campaign is not currently active.');
+      }
+      const participation = await this.dataSource.query(`
+        SELECT 1 FROM hotel_campaign_participations 
+        WHERE "campaignId" = $1 AND "hotelId" = $2 AND status = 'participating'
+        LIMIT 1
+      `, [campaign.id, hotel.id]);
+      if (!participation || participation.length === 0) {
+        throw new BadRequestException('❌ Restaurant is not participating in this campaign.');
+      }
+
+      if (campaign.offerType === 'FREE_DELIVERY') {
+        const minOrder = Number(campaign.minimumOrder) || 0;
+        if (subtotal < minOrder) {
+          throw new BadRequestException(`❌ Minimum order of ₹${minOrder} is required for Campaign Free Delivery.`);
+        }
+        if (orderItemsData.length > 0) {
+          const hasCampaignItem = await this.dataSource.query(`
+            SELECT 1 FROM store_99_items 
+            WHERE "campaignId" = $1 AND "hotelId" = $2 AND "foodId" IN (${orderItemsData.map(i => i.foodId).join(', ')})
+            LIMIT 1
+          `, [campaign.id, hotel.id]);
+          if (!hasCampaignItem || hasCampaignItem.length === 0) {
+            throw new BadRequestException('❌ No eligible items in cart for this campaign.');
+          }
+        }
+        finalDeliveryFee = 0;
+      }
     }
 
     const totalAmount = parseFloat(
