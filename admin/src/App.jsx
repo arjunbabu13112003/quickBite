@@ -23,7 +23,7 @@ import ManageDeliveryPartner from './pages/super-admin/ManageDeliveryPartner';
 import OrdersList from './pages/super-admin/OrdersList';
 import OrderDetails from './pages/super-admin/OrderDetails';
 import HomeFoodCategoriesList from './pages/super-admin/HomeFoodCategoriesList';
-import { SuperAdminOffersList, SuperAdminCampaignsList, SuperAdminCreateCampaign, SuperAdminChooseOfferType } from './pages/super-admin/OffersManagement';
+import { SuperAdminOffersList, SuperAdminCreateCampaign } from './pages/super-admin/OffersManagement';
 
 // Hotel Admin Pages
 import HotelAdminDashboard from './pages/hotel-admin/HotelAdminDashboard';
@@ -223,11 +223,8 @@ export default function App() {
       if (currentPath === '/super-admin/offers') {
         return <SuperAdminOffersList onNavigate={navigateTo} />;
       }
-      if (currentPath === '/super-admin/offers/choose') {
-        return <SuperAdminChooseOfferType onNavigate={navigateTo} />;
-      }
       if (currentPath === '/super-admin/offers/99store') {
-        return <SuperAdminCampaignsList onNavigate={navigateTo} />;
+        return <SuperAdminOffersList onNavigate={navigateTo} />;
       }
       if (currentPath === '/super-admin/offers/99store/new') {
         return <SuperAdminCreateCampaign onNavigate={navigateTo} />;

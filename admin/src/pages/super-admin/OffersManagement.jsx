@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Building2, Users, Bike, ClipboardList, Tag, Plus, Check, Edit, Trash2, 
   Search, Filter, Calendar, Clock, ArrowLeft, Image as ImageIcon, AlertTriangle, Eye, RefreshCw,
-  IndianRupee
+  IndianRupee, Upload, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { api } from '../../services/api';
 
@@ -42,7 +42,6 @@ const renderStatusBadge = (status) => {
       color: text,
       padding: '0.25rem 0.6rem',
       borderRadius: 'var(--radius-sm)',
-      fontSize: '0.72rem',
       fontWeight: '800',
       textTransform: 'uppercase',
       display: 'inline-block'
@@ -51,15 +50,16 @@ const renderStatusBadge = (status) => {
     </span>
   );
 };
-
 // ─── 1. SUPER ADMIN OFFERS MAIN LIST PAGE ───────────────────────────────────
 export function SuperAdminOffersList({ onNavigate }) {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
 
-  const fetchCampaigns = useCallback(async () => {
-    setLoading(true);
+  const fetchCampaigns = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     try {
       const data = await api.getAll99Campaigns();
       setCampaigns(data || []);
@@ -67,7 +67,7 @@ export function SuperAdminOffersList({ onNavigate }) {
       console.error(e);
       setError('Failed to fetch platform campaigns');
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, []);
 
@@ -75,32 +75,80 @@ export function SuperAdminOffersList({ onNavigate }) {
     fetchCampaigns();
   }, [fetchCampaigns]);
 
+  const getOfferTypeLabel = (type) => {
+    switch (type) {
+      case 'FIXED_PRICE': return 'Fixed Price';
+      case 'FLAT_DISCOUNT': return 'Flat Discount';
+      case 'PERCENTAGE_DISCOUNT': return 'Percentage';
+      case 'FREE_DELIVERY': return 'Free Delivery';
+      default: return 'Fixed Price';
+    }
+  };
+
+  const getOfferValueLabel = (c) => {
+    const type = c.offerType || 'FIXED_PRICE';
+    switch (type) {
+      case 'FIXED_PRICE':
+        return `₹${parseFloat(c.price || 0).toFixed(0)}`;
+      case 'FLAT_DISCOUNT':
+        return `₹${parseFloat(c.flatDiscountAmount || 0).toFixed(0)} OFF`;
+      case 'PERCENTAGE_DISCOUNT':
+        return `${parseFloat(c.percentageDiscount || 0).toFixed(0)}% OFF`;
+      case 'FREE_DELIVERY':
+        return c.minimumOrder ? `Above ₹${parseFloat(c.minimumOrder).toFixed(0)}` : 'Free Delivery';
+      default:
+        return `₹${parseFloat(c.price || 0).toFixed(0)}`;
+    }
+  };
+
   // Derived Summary Counters
   const activeCount = campaigns.filter(c => getCampaignStatus(c) === 'Active').length;
   const scheduledCount = campaigns.filter(c => getCampaignStatus(c) === 'Scheduled').length;
   const uniqueHotels = [...new Set(campaigns.flatMap(c => c.hotelCount || 0))].reduce((a, b) => a + b, 0);
 
   const handleToggleActive = async (campaign) => {
+    // Optimistic Update
+    setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, isActive: !c.isActive } : c));
     try {
       await api.toggle99CampaignActive(campaign.id);
-      fetchCampaigns();
+      fetchCampaigns(true);
     } catch (e) {
+      fetchCampaigns(false);
       alert(e.message || 'Failed to toggle status');
     }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) return;
+    // Optimistic Update
+    setCampaigns(prev => prev.filter(c => c.id !== id));
     try {
       await api.delete99Campaign(id);
-      fetchCampaigns();
+      fetchCampaigns(true);
     } catch (e) {
+      fetchCampaigns(false);
       alert(e.message || 'Failed to delete campaign');
     }
   };
 
+  // Pagination Calculations
+  const totalPages = Math.ceil(campaigns.length / itemsPerPage);
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const indexOfLastItem = activePage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentCampaigns = campaigns.slice(indexOfFirstItem, indexOfLastItem);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', padding: '1rem 0' }}>
+      <style>{`
+        @keyframes fadeInRow {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animated-tr {
+          animation: fadeInRow 0.22s ease-out forwards;
+        }
+      `}</style>
       
       {/* Title Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -109,7 +157,7 @@ export function SuperAdminOffersList({ onNavigate }) {
           <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>Create and manage platform-wide promotions</p>
         </div>
         <button 
-          onClick={() => onNavigate('/super-admin/offers/choose')}
+          onClick={() => onNavigate('/super-admin/offers/99store/new')}
           className="btn-primary" 
           style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem', fontWeight: '800' }}
         >
@@ -253,13 +301,13 @@ export function SuperAdminOffersList({ onNavigate }) {
                 </tr>
               </thead>
               <tbody>
-                {campaigns.map(c => {
+                {currentCampaigns.map(c => {
                   const status = getCampaignStatus(c);
                   return (
-                    <tr key={c.id} style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)' }}>
+                    <tr key={c.id} className="animated-tr" style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)' }}>
                       <td style={{ padding: '1rem', fontWeight: '750' }}>{c.name}</td>
-                      <td style={{ padding: '1rem' }}>Fixed Price</td>
-                      <td style={{ padding: '1rem', fontWeight: '800', color: 'var(--primary)' }}>₹{parseFloat(c.price).toFixed(0)}</td>
+                      <td style={{ padding: '1rem' }}>{getOfferTypeLabel(c.offerType)}</td>
+                      <td style={{ padding: '1rem', fontWeight: '800', color: 'var(--primary)' }}>{getOfferValueLabel(c)}</td>
                       <td style={{ padding: '1rem' }}>{new Date(c.startAt).toLocaleDateString()}</td>
                       <td style={{ padding: '1rem' }}>{new Date(c.endAt).toLocaleDateString()}</td>
                       <td style={{ padding: '1rem', fontWeight: '750' }}>{c.hotelCount || 0}</td>
@@ -295,6 +343,73 @@ export function SuperAdminOffersList({ onNavigate }) {
                 })}
               </tbody>
             </table>
+
+            {/* Pagination Footer */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', borderTop: '1px solid var(--border-color)', background: 'var(--bg-sidebar)', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '700' }}>
+                Showing {campaigns.length === 0 ? 0 : indexOfFirstItem + 1} to {Math.min(indexOfLastItem, campaigns.length)} of {campaigns.length} entries
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <button
+                  disabled={activePage === 1}
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  style={{
+                    padding: '0.45rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-card)',
+                    color: activePage === 1 ? 'var(--text-subtle)' : 'var(--text-main)',
+                    cursor: activePage === 1 ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+
+                {[...Array(totalPages)].map((_, i) => {
+                  const pageNum = i + 1;
+                  const isSelected = pageNum === activePage;
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      style={{
+                        minWidth: '32px',
+                        height: '32px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        background: isSelected ? 'var(--primary)' : 'var(--bg-card)',
+                        color: isSelected ? '#ffffff' : 'var(--text-main)',
+                        fontWeight: '800',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
+                <button
+                  disabled={activePage === totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  style={{
+                    padding: '0.45rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-card)',
+                    color: activePage === totalPages ? 'var(--text-subtle)' : 'var(--text-main)',
+                    cursor: activePage === totalPages ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -452,10 +567,55 @@ export function SuperAdminCampaignsList({ onNavigate }) {
 export function SuperAdminCreateCampaign({ id, onNavigate }) {
   const isEdit = !!id;
 
+  const fileInputRef = useRef(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const handleBannerImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be smaller than 5MB.');
+      return;
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!allowedTypes.includes(file.type)) {
+      setError('Only JPEG, PNG, and WebP images are allowed.');
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      setError('');
+      const res = await api.uploadHomeFoodCategoryImage(file);
+      if (res && res.url) {
+        setBannerUrl(res.url);
+      } else {
+        setError('Upload failed: Invalid response from server');
+      }
+    } catch (err) {
+      setError(err.message || 'Image upload failed');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   // Form State
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState(99);
+
+  // New generic fields
+  const [offerType, setOfferType] = useState('FIXED_PRICE');
+  const [flatDiscountAmount, setFlatDiscountAmount] = useState('');
+  const [percentageDiscount, setPercentageDiscount] = useState('');
+  const [maxDiscount, setMaxDiscount] = useState('');
+  const [minimumOrder, setMinimumOrder] = useState('');
+  const [maxDeliveryFee, setMaxDeliveryFee] = useState('');
+  const [deliveryRadius, setDeliveryRadius] = useState('');
+  const [appliesTo, setAppliesTo] = useState('items');
+
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('10:00');
   const [endDate, setEndDate] = useState('');
@@ -471,6 +631,7 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
   // Checkmarked list IDs
   const [selectedHotelIds, setSelectedHotelIds] = useState([]);
   const [selectedFoodIds, setSelectedFoodIds] = useState([]);
+  const [invitedHotels, setInvitedHotels] = useState([]);
 
   // UI filters/searches
   const [searchHotel, setSearchHotel] = useState('');
@@ -496,14 +657,7 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
         setHotels(hotelsData || []);
 
         // Fetch categories list for filters
-        setCategories([
-          { id: '1', name: 'Biryani' },
-          { id: '2', name: 'Burgers & Sandwiches' },
-          { id: '3', name: 'Desserts' },
-          { id: '4', name: 'Beverages' },
-          { id: '5', name: 'North Indian' },
-          { id: '6', name: 'Chinese' }
-        ]);
+        setCategories([]);
 
         if (isEdit) {
           const details = await api.get99CampaignDetails(id);
@@ -513,6 +667,14 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
             setPrice(details.price ? parseFloat(details.price) : 99);
             setBannerUrl(details.bannerUrl || '');
             setIsActive(details.isActive !== undefined ? details.isActive : true);
+            setOfferType(details.offerType || 'FIXED_PRICE');
+            setFlatDiscountAmount(details.flatDiscountAmount ? parseFloat(details.flatDiscountAmount) : '');
+            setPercentageDiscount(details.percentageDiscount ? parseFloat(details.percentageDiscount) : '');
+            setMaxDiscount(details.maxDiscount ? parseFloat(details.maxDiscount) : '');
+            setMinimumOrder(details.minimumOrder ? parseFloat(details.minimumOrder) : '');
+            setMaxDeliveryFee(details.maxDeliveryFee ? parseFloat(details.maxDeliveryFee) : '');
+            setDeliveryRadius(details.deliveryRadius ? parseFloat(details.deliveryRadius) : '');
+            setAppliesTo(details.appliesTo || 'items');
 
             // Parse Date Start
             if (details.startAt) {
@@ -529,6 +691,7 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
 
             setSelectedHotelIds(details.hotelIds || []);
             setSelectedFoodIds(details.foodIds || []);
+            setInvitedHotels(details.invitedHotels || []);
           }
         }
       } catch (e) {
@@ -560,9 +723,24 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
       if (changed) {
         setFoodsByHotel(newFoods);
       }
+
+      // Extract categories dynamically from loaded foods
+      const catMap = {};
+      Object.values(newFoods).forEach(foods => {
+        foods.forEach(f => {
+          if (f.category) {
+            catMap[f.category.id] = f.category.name;
+          } else if (f.categoryId) {
+            catMap[f.categoryId] = `Category ${f.categoryId}`;
+          }
+        });
+      });
+      setCategories(Object.entries(catMap).map(([id, name]) => ({ id, name })));
     };
     if (selectedHotelIds.length > 0) {
       fetchFoodsForSelectedHotels();
+    } else {
+      setCategories([]);
     }
   }, [selectedHotelIds, foodsByHotel]);
 
@@ -646,12 +824,7 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
     setSuccess('');
 
     if (!name.trim()) {
-      setError('Campaign name is required');
-      return;
-    }
-    const numericPrice = Number(price);
-    if (isNaN(numericPrice) || numericPrice <= 0) {
-      setError('Fixed selling price must be a valid number greater than 0');
+      setError('Offer name is required');
       return;
     }
     if (!startDate || !endDate) {
@@ -666,29 +839,63 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
       return;
     }
 
+    // Generic validations
+    if (offerType === 'FIXED_PRICE') {
+      const numericPrice = Number(price);
+      if (isNaN(numericPrice) || numericPrice <= 0) {
+        setError('Fixed selling price must be a valid number greater than 0');
+        return;
+      }
+    } else if (offerType === 'FLAT_DISCOUNT') {
+      const val = Number(flatDiscountAmount);
+      if (isNaN(val) || val <= 0) {
+        setError('Discount amount must be a valid number greater than 0');
+        return;
+      }
+    } else if (offerType === 'PERCENTAGE_DISCOUNT') {
+      const val = Number(percentageDiscount);
+      if (isNaN(val) || val <= 0 || val > 100) {
+        setError('Discount percentage must be a valid number between 1 and 100');
+        return;
+      }
+    } else if (offerType === 'FREE_DELIVERY') {
+      const val = Number(minimumOrder);
+      if (minimumOrder !== '' && (isNaN(val) || val < 0)) {
+        setError('Minimum order value must be a valid positive number');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const payload = {
         name,
         description,
         bannerUrl,
-        price: Number(price) || 99.00,
+        price: offerType === 'FIXED_PRICE' ? (Number(price) || 0) : 0,
+        offerType,
+        flatDiscountAmount: offerType === 'FLAT_DISCOUNT' ? (Number(flatDiscountAmount) || 0) : null,
+        percentageDiscount: offerType === 'PERCENTAGE_DISCOUNT' ? (Number(percentageDiscount) || 0) : null,
+        maxDiscount: (offerType === 'PERCENTAGE_DISCOUNT' && maxDiscount) ? Number(maxDiscount) : null,
+        minimumOrder: ((offerType === 'FREE_DELIVERY' || offerType === 'FLAT_DISCOUNT' || offerType === 'PERCENTAGE_DISCOUNT') && minimumOrder) ? Number(minimumOrder) : null,
+        maxDeliveryFee: (offerType === 'FREE_DELIVERY' && maxDeliveryFee) ? Number(maxDeliveryFee) : null,
+        deliveryRadius: (offerType === 'FREE_DELIVERY' && deliveryRadius) ? Number(deliveryRadius) : null,
+        appliesTo: offerType === 'FREE_DELIVERY' ? appliesTo : 'items',
         startAt: startDateTime.toISOString(),
         endAt: endDateTime.toISOString(),
         hotelIds: selectedHotelIds,
-        foodIds: selectedFoodIds,
         isActive: shouldPublish
       };
 
       if (isEdit) {
         await api.update99Campaign(id, payload);
-        setSuccess('Campaign updated successfully!');
+        setSuccess('Offer updated successfully!');
       } else {
         await api.create99Campaign(payload);
-        setSuccess('Campaign published successfully!');
+        setSuccess('Offer published successfully!');
       }
       setTimeout(() => {
-        onNavigate('/super-admin/offers/99store');
+        onNavigate('/super-admin/offers');
       }, 1500);
     } catch (e) {
       console.error(e);
@@ -709,6 +916,24 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
     }
   };
 
+  const getOfferFinalPrice = (originalPrice) => {
+    const orig = Number(originalPrice) || 0;
+    if (offerType === 'FIXED_PRICE') {
+      return Number(price) || 0;
+    }
+    if (offerType === 'FLAT_DISCOUNT') {
+      return Math.max(0, orig - (Number(flatDiscountAmount) || 0));
+    }
+    if (offerType === 'PERCENTAGE_DISCOUNT') {
+      let disc = orig * (Number(percentageDiscount) || 0) / 100;
+      if (maxDiscount) {
+        disc = Math.min(disc, Number(maxDiscount));
+      }
+      return Math.max(0, orig - disc);
+    }
+    return orig;
+  };
+
   const filteredHotels = getFilteredHotels();
   const filteredFoods = getFilteredFoods();
 
@@ -721,14 +946,14 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
       {/* Header Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button onClick={() => onNavigate('/super-admin/offers/99store')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}>
+          <button onClick={() => onNavigate('/super-admin/offers')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}>
             <ArrowLeft size={20} />
           </button>
           <div>
             <h1 style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--text-main)', marginBottom: '0.2rem' }}>
-              {isEdit ? 'Edit Campaign' : 'Create Fixed Price Offer'}
+              {isEdit ? 'Edit Offer' : 'Create Offer'}
             </h1>
-            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Build platform-wide fixed selling price campaigns</span>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Configure a platform-wide promotional campaign</span>
           </div>
         </div>
         
@@ -747,7 +972,7 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
             className="btn-primary" 
             style={{ padding: '0.65rem 1.5rem', fontWeight: '800' }}
           >
-            {saving ? 'Saving...' : 'Publish Campaign'}
+            {saving ? 'Saving...' : 'Publish Offer'}
           </button>
         </div>
       </div>
@@ -769,18 +994,37 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
         
         {/* Left Panel: Builder Steps */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+          {/* Section: Offer Type Selector */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', boxShadow: 'var(--shadow-sm)' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Offer Type</h3>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Select Campaign Pricing Strategy</label>
+              <select
+                value={offerType}
+                onChange={e => setOfferType(e.target.value)}
+                className="premium-form-control"
+                style={{ width: '100%', padding: '0.65rem 1rem', fontSize: '0.9rem', fontWeight: '750', color: 'var(--text-main)' }}
+              >
+                <option value="FIXED_PRICE">Fixed Price (e.g. ₹50, ₹99, ₹149 specials)</option>
+                <option value="FLAT_DISCOUNT">Flat Discount (e.g. Flat ₹50 OFF)</option>
+                <option value="PERCENTAGE_DISCOUNT">Percentage Discount (e.g. 25% OFF)</option>
+                <option value="FREE_DELIVERY">Free Delivery (e.g. Free delivery on orders above threshold)</option>
+              </select>
+            </div>
+          </div>
           
-          {/* Section: Campaign Details */}
+          {/* Section: Basic Details */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', boxShadow: 'var(--shadow-sm)' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Campaign Details</h3>
+            <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Basic Details</h3>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Campaign Name</label>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Offer Name</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Monsoon ₹99 Mega Deal"
+                  placeholder="e.g. Weekend ₹50 OFF, 99 Store, Monsoon Sale"
                   value={name}
                   onChange={e => setName(e.target.value)}
                   className="premium-form-control"
@@ -791,28 +1035,160 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Description</label>
                 <textarea
-                  placeholder="Tell customers about this discount campaign..."
+                  placeholder="Tell customers about this promotional offer campaign..."
                   value={description}
                   onChange={e => setDescription(e.target.value)}
                   className="premium-form-control"
                   style={{ width: '100%', minHeight: '80px', padding: '0.75rem 1rem' }}
                 />
               </div>
+            </div>
+          </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Offer Price (Fixed)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <input
-                    type="number"
-                    min="1"
-                    value={price}
-                    onChange={e => setPrice(e.target.value)}
-                    className="premium-form-control"
-                    style={{ width: '120px', fontWeight: '900', color: 'var(--primary)', textAlign: 'center', fontSize: '1.1rem' }}
-                  />
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>This campaign locks item prices to exactly the specified selling price.</span>
+          {/* Section: Offer Configuration */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', boxShadow: 'var(--shadow-sm)' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Offer Configuration</h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {offerType === 'FIXED_PRICE' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Fixed Selling Price (₹)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 99"
+                      value={price}
+                      onChange={e => setPrice(e.target.value)}
+                      className="premium-form-control"
+                      style={{ width: '120px', fontWeight: '900', color: 'var(--primary)', textAlign: 'center', fontSize: '1.1rem' }}
+                    />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Locks selected item prices to exactly this value. (e.g. ₹50, ₹99, ₹149)</span>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {offerType === 'FLAT_DISCOUNT' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Discount Amount (₹)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 50"
+                      value={flatDiscountAmount}
+                      onChange={e => setFlatDiscountAmount(e.target.value)}
+                      className="premium-form-control"
+                      style={{ width: '150px', fontWeight: '900', color: 'var(--primary)' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Minimum Order Value (₹) - Optional</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 299"
+                      value={minimumOrder}
+                      onChange={e => setMinimumOrder(e.target.value)}
+                      className="premium-form-control"
+                      style={{ width: '150px' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {offerType === 'PERCENTAGE_DISCOUNT' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Discount Percentage (%)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        placeholder="e.g. 25"
+                        value={percentageDiscount}
+                        onChange={e => setPercentageDiscount(e.target.value)}
+                        className="premium-form-control"
+                        style={{ width: '100%', fontWeight: '900', color: 'var(--primary)' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Maximum Discount (₹) - Optional</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 100"
+                        value={maxDiscount}
+                        onChange={e => setMaxDiscount(e.target.value)}
+                        className="premium-form-control"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Minimum Order Value (₹) - Optional</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 199"
+                      value={minimumOrder}
+                      onChange={e => setMinimumOrder(e.target.value)}
+                      className="premium-form-control"
+                      style={{ width: '150px' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {offerType === 'FREE_DELIVERY' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Minimum Order Value (₹) - Optional</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 199"
+                        value={minimumOrder}
+                        onChange={e => setMinimumOrder(e.target.value)}
+                        className="premium-form-control"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Delivery Radius (km) - Optional</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 10"
+                        value={deliveryRadius}
+                        onChange={e => setDeliveryRadius(e.target.value)}
+                        className="premium-form-control"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Maximum Delivery Fee Covered (₹) - Optional</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 50"
+                      value={maxDeliveryFee}
+                      onChange={e => setMaxDeliveryFee(e.target.value)}
+                      className="premium-form-control"
+                      style={{ width: '150px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Applies To</label>
+                    <select
+                      value={appliesTo}
+                      onChange={e => setAppliesTo(e.target.value)}
+                      className="premium-form-control"
+                      style={{ width: '220px' }}
+                    >
+                      <option value="all">Entire Selected Restaurant</option>
+                      <option value="items">Specific Food Items Only</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -879,30 +1255,55 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
             <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Campaign Banner</h3>
             
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Banner Image URL</label>
               <input
-                type="text"
-                placeholder="e.g. https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=1600"
-                value={bannerUrl}
-                onChange={e => setBannerUrl(e.target.value)}
-                className="premium-form-control"
-                style={{ width: '100%' }}
+                type="file"
+                ref={fileInputRef}
+                accept="image/jpeg,image/png,image/webp,image/jpg"
+                onChange={handleBannerImageUpload}
+                style={{ display: 'none' }}
               />
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>Aspect ratio: 16:6. Recommended size: 1600 × 600 px</span>
-            </div>
 
-            {bannerUrl && (
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', height: '140px', overflow: 'hidden', position: 'relative' }}>
-                <img src={bannerUrl} alt="Banner Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                <button type="button" onClick={() => setBannerUrl('')} style={{ position: 'absolute', right: '0.5rem', top: '0.5rem', background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '4px', padding: '0.25rem 0.5rem', cursor: 'pointer', fontSize: '0.72rem', fontWeight: '800' }}>Remove</button>
-              </div>
-            )}
+              {!bannerUrl ? (
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-md)', padding: '2.5rem 1.5rem', textAlign: 'center', cursor: 'pointer', background: 'rgba(255,255,255,0.01)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', transition: 'all 0.2s ease-in-out' }}
+                >
+                  {uploadingImage ? (
+                    <div className="spinner" style={{ border: '2px solid var(--border-color)', borderTop: '2px solid var(--primary)', borderRadius: '50%', width: '24px', height: '24px', animation: 'spin 1s linear infinite', marginBottom: '0.25rem' }} />
+                  ) : (
+                    <Upload size={28} color="var(--primary)" style={{ marginBottom: '0.25rem' }} />
+                  )}
+                  <span style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--text-main)' }}>
+                    {uploadingImage ? 'Uploading Image...' : 'Click to Upload Banner Image'}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Aspect ratio: 16:6. Recommended size: 1600 × 600 px (Max 5MB)</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', height: '140px', overflow: 'hidden', position: 'relative', background: '#121212', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img src={bannerUrl} alt="Banner Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    <button type="button" onClick={() => setBannerUrl('')} style={{ position: 'absolute', right: '0.5rem', top: '0.5rem', background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '4px', padding: '0.25rem 0.5rem', cursor: 'pointer', fontSize: '0.72rem', fontWeight: '800' }}>Remove</button>
+                  </div>
+                  <div>
+                    <button 
+                      type="button" 
+                      onClick={() => fileInputRef.current?.click()} 
+                      className="btn-secondary" 
+                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem', fontWeight: '800' }}
+                      disabled={uploadingImage}
+                    >
+                      {uploadingImage ? 'Uploading...' : 'Replace Image'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Section: Participating Restaurants */}
+          {/* Section: Eligible / Invited Restaurants */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', boxShadow: 'var(--shadow-sm)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)' }}>Participating Restaurants</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)' }}>Eligible / Invited Restaurants</h3>
               <span style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: '800' }}>{selectedHotelIds.length} Selected</span>
             </div>
 
@@ -952,13 +1353,15 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
                   style={{ marginRight: '1rem', width: '16px', height: '16px', cursor: 'pointer' }}
                 />
                 <div style={{ flex: 1 }}>Restaurant Name</div>
-                <div style={{ width: '120px' }}>Location</div>
+                <div style={{ width: '100px' }}>Location</div>
                 <div style={{ width: '80px' }}>Status</div>
+                <div style={{ width: '120px' }}>Invitation Status</div>
               </div>
               
               <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
                 {filteredHotels.map(h => {
                   const isChecked = selectedHotelIds.includes(h.id);
+                  const invitedEntry = invitedHotels.find(ih => ih.id === h.id);
                   return (
                     <div key={h.id} style={{ display: 'flex', padding: '0.65rem 1rem', borderBottom: '1px solid var(--border-color)', alignItems: 'center', fontSize: '0.8rem', background: isChecked ? 'rgba(255,85,32,0.02)' : 'transparent', color: 'var(--text-main)' }}>
                       <input
@@ -975,126 +1378,36 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
                         )}
                         {h.name}
                       </div>
-                      <div style={{ width: '120px', color: 'var(--text-muted)' }}>{h.city || 'Kochi'}</div>
+                      <div style={{ width: '100px', color: 'var(--text-muted)' }}>{h.city || 'Kochi'}</div>
                       <div style={{ width: '80px' }}>
                         <span style={{ fontSize: '0.7rem', color: h.isActive ? '#10b981' : '#ef4444', fontWeight: '800' }}>
                           {h.isActive ? 'Active' : 'Inactive'}
                         </span>
+                      </div>
+                      <div style={{ width: '120px' }}>
+                        {isEdit && invitedEntry ? (
+                          <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: '800',
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '4px',
+                            textTransform: 'uppercase',
+                            background: invitedEntry.status === 'participating' ? 'rgba(16,185,129,0.12)' :
+                                        invitedEntry.status === 'declined' ? 'rgba(239,68,68,0.12)' : 'rgba(100,116,139,0.12)',
+                            color: invitedEntry.status === 'participating' ? '#10b981' :
+                                   invitedEntry.status === 'declined' ? '#ef4444' : 'var(--text-muted)'
+                          }}>
+                            {invitedEntry.status}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>—</span>
+                        )}
                       </div>
                     </div>
                   );
                 })}
               </div>
             </div>
-          </div>
-
-          {/* Section: Eligible Items */}
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', boxShadow: 'var(--shadow-sm)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)' }}>Eligible Items</h3>
-              <span style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: '800' }}>{selectedFoodIds.length} Selected</span>
-            </div>
-
-            {selectedHotelIds.length === 0 ? (
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Select participating restaurants above to load eligible food items.</p>
-            ) : (
-              <>
-                {/* Food Filters */}
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: '150px', position: 'relative' }}>
-                    <input
-                      type="text"
-                      placeholder="Search food items..."
-                      value={searchFood}
-                      onChange={e => setSearchFood(e.target.value)}
-                      className="premium-form-control"
-                      style={{ width: '100%', paddingLeft: '2.2rem' }}
-                    />
-                    <Search size={15} color="var(--text-muted)" style={{ position: 'absolute', left: '0.8rem', top: '50%', transform: 'translateY(-50%)' }} />
-                  </div>
-                  <select
-                    value={foodCategoryFilter}
-                    onChange={e => setFoodCategoryFilter(e.target.value)}
-                    className="premium-form-control"
-                    style={{ width: '140px' }}
-                  >
-                    <option value="all">All Categories</option>
-                    {categories.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={foodAvailabilityFilter}
-                    onChange={e => setFoodAvailabilityFilter(e.target.value)}
-                    className="premium-form-control"
-                    style={{ width: '140px' }}
-                  >
-                    <option value="all">All Availability</option>
-                    <option value="available">Available</option>
-                    <option value="unavailable">Unavailable</option>
-                  </select>
-                </div>
-
-                {/* Food table */}
-                <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', background: 'var(--bg-sidebar)', padding: '0.6rem 1rem', borderBottom: '1px solid var(--border-color)', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '800' }}>
-                    <input
-                      type="checkbox"
-                      checked={filteredFoods.length > 0 && filteredFoods.every(f => selectedFoodIds.includes(f.id))}
-                      onChange={() => handleSelectAllFoods(filteredFoods)}
-                      style={{ marginRight: '1rem', width: '16px', height: '16px', cursor: 'pointer' }}
-                    />
-                    <div style={{ flex: 1 }}>Food Item</div>
-                    <div style={{ width: '130px' }}>Restaurant</div>
-                    <div style={{ width: '100px' }}>Orig. Price</div>
-                    <div style={{ width: '100px' }}>Status</div>
-                  </div>
-
-                  <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
-                    {filteredFoods.map(food => {
-                      const isChecked = selectedFoodIds.includes(food.id);
-                      const isAvailable = food.isAvailable && food.isActive;
-                      const campaignPrice = Number(price) || 99;
-                      const isEligiblePrice = Number(food.price) > campaignPrice;
-                      const isEligible = isAvailable && isEligiblePrice;
-
-                      let reason = '';
-                      if (!isAvailable) reason = 'Unavailable';
-                      else if (!isEligiblePrice) reason = `Price <= ₹${campaignPrice}`;
-
-                      return (
-                        <div key={food.id} style={{ display: 'flex', padding: '0.65rem 1rem', borderBottom: '1px solid var(--border-color)', alignItems: 'center', fontSize: '0.8rem', background: isChecked ? 'rgba(255,85,32,0.02)' : 'transparent', opacity: isEligible ? 1 : 0.6, color: 'var(--text-main)' }}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            disabled={!isEligible}
-                            onChange={() => handleToggleFood(food.id)}
-                            style={{ marginRight: '1rem', width: '16px', height: '16px', cursor: isEligible ? 'pointer' : 'not-allowed', accentColor: 'var(--primary)' }}
-                          />
-                          <div style={{ flex: 1, fontWeight: '750', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            {food.image && (
-                              <img src={food.image} alt="" style={{ width: '28px', height: '28px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
-                            )}
-                            {food.name}
-                          </div>
-                          <div style={{ width: '130px', color: 'var(--text-muted)' }}>
-                            {hotels.find(h => h.id === food.hotelId)?.name || 'Restaurant'}
-                          </div>
-                          <div style={{ width: '100px', fontWeight: '700' }}>₹{food.price}</div>
-                          <div style={{ width: '100px' }}>
-                            {isEligible ? (
-                              <span style={{ color: '#10b981', fontWeight: '800' }}>Eligible</span>
-                            ) : (
-                              <span style={{ color: '#ef4444', fontWeight: '800', background: 'rgba(239,68,68,0.08)', padding: '0.15rem 0.4rem', borderRadius: '2px', fontSize: '0.72rem' }}>{reason}</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
           </div>
         </div>
 
@@ -1124,9 +1437,9 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
                 </div>
 
                 {/* Banner Preview */}
-                <div style={{ background: '#1e1e1e', borderRadius: '12px', height: '110px', overflow: 'hidden', border: '1px solid #2e2e2e', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', position: 'relative' }}>
+                <div style={{ background: '#121212', borderRadius: '12px', height: '110px', overflow: 'hidden', border: '1px solid #2e2e2e', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
                   {bannerUrl ? (
-                    <img src={bannerUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }} />
+                    <img src={bannerUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
                       <ImageIcon size={24} />
@@ -1136,139 +1449,87 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
                   {/* Overlay text */}
                   {bannerUrl && (
                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.8))', padding: '0.5rem', display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: '900', color: '#fff' }}>{name || 'Campaign Name'}</span>
-                      <span style={{ fontSize: '0.6rem', color: '#ccc', textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden' }}>{description || 'Campaign Description'}</span>
+                      <span style={{ fontSize: '0.8rem', fontWeight: '900', color: '#fff' }}>{name || 'Offer Name'}</span>
+                      <span style={{ fontSize: '0.6rem', color: '#ccc', textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden' }}>{description || 'Offer Description'}</span>
                     </div>
                   )}
                 </div>
-
-                {/* Campaign Header Details */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <span style={{ fontSize: '0.95rem', fontWeight: '900' }}>{name || 'Campaign Name'}</span>
+                    <span style={{ fontSize: '0.95rem', fontWeight: '900' }}>{name || 'Offer Name'}</span>
                     <span style={{ fontSize: '0.65rem', color: '#f97316', fontWeight: '800' }}>View All</span>
                   </div>
-                  <span style={{ fontSize: '0.65rem', color: '#aaa', display: 'block', marginTop: '0.1rem' }}>{description || `Meals at ₹${price || 99} + Free Delivery`}</span>
+                  <span style={{ fontSize: '0.65rem', color: '#aaa', display: 'block', marginTop: '0.1rem' }}>
+                    {description || (offerType === 'FREE_DELIVERY' ? `Free delivery on orders above ₹${minimumOrder || 199}` : (offerType === 'FLAT_DISCOUNT' ? `Flat ₹${flatDiscountAmount || 50} OFF` : (offerType === 'PERCENTAGE_DISCOUNT' ? `${percentageDiscount || 25}% OFF` : `Special price ₹${price || 99}`)))}
+                  </span>
+                  
+                  {/* Dynamic Badge */}
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.35rem' }}>
+                    <span style={{ background: 'rgba(249,115,22,0.15)', color: '#f97316', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.62rem', fontWeight: '900', letterSpacing: '0.5px' }}>
+                      {offerType === 'FREE_DELIVERY' ? 'FREE DELIVERY' : (offerType === 'FLAT_DISCOUNT' ? `₹${flatDiscountAmount || 0} OFF` : (offerType === 'PERCENTAGE_DISCOUNT' ? `${percentageDiscount || 0}% OFF` : `₹${price || 99} STORE`))}
+                    </span>
+                    {offerType === 'FREE_DELIVERY' && minimumOrder && (
+                      <span style={{ fontSize: '0.6rem', color: '#aaa', alignSelf: 'center' }}>On orders above ₹{minimumOrder}</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Food Item Previews */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                  {previewFoodsList.length === 0 ? (
-                    <div style={{ padding: '2rem 1rem', border: '1.5px dashed #333', borderRadius: '10px', textAlign: 'center', color: '#666', fontSize: '0.7rem' }}>
-                      No items selected. Choose eligible food items on the left to see preview cards.
-                    </div>
-                  ) : (
-                    previewFoodsList.map(item => (
-                      <div key={item.id} style={{ display: 'flex', gap: '0.6rem', background: '#1c1c1e', borderRadius: '10px', padding: '0.5rem', border: '1px solid #2c2c2e', alignItems: 'center' }}>
-                        {item.image && (
-                          <img src={item.image} alt="" style={{ width: '48px', height: '48px', borderRadius: '6px', objectFit: 'cover' }} />
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <div style={{ width: '8px', height: '8px', border: '1px solid #22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1px' }}><div style={{ width: '4px', height: '4px', background: '#22c55e', borderRadius: '50%' }} /></div>
-                            <span style={{ fontSize: '0.75rem', fontWeight: '800', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{item.name}</span>
-                          </div>
-                          <span style={{ fontSize: '0.6rem', color: '#999', display: 'block' }}>{hotels.find(h => h.id === item.hotelId)?.name || 'Restaurant'}</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.15rem' }}>
-                            <span style={{ fontSize: '0.65rem', textDecoration: 'line-through', color: '#777' }}>₹{item.price}</span>
-                            <span style={{ fontSize: '0.75rem', fontWeight: '900', color: '#f97316' }}>₹{price || 99}</span>
-                          </div>
-                        </div>
-                        <button style={{ border: 'none', background: '#f97316', color: '#fff', fontSize: '0.65rem', fontWeight: '900', padding: '0.25rem 0.6rem', borderRadius: '6px', cursor: 'pointer' }}>ADD</button>
+                  {offerType === 'FREE_DELIVERY' && appliesTo === 'all' ? (
+                    /* Show participating restaurants for entire restaurant free delivery */
+                    selectedHotelIds.length === 0 ? (
+                      <div style={{ padding: '2rem 1rem', border: '1.5px dashed #333', borderRadius: '10px', textAlign: 'center', color: '#666', fontSize: '0.7rem' }}>
+                        No restaurants selected. Choose participating restaurants on the left to see preview cards.
                       </div>
-                    ))
+                    ) : (
+                      selectedHotelIds.slice(0, 3).map(hid => {
+                        const hotelObj = hotels.find(h => h.id === hid);
+                        return (
+                          <div key={hid} style={{ display: 'flex', gap: '0.6rem', background: '#1c1c1e', borderRadius: '10px', padding: '0.65rem 0.85rem', border: '1px solid #2c2c2e', alignItems: 'center' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: '0.78rem', fontWeight: '800', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hotelObj?.name || 'Restaurant'}</span>
+                              <span style={{ fontSize: '0.6rem', color: '#777', display: 'block', marginTop: '0.1rem' }}>{hotelObj?.city || 'Kochi'} • Rating: {hotelObj?.rating || '4.2'} ⭐</span>
+                            </div>
+                            <span style={{ fontSize: '0.62rem', color: '#22c55e', fontWeight: '900', background: 'rgba(34,197,94,0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>FREE DEL</span>
+                          </div>
+                        );
+                      })
+                    )
+                  ) : (
+                    /* Show food items preview */
+                    previewFoodsList.length === 0 ? (
+                      <div style={{ padding: '2rem 1rem', border: '1.5px dashed #333', borderRadius: '10px', textAlign: 'center', color: '#666', fontSize: '0.7rem' }}>
+                        No participating items yet. Items will appear after invited restaurants join this campaign.
+                      </div>
+                    ) : (
+                      previewFoodsList.map(item => (
+                        <div key={item.id} style={{ display: 'flex', gap: '0.6rem', background: '#1c1c1e', borderRadius: '10px', padding: '0.5rem', border: '1px solid #2c2c2e', alignItems: 'center' }}>
+                          {item.image && (
+                            <img src={item.image} alt="" style={{ width: '48px', height: '48px', borderRadius: '6px', objectFit: 'cover' }} />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <div style={{ width: '8px', height: '8px', border: '1px solid #22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1px' }}><div style={{ width: '4px', height: '4px', background: '#22c55e', borderRadius: '50%' }} /></div>
+                              <span style={{ fontSize: '0.75rem', fontWeight: '800', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{item.name}</span>
+                            </div>
+                            <span style={{ fontSize: '0.6rem', color: '#999', display: 'block' }}>{hotels.find(h => h.id === item.hotelId)?.name || 'Restaurant'}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.15rem' }}>
+                              <span style={{ fontSize: '0.65rem', textDecoration: 'line-through', color: '#777' }}>₹{item.price}</span>
+                              <span style={{ fontSize: '0.75rem', fontWeight: '900', color: '#f97316' }}>₹{getOfferFinalPrice(item.price).toFixed(0)}</span>
+                            </div>
+                          </div>
+                          <button style={{ border: 'none', background: '#f97316', color: '#fff', fontSize: '0.65rem', fontWeight: '900', padding: '0.25rem 0.6rem', borderRadius: '6px', cursor: 'pointer' }}>ADD</button>
+                        </div>
+                      ))
+                    )
                   )}
                 </div>
-
               </div>
-
             </div>
-
           </div>
-
-        </div>
-
-      </div>
-
-    </div>
-  );
-}
-
-// ─── 4. SUPER ADMIN CHOOSE OFFER TYPE PAGE ──────────────────────────────────
-export function SuperAdminChooseOfferType({ onNavigate }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', padding: '1rem 0' }}>
-      
-      {/* Header back button */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <button onClick={() => onNavigate('/super-admin/offers')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}>
-          <ArrowLeft size={20} />
-        </button>
-        <div>
-          <h1 style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--text-main)', marginBottom: '0.2rem' }}>Choose Offer Type</h1>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Select the type of promotional campaign you want to build</p>
         </div>
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginTop: '1rem' }}>
-        
-        {/* Card: Fixed Price Offer */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.75rem', display: 'flex', flexDirection: 'column', minHeight: '200px', boxShadow: 'var(--shadow-sm)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <IndianRupee size={18} color="var(--primary)" />
-              <span style={{ fontSize: '1.1rem', fontWeight: '900', color: 'var(--text-main)' }}>Fixed Price Offer</span>
-            </div>
-            <span style={{ background: 'rgba(16,185,129,0.08)', color: '#10b981', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem', fontWeight: '800' }}>Active</span>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '1.75rem' }}>
-            Set a fixed selling price for selected food items.<br />
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.4rem' }}>Examples: ₹50 &bull; ₹99 &bull; ₹149 &bull; ₹199</span>
-          </p>
-          <button 
-            onClick={() => onNavigate('/super-admin/offers/99store/new')} 
-            className="btn-primary" 
-            style={{ width: '100%', padding: '0.65rem', fontSize: '0.82rem', fontWeight: '800', marginTop: 'auto' }}
-          >
-            Create Fixed Price Offer
-          </button>
-        </div>
-
-        {/* Card: Free Delivery */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.75rem', display: 'flex', flexDirection: 'column', minHeight: '200px', opacity: 0.7 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '1.1rem', fontWeight: '900', color: 'var(--text-main)' }}>Free Delivery</span>
-            <span style={{ background: 'var(--bg-subtle)', color: 'var(--text-muted)', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem', fontWeight: '800' }}>Coming Soon</span>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '1.75rem' }}>
-            Create a platform-wide free delivery campaign.
-          </p>
-        </div>
-
-        {/* Card: Percentage Discount */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.75rem', display: 'flex', flexDirection: 'column', minHeight: '200px', opacity: 0.7 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '1.1rem', fontWeight: '900', color: 'var(--text-main)' }}>Percentage Discount</span>
-            <span style={{ background: 'var(--bg-subtle)', color: 'var(--text-muted)', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem', fontWeight: '800' }}>Coming Soon</span>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '1.75rem' }}>
-            Create percentage-based platform offers.
-          </p>
-        </div>
-
-        {/* Card: Flat Discount */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.75rem', display: 'flex', flexDirection: 'column', minHeight: '200px', opacity: 0.7 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '1.1rem', fontWeight: '900', color: 'var(--text-main)' }}>Flat Discount</span>
-            <span style={{ background: 'var(--bg-subtle)', color: 'var(--text-muted)', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem', fontWeight: '800' }}>Coming Soon</span>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '1.75rem' }}>
-            Create fixed-value platform discounts.
-          </p>
-        </div>
-
-      </div>
-
     </div>
   );
 }

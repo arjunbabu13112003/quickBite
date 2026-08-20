@@ -703,6 +703,13 @@ export const api = {
     return handleResponse(res);
   },
 
+  getActiveCampaigns: async () => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/active-campaigns`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
   join99Campaign: async (campaignId) => {
     const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${campaignId}/join`, {
       method: 'POST',
@@ -723,6 +730,30 @@ export const api = {
       method: 'POST',
       headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ foodIds }),
+    });
+    return handleResponse(res);
+  },
+
+  getHotelCampaigns: async () => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/hotel-campaigns`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  participateInCampaign: async (campaignId, foodIds) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${campaignId}/participate`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ foodIds }),
+    });
+    return handleResponse(res);
+  },
+
+  declineCampaign: async (campaignId) => {
+    const res = await fetch(`${API_BASE_URL}/offers/store99/campaigns/${campaignId}/decline`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
     });
     return handleResponse(res);
   },

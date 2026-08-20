@@ -10,6 +10,14 @@ async function bootstrap() {
   // Enable CORS for frontend applications
   app.enableCors();
 
+  // Log incoming requests and their status codes
+  app.use((req, res, next) => {
+    res.on('finish', () => {
+      console.log(`[HTTP] ${req.method} ${req.originalUrl} - Status: ${res.statusCode}`);
+    });
+    next();
+  });
+
   // Serve uploaded food images as static files at /uploads/*
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads',

@@ -21,6 +21,8 @@ import { Roles } from '../users/roles.decorator';
 import { UserRole } from '../users/user-role.enum';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { UpdateOfferDto } from './dto/update-offer.dto';
+import { CreateStore99CampaignDto } from './dto/create-campaign.dto';
+import { UpdateStore99CampaignDto } from './dto/update-campaign.dto';
 import { HotelAdmin } from '../hotel-admins/hotel-admin.entity';
 import { Food } from '../foods/food.entity';
 
@@ -167,17 +169,24 @@ export class OffersController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.HOTEL_ADMIN)
-  @Get('store99/active-campaign')
-  async getActiveCampaign(@Request() req) {
+  @Get('store99/hotel-campaigns')
+  async getHotelCampaigns(@Request() req) {
     const hotelId = await this.getHotelIdForAdmin(req.user.userId);
-    const campaign = await this.offersService.getActiveCampaign();
-    if (!campaign) return null;
+    console.log(`[DEBUG] getHotelCampaigns - user ID: ${req.user.userId}, resolved hotel ID: ${hotelId}`);
+    const campaigns = await this.offersService.getHotelCampaigns(hotelId);
+    console.log(`[DEBUG] getHotelCampaigns - campaigns returned for hotel ${hotelId}:`, campaigns.map(c => c.id));
+    return campaigns;
+  }
 
-    const isParticipating = await this.offersService.checkHotelParticipating(campaign.id, hotelId);
-    return {
-      ...campaign,
-      isParticipating,
-    };
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Get('store99/active-campaigns')
+  async getActiveCampaigns(@Request() req) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    console.log(`[DEBUG] getActiveCampaigns - user ID: ${req.user.userId}, resolved hotel ID: ${hotelId}`);
+    const campaigns = await this.offersService.getHotelCampaigns(hotelId);
+    console.log(`[DEBUG] getActiveCampaigns - campaigns returned for hotel ${hotelId}:`, campaigns.map(c => c.id));
+    return campaigns;
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -185,16 +194,9 @@ export class OffersController {
   @Post('store99/campaigns/:campaignId/join')
   async joinCampaign(@Param('campaignId', ParseIntPipe) campaignId: number, @Request() req) {
     const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    console.log(`[DEBUG] joinCampaign - campaignId: ${campaignId}, hotel ID: ${hotelId}`);
     await this.offersService.joinCampaign(campaignId, hotelId);
     return { success: true, message: 'Joined campaign successfully' };
-  }
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.HOTEL_ADMIN)
-  @Get('store99/campaigns/:campaignId/items')
-  async getCampaignItems(@Param('campaignId', ParseIntPipe) campaignId: number, @Request() req) {
-    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
-    return this.offersService.getCampaignItems(campaignId, hotelId);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -206,8 +208,41 @@ export class OffersController {
     @Body() body: { foodIds: number[] },
   ) {
     const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    console.log(`[DEBUG] submitCampaignItems - campaignId: ${campaignId}, hotel ID: ${hotelId}, foodIds:`, body.foodIds);
     await this.offersService.submitCampaignItems(campaignId, hotelId, body.foodIds);
-    return { success: true, message: '99 Store items updated successfully' };
+    return { success: true, message: 'Items updated successfully' };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Post('store99/campaigns/:campaignId/participate')
+  async participateInCampaign(
+    @Param('campaignId', ParseIntPipe) campaignId: number,
+    @Request() req,
+    @Body() body: { foodIds: number[] },
+  ) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    console.log(`[DEBUG] participateInCampaign - campaignId: ${campaignId}, hotel ID: ${hotelId}, foodIds:`, body.foodIds);
+    await this.offersService.participateInCampaign(campaignId, hotelId, body.foodIds);
+    return { success: true, message: 'Participated in campaign successfully' };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Post('store99/campaigns/:campaignId/decline')
+  async declineCampaign(@Param('campaignId', ParseIntPipe) campaignId: number, @Request() req) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    console.log(`[DEBUG] declineCampaign - campaignId: ${campaignId}, hotel ID: ${hotelId}`);
+    await this.offersService.declineCampaign(campaignId, hotelId);
+    return { success: true, message: 'Declined campaign successfully' };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOTEL_ADMIN)
+  @Get('store99/campaigns/:campaignId/items')
+  async getCampaignItems(@Param('campaignId', ParseIntPipe) campaignId: number, @Request() req) {
+    const hotelId = await this.getHotelIdForAdmin(req.user.userId);
+    return this.offersService.getCampaignItems(campaignId, hotelId);
   }
 
   // ─── Super Admin 99 Store Campaign Endpoints ───
@@ -229,17 +264,7 @@ export class OffersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   @Post('store99/campaigns')
-  async createCampaign(@Body() body: {
-    name: string;
-    description?: string;
-    bannerUrl?: string;
-    price: number;
-    startAt: string;
-    endAt: string;
-    hotelIds: number[];
-    foodIds: number[];
-    isActive: boolean;
-  }) {
+  async createCampaign(@Body() body: CreateStore99CampaignDto) {
     return this.offersService.createCampaign({
       ...body,
       startAt: new Date(body.startAt),
@@ -252,17 +277,7 @@ export class OffersController {
   @Patch('store99/campaigns/:id')
   async updateCampaign(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: {
-      name?: string;
-      description?: string;
-      bannerUrl?: string;
-      price?: number;
-      startAt?: string;
-      endAt?: string;
-      hotelIds?: number[];
-      foodIds?: number[];
-      isActive?: boolean;
-    },
+    @Body() body: UpdateStore99CampaignDto,
   ) {
     return this.offersService.updateCampaign(id, {
       ...body,

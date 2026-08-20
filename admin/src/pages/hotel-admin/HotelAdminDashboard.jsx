@@ -3,7 +3,7 @@ import {
   LogOut, Store, Utensils, TrendingUp, Activity, ClipboardList,
   Building, RefreshCw, Plus, AlertTriangle, Bell, User,
   Settings, MapPin, Clock, Search, Loader2, Eye, Edit, Trash2, X, Check, EyeOff, Upload,
-  MoreVertical, Calendar, Tag, ChevronDown, Copy
+  MoreVertical, Calendar, Tag, ChevronDown, Copy, ArrowLeft
 } from 'lucide-react';
 import { api } from '../../services/api';
 import CustomizationsSection from './CustomizationsSection';
@@ -2308,16 +2308,7 @@ function SettingsPage({ currentUser, hotel }) {
 // ─── Offers Management Page ───────────────────────────────────────────────────
 function OffersManagementPage({ hotel }) {
   const [offers, setOffers] = useState([]);
-  const [subTab, setSubTab] = useState('my-offers');
-  const [activeCampaign, setActiveCampaign] = useState(null);
-  const [loadingCampaign, setLoadingCampaign] = useState(false);
-  const [participatingItems, setParticipatingItems] = useState([]);
-  const [selectedCampaignFoodIds, setSelectedCampaignFoodIds] = useState([]);
-  const [campaignSubmitting, setCampaignSubmitting] = useState(false);
-  const [campaignMessage, setCampaignMessage] = useState('');
-  const [campaignSearch, setCampaignSearch] = useState('');
-  const [campaignCategoryFilter, setCampaignCategoryFilter] = useState('all');
-  const [campaignAvailabilityFilter, setCampaignAvailabilityFilter] = useState('all');
+
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
   const [foods, setFoods] = useState([]);
@@ -2377,71 +2368,6 @@ function OffersManagementPage({ hotel }) {
     }
   }, [hotel.id]);
 
-  const fetchCampaignData = useCallback(async () => {
-    setLoadingCampaign(true);
-    try {
-      const camp = await api.getActive99Campaign();
-      setActiveCampaign(camp);
-      if (camp) {
-        const items = await api.get99CampaignItems(camp.id);
-        setParticipatingItems(items || []);
-        setSelectedCampaignFoodIds((items || []).map(item => item.foodId));
-      }
-    } catch (err) {
-      console.error('Failed to fetch active 99 store campaign data', err);
-    } finally {
-      setLoadingCampaign(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (subTab === '99-store') {
-      fetchCampaignData();
-    }
-  }, [subTab, fetchCampaignData]);
-
-  const handleJoinCampaign = async () => {
-    if (!activeCampaign) return;
-    setCampaignSubmitting(true);
-    try {
-      await api.join99Campaign(activeCampaign.id);
-      await fetchCampaignData();
-    } catch (err) {
-      console.error('Failed to join campaign', err);
-    } finally {
-      setCampaignSubmitting(false);
-    }
-  };
-
-  const handleSaveCampaignItems = async () => {
-    if (!activeCampaign) return;
-    setCampaignSubmitting(true);
-    setCampaignMessage('');
-    try {
-      await api.submit99CampaignItems(activeCampaign.id, selectedCampaignFoodIds);
-      setCampaignMessage(`${activeCampaign.name} items updated successfully`);
-      await fetchCampaignData();
-    } catch (err) {
-      console.error('Failed to submit campaign items', err);
-      setCampaignMessage(`Failed to update ${activeCampaign.name} items`);
-    } finally {
-      setCampaignSubmitting(false);
-    }
-  };
-
-  const handleToggleFood = (foodId) => {
-    setSelectedCampaignFoodIds(prev => {
-      if (prev.includes(foodId)) {
-        return prev.filter(id => id !== foodId);
-      } else {
-        return [...prev, foodId];
-      }
-    });
-  };
-
-  const handleRemoveFood = (foodId) => {
-    setSelectedCampaignFoodIds(prev => prev.filter(id => id !== foodId));
-  };
 
   useEffect(() => {
     fetchOffers();
@@ -2661,51 +2587,12 @@ function OffersManagementPage({ hotel }) {
             <strong style={{ color: 'var(--primary)' }}>{hotel.name}</strong> &bull; Manage your active campaigns and discounts.
           </p>
         </div>
-        {subTab === 'my-offers' && (
-          <button onClick={openDrawerForCreate} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem', fontWeight: '800' }}>
-            <Plus size={18} /> Create Offer
-          </button>
-        )}
-      </div>
-
-      {/* Sub-tabs Selection Row */}
-      <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.5rem' }}>
-        <button
-          onClick={() => setSubTab('my-offers')}
-          style={{
-            border: 'none',
-            background: 'none',
-            borderBottom: subTab === 'my-offers' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
-            color: subTab === 'my-offers' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: '800',
-            padding: '0.6rem 0.5rem',
-            cursor: 'pointer',
-            fontSize: '0.95rem',
-            transition: 'all var(--transition-fast)'
-          }}
-        >
-          My Offers
-        </button>
-        <button
-          onClick={() => setSubTab('99-store')}
-          style={{
-            border: 'none',
-            background: 'none',
-            borderBottom: subTab === '99-store' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
-            color: subTab === '99-store' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: '800',
-            padding: '0.6rem 0.5rem',
-            cursor: 'pointer',
-            fontSize: '0.95rem',
-            transition: 'all var(--transition-fast)'
-          }}
-        >
-          {activeCampaign ? activeCampaign.name : '99 Store'}
+        <button onClick={openDrawerForCreate} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem', fontWeight: '800' }}>
+          <Plus size={18} /> Create Offer
         </button>
       </div>
 
-      {subTab === 'my-offers' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
 
       {/* METRICS CARDS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem' }}>
@@ -3345,308 +3232,6 @@ function OffersManagementPage({ hotel }) {
         </>
       )}
         </div>
-      )}
-
-      {subTab === '99-store' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '0.2rem' }}>{activeCampaign ? activeCampaign.name : 'Fixed Price Campaign'}</h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Participate in platform-wide fixed selling price campaigns</p>
-          </div>
-
-          {loadingCampaign ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
-              <div className="spinner" style={{ border: '3px solid var(--border-color)', borderTop: '3px solid var(--primary)', borderRadius: '50%', width: '30px', height: '30px', animation: 'spin 1s linear infinite' }} />
-            </div>
-          ) : !activeCampaign ? (
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '4rem 2rem', textAlign: 'center', boxShadow: 'var(--shadow-sm)' }}>
-              <div style={{ display: 'inline-flex', width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(249,115,22,0.08)', color: 'var(--primary)', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem' }}>
-                <Tag size={28} />
-              </div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '0.5rem' }}>No active campaigns</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '400px', margin: '0 auto' }}>
-                New platform campaigns will appear here when available.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Active Campaign Card */}
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
-                {activeCampaign.bannerUrl && (
-                  <div style={{ height: '180px', width: '100%', overflow: 'hidden' }}>
-                    <img src={activeCampaign.bannerUrl} alt="Campaign Banner" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  </div>
-                )}
-                <div style={{ padding: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem' }}>
-                  <div style={{ flex: 1, minWidth: '250px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
-                      <h3 style={{ fontSize: '1.3rem', fontWeight: '900', color: 'var(--text-main)' }}>{activeCampaign.name}</h3>
-                      <span style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontSize: '0.72rem', fontWeight: '800' }}>Active</span>
-                    </div>
-                    <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>{activeCampaign.description}</p>
-                    
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem 2rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      <div>
-                        <strong>Price setup:</strong> <span style={{ color: 'var(--primary)', fontWeight: '800', fontSize: '0.9rem' }}>₹{parseFloat(activeCampaign.price).toFixed(0)}</span>
-                      </div>
-                      <div>
-                        <strong>Start Date:</strong> {new Date(activeCampaign.startAt).toLocaleDateString()}
-                      </div>
-                      <div>
-                        <strong>End Date:</strong> {new Date(activeCampaign.endAt).toLocaleDateString()}
-                      </div>
-                      <div style={{ color: 'var(--accent-amber)', fontWeight: '750' }}>
-                        {(() => {
-                          const diff = new Date(activeCampaign.endAt) - new Date();
-                          if (diff <= 0) return 'Ended';
-                          const days = Math.floor(diff / (24 * 60 * 60 * 1000));
-                          const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-                          return days > 0 ? `${days}d ${hours}h remaining` : `${hours}h remaining`;
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    {activeCampaign.isParticipating ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', padding: '0.6rem 1.2rem', borderRadius: 'var(--radius-md)', fontWeight: '800', fontSize: '0.88rem' }}>
-                        <Check size={16} /> Participating
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleJoinCampaign}
-                        disabled={campaignSubmitting}
-                        className="btn-primary"
-                        style={{ padding: '0.65rem 1.5rem', fontWeight: '800' }}
-                      >
-                        {campaignSubmitting ? 'Joining...' : 'Join Campaign'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Item Selection UI */}
-              {activeCampaign.isParticipating && (
-                <>
-                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
-                    <h3 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '1rem' }}>Select Items for {activeCampaign ? activeCampaign.name : 'Campaign'}</h3>
-
-                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: '200px', position: 'relative' }}>
-                        <input
-                          type="text"
-                          placeholder="Search food items..."
-                          value={campaignSearch}
-                          onChange={e => setCampaignSearch(e.target.value)}
-                          className="premium-form-control"
-                          style={{ width: '100%', paddingLeft: '2.2rem' }}
-                        />
-                        <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '0.8rem', top: '50%', transform: 'translateY(-50%)' }} />
-                      </div>
-                      
-                      <select
-                        value={campaignCategoryFilter}
-                        onChange={e => setCampaignCategoryFilter(e.target.value)}
-                        className="premium-form-control"
-                        style={{ minWidth: '150px' }}
-                      >
-                        <option value="all">All Categories</option>
-                        {categories.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-
-                      <select
-                        value={campaignAvailabilityFilter}
-                        onChange={e => setCampaignAvailabilityFilter(e.target.value)}
-                        className="premium-form-control"
-                        style={{ minWidth: '150px' }}
-                      >
-                        <option value="all">All Availability</option>
-                        <option value="available">Available</option>
-                        <option value="unavailable">Unavailable</option>
-                      </select>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '400px', overflowY: 'auto', paddingRight: '0.5rem' }}>
-                      {foods
-                        .filter(food => {
-                          const matchesSearch = food.name.toLowerCase().includes(campaignSearch.toLowerCase());
-                          const matchesCat = campaignCategoryFilter === 'all' || Number(food.categoryId) === Number(campaignCategoryFilter);
-                          const matchesAvail = campaignAvailabilityFilter === 'all' || 
-                            (campaignAvailabilityFilter === 'available' && food.isAvailable && food.isActive) ||
-                            (campaignAvailabilityFilter === 'unavailable' && !(food.isAvailable && food.isActive));
-                          return matchesSearch && matchesCat && matchesAvail;
-                        })
-                        .map(item => {
-                          const campaignPrice = activeCampaign ? Number(activeCampaign.price) : 99;
-                          const isEligiblePrice = Number(item.price) > campaignPrice;
-                          const isEligible = isAvailable && isEligiblePrice;
-                          
-                          let ineligibleReason = '';
-                          if (!isAvailable) ineligibleReason = 'Unavailable';
-                          else if (!isEligiblePrice) ineligibleReason = `Price <= ₹${campaignPrice}`;
-
-                          const isChecked = selectedCampaignFoodIds.includes(item.id);
-
-                          return (
-                            <div
-                              key={item.id}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '1rem',
-                                padding: '0.75rem 1rem',
-                                border: '1px solid var(--border-color)',
-                                borderRadius: 'var(--radius-md)',
-                                background: isChecked ? 'rgba(255,85,32,0.02)' : 'transparent',
-                                opacity: isEligible ? 1 : 0.6
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                disabled={!isEligible}
-                                onChange={() => handleToggleFood(item.id)}
-                                style={{ width: '18px', height: '18px', cursor: isEligible ? 'pointer' : 'not-allowed', accentColor: 'var(--primary)' }}
-                              />
-
-                              {item.image && (
-                                <img src={item.image} alt={item.name} style={{ width: '48px', height: '48px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
-                              )}
-
-                              <div style={{ flex: 1 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <strong style={{ color: 'var(--text-main)', fontSize: '0.9rem' }}>{item.name}</strong>
-                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', background: 'var(--bg-subtle)', padding: '0.1rem 0.35rem', borderRadius: '2px' }}>
-                                    {categories.find(c => c.id === item.categoryId)?.name || 'Food'}
-                                  </span>
-                                </div>
-                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                                  Original Price: <span style={{ textDecoration: 'line-through' }}>₹{item.price}</span> &bull; Campaign Price: <strong style={{ color: 'var(--primary)' }}>₹{campaignPrice}</strong>
-                                </div>
-                              </div>
-
-                              <div>
-                                {isEligible ? (
-                                  <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: '800' }}>Eligible</span>
-                                ) : (
-                                  <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: '800', background: 'rgba(239,68,68,0.08)', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)' }}>
-                                    {ineligibleReason}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-
-                  {/* My Selected Items */}
-                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
-                    <h3 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)', marginBottom: '1rem' }}>My Selected Items</h3>
-
-                    {selectedCampaignFoodIds.length === 0 ? (
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No items selected yet. Choose items above to participate.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        {foods
-                          .filter(f => selectedCampaignFoodIds.includes(f.id))
-                          .map(item => {
-                            const isAvailable = item.isAvailable && item.isActive;
-                            const backendItem = participatingItems.find(p => p.foodId === item.id);
-                            const status = backendItem ? backendItem.status : 'Active';
-
-                            return (
-                              <div
-                                key={item.id}
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '1rem',
-                                  padding: '0.75rem 1rem',
-                                  border: '1px solid var(--border-color)',
-                                  borderRadius: 'var(--radius-md)'
-                                }}
-                              >
-                                {item.image && (
-                                  <img src={item.image} alt={item.name} style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
-                                )}
-
-                                <div style={{ flex: 1 }}>
-                                  <strong style={{ color: 'var(--text-main)', fontSize: '0.85rem' }}>{item.name}</strong>
-                                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-                                    Original Price: ₹{item.price} &bull; Campaign Price: <strong style={{ color: 'var(--primary)' }}>₹{activeCampaign ? parseFloat(activeCampaign.price).toFixed(0) : '99'}</strong>
-                                  </div>
-                                </div>
-
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                                  <span style={{ fontSize: '0.75rem', color: isAvailable ? '#10b981' : '#ef4444', fontWeight: '750' }}>
-                                    {isAvailable ? 'Available' : 'Unavailable'}
-                                  </span>
-
-                                  <span style={{
-                                    fontSize: '0.72rem',
-                                    fontWeight: '800',
-                                    padding: '0.2rem 0.5rem',
-                                    borderRadius: 'var(--radius-sm)',
-                                    color: status.toLowerCase() === 'approved' || status.toLowerCase() === 'active' ? '#10b981' : (status.toLowerCase() === 'pending' ? '#f59e0b' : '#ef4444'),
-                                    background: status.toLowerCase() === 'approved' || status.toLowerCase() === 'active' ? 'rgba(16,185,129,0.08)' : (status.toLowerCase() === 'pending' ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)'),
-                                    textTransform: 'capitalize'
-                                  }}>
-                                    {status}
-                                  </span>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveFood(item.id)}
-                                    style={{ background: 'none', border: 'none', color: 'var(--text-danger)', cursor: 'pointer', padding: '4px' }}
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Submission Row */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-start' }}>
-                    {campaignMessage && (
-                      <div style={{
-                        padding: '0.75rem 1.25rem',
-                        borderRadius: 'var(--radius-md)',
-                        background: campaignMessage.includes('successfully') ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
-                        color: campaignMessage.includes('successfully') ? '#10b981' : '#ef4444',
-                        border: '1px solid',
-                        borderColor: campaignMessage.includes('successfully') ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
-                        fontSize: '0.85rem',
-                        fontWeight: '700'
-                      }}>
-                        {campaignMessage}
-                      </div>
-                    )}
-                    
-                    <button
-                      type="button"
-                      onClick={handleSaveCampaignItems}
-                      disabled={campaignSubmitting}
-                      className="btn-primary"
-                      style={{ padding: '0.75rem 2rem', fontWeight: '800', fontSize: '0.95rem' }}
-                    >
-                      {campaignSubmitting ? 'Saving Items...' : `Submit Items for ${activeCampaign ? activeCampaign.name : 'Campaign'}`}
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -3802,6 +3387,7 @@ export default function HotelAdminDashboard({
     { id: 'orders', label: 'Orders', icon: <ClipboardList size={18} /> },
     { id: 'menu', label: 'Menu Management', icon: <Utensils size={18} /> },
     { id: 'offers', label: 'Offers & Promotions', icon: <TrendingUp size={18} /> },
+    { id: 'platform-campaigns', label: 'Platform Campaigns', icon: <Tag size={18} /> },
     { id: 'analytics', label: 'Analytics', icon: <Store size={18} /> },
     { id: 'profile', label: 'Restaurant Profile', icon: <Building size={18} /> },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
@@ -4197,11 +3783,14 @@ export default function HotelAdminDashboard({
           {/* ── OFFERS TAB ── */}
           {activeTab === 'offers' && <OffersManagementPage hotel={hotel} />}
 
+          {/* ── PLATFORM CAMPAIGNS TAB ── */}
+          {activeTab === 'platform-campaigns' && <PlatformCampaignsPage hotel={hotel} />}
+
           {/* ── PROFILE TAB ── */}
           {activeTab === 'profile' && <RestaurantProfilePage hotel={hotel} setHotel={setHotel} />}
 
           {/* ── PLACEHOLDER TABS ── */}
-          {!['dashboard', 'orders', 'menu', 'settings', 'offers', 'profile'].includes(activeTab) && (
+          {!['dashboard', 'orders', 'menu', 'settings', 'offers', 'profile', 'platform-campaigns'].includes(activeTab) && (
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '5rem 2rem', textAlign: 'center', boxShadow: 'var(--shadow-sm)' }}>
               <Store size={48} style={{ color: 'var(--primary)', marginBottom: '1.5rem' }} />
               <h2 style={{ fontSize: '1.5rem', fontWeight: '850', marginBottom: '0.5rem' }}>
@@ -4217,6 +3806,340 @@ export default function HotelAdminDashboard({
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function PlatformCampaignsPage({ hotel }) {
+  const [campaigns, setCampaigns] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  
+  // Modal states
+  const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const [foods, setFoods] = useState([]);
+  const [selectedFoodIds, setSelectedFoodIds] = useState([]);
+  const [searchFood, setSearchFood] = useState('');
+  const [foodCategoryFilter, setFoodCategoryFilter] = useState('all');
+  const [categories, setCategories] = useState([]);
+  const [joining, setJoining] = useState(false);
+
+  const fetchCampaigns = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api.getHotelCampaigns();
+      setCampaigns(data || []);
+    } catch (err) {
+      setError(err.message || 'Failed to load platform campaigns.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCampaigns();
+  }, [fetchCampaigns]);
+
+  const handleOpenJoin = async (campaign) => {
+    setSelectedCampaign(campaign);
+    setIsJoinModalOpen(true);
+    setSearchFood('');
+    setFoodCategoryFilter('all');
+    
+    // Fetch hotel foods and campaign selected items
+    try {
+      const [allFoods, campaignItems] = await Promise.all([
+        api.getHotelFoods(hotel.id),
+        api.get99CampaignItems(campaign.id)
+      ]);
+      setFoods(allFoods || []);
+      setSelectedFoodIds((campaignItems || []).map(item => item.foodId));
+      
+      // Extract categories dynamically
+      const catMap = {};
+      (allFoods || []).forEach(f => {
+        if (f.category) {
+          catMap[f.category.id] = f.category.name;
+        }
+      });
+      setCategories(Object.entries(catMap).map(([id, name]) => ({ id: Number(id), name })));
+    } catch (err) {
+      alert('Failed to load menu items.');
+    }
+  };
+
+  const handleDecline = async (campaignId) => {
+    if (!window.confirm('Are you sure you want to decline participation in this campaign?')) return;
+    try {
+      await api.declineCampaign(campaignId);
+      fetchCampaigns();
+    } catch (err) {
+      alert(err.message || 'Failed to decline campaign.');
+    }
+  };
+
+  const handleConfirmParticipation = async () => {
+    setJoining(true);
+    try {
+      await api.participateInCampaign(selectedCampaign.id, selectedFoodIds);
+      setIsJoinModalOpen(false);
+      fetchCampaigns();
+    } catch (err) {
+      alert(err.message || 'Failed to confirm campaign participation.');
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const getCampaignStatus = (campaign) => {
+    const now = new Date();
+    const start = new Date(campaign.startAt);
+    const end = new Date(campaign.endAt);
+    if (now > end) return 'ended';
+    return campaign.participationStatus || 'invited';
+  };
+
+  const calculateOfferPrice = (originalPrice, campaign) => {
+    const orig = Number(originalPrice) || 0;
+    const type = campaign.offerType || 'FIXED_PRICE';
+    if (type === 'FIXED_PRICE') {
+      return Number(campaign.price) || 0;
+    }
+    if (type === 'FLAT_DISCOUNT') {
+      return Math.max(0, orig - (Number(campaign.flatDiscountAmount) || 0));
+    }
+    if (type === 'PERCENTAGE_DISCOUNT') {
+      let disc = orig * (Number(campaign.percentageDiscount) || 0) / 100;
+      if (campaign.maxDiscount) {
+        disc = Math.min(disc, Number(campaign.maxDiscount));
+      }
+      return Math.max(0, orig - disc);
+    }
+    return orig;
+  };
+
+  const getFilteredFoods = () => {
+    return foods.filter(food => {
+      const matchesSearch = food.name.toLowerCase().includes(searchFood.toLowerCase());
+      const matchesCat = foodCategoryFilter === 'all' || Number(food.categoryId) === Number(foodCategoryFilter);
+      return matchesSearch && matchesCat;
+    });
+  };
+
+  const filteredFoods = getFilteredFoods();
+
+  const getOfferValueLabel = (c) => {
+    const type = c.offerType || 'FIXED_PRICE';
+    switch (type) {
+      case 'FIXED_PRICE':
+        return `₹${parseFloat(c.price || 0).toFixed(0)} Fixed Price`;
+      case 'FLAT_DISCOUNT':
+        return `Flat ₹${parseFloat(c.flatDiscountAmount || 0).toFixed(0)} OFF`;
+      case 'PERCENTAGE_DISCOUNT':
+        return `${parseFloat(c.percentageDiscount || 0).toFixed(0)}% OFF`;
+      case 'FREE_DELIVERY':
+        return c.minimumOrder ? `Free Delivery above ₹${parseFloat(c.minimumOrder).toFixed(0)}` : 'Free Delivery';
+      default:
+        return `₹${parseFloat(c.price || 0).toFixed(0)}`;
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h2 style={{ fontSize: '1.35rem', fontWeight: '850', color: 'var(--text-main)' }}>Platform Campaigns</h2>
+        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Participate in exclusive campaigns initiated by QuickBite</span>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {[1, 2].map(i => <div key={i} style={{ height: '140px', background: 'var(--bg-hover)', borderRadius: 'var(--radius-lg)', animation: 'pulse 1.5s infinite ease-in-out' }} />)}
+        </div>
+      ) : error ? (
+        <div style={{ background: 'var(--bg-danger-subtle)', color: 'var(--text-danger)', padding: '1rem', borderRadius: 'var(--radius-md)', fontWeight: '750' }}>{error}</div>
+      ) : campaigns.length === 0 ? (
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '4rem 2rem', textAlign: 'center' }}>
+          <Tag size={44} style={{ color: 'var(--text-subtle)', marginBottom: '1rem' }} />
+          <h3 style={{ fontSize: '1.15rem', fontWeight: '800', marginBottom: '0.4rem' }}>No invitations yet</h3>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>You will see campaigns here once the platform invites your restaurant.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
+          {campaigns.map(c => {
+            const status = getCampaignStatus(c);
+            return (
+              <div key={c.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-sm)' }}>
+                {c.bannerUrl && (
+                  <img src={c.bannerUrl} alt={c.name} style={{ width: '100%', height: '120px', objectFit: 'cover' }} />
+                )}
+                <div style={{ padding: '1.25rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                    <strong style={{ fontSize: '1.05rem', color: 'var(--text-main)', fontWeight: '850' }}>{c.name}</strong>
+                    <span style={{
+                      fontSize: '0.65rem',
+                      fontWeight: '800',
+                      padding: '0.2rem 0.5rem',
+                      borderRadius: 'var(--radius-sm)',
+                      textTransform: 'uppercase',
+                      background: status === 'participating' ? 'rgba(16,185,129,0.1)' :
+                                  status === 'declined' ? 'rgba(239,68,68,0.1)' :
+                                  status === 'ended' ? 'rgba(100,116,139,0.1)' : 'rgba(59,130,246,0.1)',
+                      color: status === 'participating' ? '#10b981' :
+                             status === 'declined' ? '#ef4444' :
+                             status === 'ended' ? 'var(--text-muted)' : '#3b82f6'
+                    }}>
+                      {status}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>{c.description}</p>
+                  
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <div><strong>Value:</strong> <span style={{ color: 'var(--primary)', fontWeight: '800' }}>{getOfferValueLabel(c)}</span></div>
+                    <div><strong>Start Date:</strong> {new Date(c.startAt).toLocaleDateString()}</div>
+                    <div><strong>End Date:</strong> {new Date(c.endAt).toLocaleDateString()}</div>
+                  </div>
+
+                  {status !== 'ended' && (
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+                      <button
+                        onClick={() => handleOpenJoin(c)}
+                        className="btn-primary"
+                        style={{ flex: 1, padding: '0.45rem', fontSize: '0.78rem', fontWeight: '800' }}
+                      >
+                        {status === 'participating' ? 'Edit Items' : 'Join Campaign'}
+                      </button>
+                      {status !== 'declined' && (
+                        <button
+                          onClick={() => handleDecline(c.id)}
+                          className="btn-secondary"
+                          style={{ padding: '0.45rem 0.75rem', fontSize: '0.78rem', fontWeight: '800', color: '#ef4444', borderColor: 'rgba(239,68,68,0.2)' }}
+                        >
+                          Decline
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Join Campaign Modal */}
+      {isJoinModalOpen && selectedCampaign && (
+        <div style={{ position: 'fixed', left: 0, top: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-xl)', width: '90%', maxWidth: '640px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: '1.75rem', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border-color)', animation: 'scaleUp 0.15s ease-out' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginBottom: '1rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)' }}>Select Participating Items</h3>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{selectedCampaign.name} &bull; {getOfferValueLabel(selectedCampaign)}</span>
+              </div>
+              <button onClick={() => setIsJoinModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
+            </div>
+
+            {/* Filters Row */}
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)' }} />
+                <input
+                  type="text"
+                  placeholder="Search food items..."
+                  value={searchFood}
+                  onChange={e => setSearchFood(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '0.45rem 0.75rem 0.45rem 2.25rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', fontWeight: '600', background: 'var(--bg-card)', color: 'var(--text-main)', outline: 'none' }}
+                />
+              </div>
+              <select
+                value={foodCategoryFilter}
+                onChange={e => setFoodCategoryFilter(e.target.value)}
+                style={{ padding: '0.45rem', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', fontWeight: '600', background: 'var(--bg-card)', color: 'var(--text-main)', outline: 'none' }}
+              >
+                <option value="all">All Categories</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* List Row */}
+            <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: '200px' }}>
+              <div style={{ display: 'flex', background: 'var(--bg-sidebar)', padding: '0.6rem 1rem', borderBottom: '1px solid var(--border-color)', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '800' }}>
+                <input
+                  type="checkbox"
+                  checked={filteredFoods.length > 0 && filteredFoods.every(f => selectedFoodIds.includes(f.id))}
+                  onChange={() => {
+                    const allSelected = filteredFoods.every(f => selectedFoodIds.includes(f.id));
+                    if (allSelected) {
+                      setSelectedFoodIds(prev => prev.filter(id => !filteredFoods.map(ff => ff.id).includes(id)));
+                    } else {
+                      setSelectedFoodIds(prev => [...new Set([...prev, ...filteredFoods.map(ff => ff.id)])]);
+                    }
+                  }}
+                  style={{ marginRight: '1rem', width: '16px', height: '16px', cursor: 'pointer' }}
+                />
+                <div style={{ flex: 1 }}>Food Item</div>
+                <div style={{ width: '90px' }}>Orig. Price</div>
+                <div style={{ width: '90px' }}>Offer Price</div>
+                <div style={{ width: '80px' }}>Status</div>
+              </div>
+
+              <div style={{ overflowY: 'auto', flex: 1, maxHeight: '300px' }}>
+                {filteredFoods.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>No food items found.</div>
+                ) : (
+                  filteredFoods.map(f => {
+                    const isChecked = selectedFoodIds.includes(f.id);
+                    return (
+                      <div key={f.id} style={{ display: 'flex', padding: '0.65rem 1rem', borderBottom: '1px solid var(--border-color)', alignItems: 'center', fontSize: '0.8rem', background: isChecked ? 'rgba(255,85,32,0.02)' : 'transparent', color: 'var(--text-main)' }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            if (isChecked) {
+                              setSelectedFoodIds(prev => prev.filter(id => id !== f.id));
+                            } else {
+                              setSelectedFoodIds(prev => [...prev, f.id]);
+                            }
+                          }}
+                          style={{ marginRight: '1rem', width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+                        />
+                        <div style={{ flex: 1, fontWeight: '750', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {f.image && (
+                            <img src={f.image} alt="" style={{ width: '28px', height: '28px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
+                          )}
+                          {f.name}
+                        </div>
+                        <div style={{ width: '90px', fontWeight: '700', color: 'var(--text-muted)', textDecoration: 'line-through' }}>₹{parseFloat(f.price).toFixed(0)}</div>
+                        <div style={{ width: '90px', fontWeight: '900', color: 'var(--primary)' }}>
+                          ₹{calculateOfferPrice(f.price, selectedCampaign).toFixed(0)}
+                        </div>
+                        <div style={{ width: '80px' }}>
+                          <span style={{ fontSize: '0.72rem', color: f.isAvailable ? '#10b981' : '#ef4444', fontWeight: '800' }}>
+                            {f.isAvailable ? 'Available' : 'Out'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+              <button onClick={() => setIsJoinModalOpen(false)} style={{ background: 'var(--bg-card)', border: '1.5px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 1rem', fontSize: '0.82rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                Cancel
+              </button>
+              <button onClick={handleConfirmParticipation} disabled={joining} style={{ background: 'var(--primary)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.5rem 1rem', fontSize: '0.82rem', fontWeight: '800', cursor: joining ? 'not-allowed' : 'pointer', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                {joining && <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />}
+                Confirm Participation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -487,18 +487,23 @@ export default function App() {
               coverImage: resolveImage(hotel.image) || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80',
               address: hotel.address,
               description: hotel.description || '',
-              menu: foods.map(f => ({
-                id: f.id,
-                itemId: f.id,
-                name: f.name,
-                categoryName: f.category?.name || 'Specials',
-                price: Number(f.price),
-                description: f.description || '',
-                image: resolveImage(f.image) || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-                isVeg: f.isVeg || false,
-                isPopular: f.isBestseller || false,
-                hotelId: hotel.id
-              }))
+              menu: foods.map(f => {
+                const hasOfferPrice = f.offerPrice !== null && f.offerPrice !== undefined;
+                return {
+                  id: f.id,
+                  itemId: f.id,
+                  name: f.name,
+                  categoryName: f.category?.name || 'Specials',
+                  price: hasOfferPrice ? Number(f.offerPrice) : Number(f.price),
+                  originalPrice: hasOfferPrice ? Number(f.price) : null,
+                  is99StoreItem: hasOfferPrice,
+                  description: f.description || '',
+                  image: resolveImage(f.image) || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+                  isVeg: f.isVeg || false,
+                  isPopular: f.isBestseller || false,
+                  hotelId: hotel.id
+                };
+              })
             };
             mappedRestaurants.push(mappedRest);
           }
@@ -3193,21 +3198,19 @@ export default function App() {
                           </View>
 
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 10 }}>
-                            {allDishes.filter(d => d.price <= 200).slice(0, 5).map((item, idx) => {
-                              const discountedPrice = Math.min(item.price, 99);
-                              const originalPrice = Math.max(item.price, 120);
+                            {allDishes.filter(d => d.is99StoreItem).slice(0, 5).map((item, idx) => {
                               const inCart = cartItems.some(c => c.id === item.id);
                               return (
                                 <TouchableOpacity
                                   key={`store-99-${idx}`}
                                   style={[styles.store99ItemCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
-                                  onPress={() => openProductDetails({ ...item, price: discountedPrice, originalPrice, is99StoreItem: true }, item.restaurant)}
+                                  onPress={() => openProductDetails(item, item.restaurant)}
                                 >
                                   <View style={{ position: 'relative' }}>
                                     <Image source={{ uri: item.image }} style={styles.store99ItemImg} />
                                     <TouchableOpacity
                                       style={[styles.store99AddBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
-                                      onPress={() => openCustomizer({ ...item, price: discountedPrice, originalPrice, is99StoreItem: true }, item.restaurant)}
+                                      onPress={() => openCustomizer(item, item.restaurant)}
                                     >
                                       <Text style={[styles.store99AddBtnText, inCart && { color: '#ffffff' }]}>{inCart ? 'ADDED ✓' : 'ADD +'}</Text>
                                     </TouchableOpacity>
@@ -3221,9 +3224,11 @@ export default function App() {
                                     </View>
 
                                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                                      <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginRight: 6 }}>₹{originalPrice}</Text>
+                                      {item.originalPrice && (
+                                        <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginRight: 6 }}>₹{item.originalPrice}</Text>
+                                      )}
                                       <View style={{ backgroundColor: '#FEF08A', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
-                                        <Text style={{ fontSize: 13, fontWeight: '900', color: '#854D0E' }}>₹{discountedPrice}</Text>
+                                        <Text style={{ fontSize: 13, fontWeight: '900', color: '#854D0E' }}>₹{item.price}</Text>
                                       </View>
                                     </View>
 
@@ -3973,7 +3978,12 @@ export default function App() {
 
                               {/* Price + Add Button Row */}
                               <View style={styles.rdFoodFooterRow}>
-                                <Text style={[styles.rdFoodPrice, { color: D.text }]}>₹{item.price}</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <Text style={[styles.rdFoodPrice, { color: D.text }]}>₹{item.price}</Text>
+                                  {item.originalPrice && (
+                                    <Text style={{ fontSize: 12, textDecorationLine: 'line-through', color: D.textSub, marginLeft: 4 }}>₹{item.originalPrice}</Text>
+                                  )}
+                                </View>
                                 <TouchableOpacity
                                   style={[styles.rdAddBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
                                   onPress={(e) => {
@@ -4139,7 +4149,14 @@ export default function App() {
                   const daysList = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
                   const todayName = daysList[new Date().getDay()];
                   
-                  const todaySchedule = parsed.find(d => d.day && d.day.toLowerCase() === todayName.toLowerCase());
+                  const todaySchedule = parsed.find(d => {
+                    if (!d.day) return false;
+                    const dayLower = d.day.toLowerCase();
+                    const todayLower = todayName.toLowerCase();
+                    return dayLower === todayLower || 
+                           todayLower.startsWith(dayLower) || 
+                           dayLower.startsWith(todayLower.substring(0, 3));
+                  });
                   if (todaySchedule) {
                     if (!todaySchedule.isOpen) return false;
                     
@@ -4214,7 +4231,7 @@ export default function App() {
                   ) : (
                     <ScrollView 
                       style={{ flex: 1 }}
-                      contentContainerStyle={{ padding: 16, paddingBottom: Math.max(32, bottomInset) + 40, flexGrow: 1 }}
+                      contentContainerStyle={{ padding: 16, paddingBottom: Math.max(32, bottomInset) + 80 }}
                       showsVerticalScrollIndicator={false}
                     >
                       {/* Hero Restaurant Card */}
@@ -4479,7 +4496,14 @@ export default function App() {
                             <View style={{ backgroundColor: D.card, borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, padding: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 3 }}>
                               {isJson ? (
                                 operatingHours.map((hour, idx) => {
-                                  const isToday = hour.day.toLowerCase() === todayName.toLowerCase();
+                                  const isToday = (() => {
+                                    if (!hour.day) return false;
+                                    const dayLower = hour.day.toLowerCase();
+                                    const todayLower = todayName.toLowerCase();
+                                    return dayLower === todayLower || 
+                                           todayLower.startsWith(dayLower) || 
+                                           dayLower.startsWith(todayLower.substring(0, 3));
+                                  })();
                                   const dayText = isToday ? `${hour.day} (Today)` : hour.day;
                                   return (
                                     <View 
@@ -5582,21 +5606,19 @@ export default function App() {
                 </View>
               </View>
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-                {allDishes.filter(d => d.price <= 200).map((item, idx) => {
-                  const discountedPrice = Math.min(item.price, 99);
-                  const originalPrice = Math.max(item.price, 120);
+                {allDishes.filter(d => d.is99StoreItem).map((item, idx) => {
                   const inCart = cartItems.some(c => c.id === item.id);
                   return (
                     <TouchableOpacity
                       key={`store-99-full-${idx}`}
                       style={[styles.store99ItemCard, { backgroundColor: D.card, borderColor: D.cardBorder, width: '48%', marginBottom: 12, marginRight: 0 }]}
-                      onPress={() => { setIsStore99ModalOpen(false); openProductDetails({ ...item, price: discountedPrice, originalPrice, is99StoreItem: true }, item.restaurant); }}
+                      onPress={() => { setIsStore99ModalOpen(false); openProductDetails(item, item.restaurant); }}
                     >
                       <View style={{ position: 'relative' }}>
                         <Image source={{ uri: item.image }} style={[styles.store99ItemImg, { width: '100%', height: 120 }]} />
                         <TouchableOpacity
                           style={[styles.store99AddBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
-                          onPress={() => openCustomizer({ ...item, price: discountedPrice, originalPrice, is99StoreItem: true }, item.restaurant)}
+                          onPress={() => openCustomizer(item, item.restaurant)}
                         >
                           <Text style={[styles.store99AddBtnText, inCart && { color: '#ffffff' }]}>{inCart ? 'ADDED ✓' : 'ADD +'}</Text>
                         </TouchableOpacity>
@@ -5610,9 +5632,11 @@ export default function App() {
                         </View>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                          <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginRight: 6 }}>₹{originalPrice}</Text>
+                          {item.originalPrice && (
+                            <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginRight: 6 }}>₹{item.originalPrice}</Text>
+                          )}
                           <View style={{ backgroundColor: '#FEF08A', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '900', color: '#854D0E' }}>₹{discountedPrice}</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '900', color: '#854D0E' }}>₹{item.price}</Text>
                           </View>
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>

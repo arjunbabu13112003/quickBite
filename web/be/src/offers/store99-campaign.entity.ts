@@ -15,7 +15,31 @@ export class Store99Campaign {
   bannerUrl?: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 99.00 })
-  price: number;
+  price: number; // For FIXED_PRICE selling price
+
+  @Column({ type: 'varchar', length: 50, default: 'FIXED_PRICE' })
+  offerType: string; // 'FIXED_PRICE' | 'FLAT_DISCOUNT' | 'PERCENTAGE_DISCOUNT' | 'FREE_DELIVERY'
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  flatDiscountAmount?: number;
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  percentageDiscount?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  maxDiscount?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  minimumOrder?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  maxDeliveryFee?: number;
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  deliveryRadius?: number;
+
+  @Column({ type: 'varchar', length: 50, default: 'items' })
+  appliesTo: string; // 'all' (entire restaurant) | 'items' (specific items)
 
   @Column({ type: 'timestamp' })
   startAt: Date;

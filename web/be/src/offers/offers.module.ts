@@ -4,6 +4,7 @@ import { Offer } from './offer.entity';
 import { OfferRedemption } from './offer-redemption.entity';
 import { Store99Campaign } from './store99-campaign.entity';
 import { Store99Item } from './store99-item.entity';
+import { HotelCampaignParticipation } from './hotel-campaign-participation.entity';
 import { Category } from '../categories/category.entity';
 import { Food } from '../foods/food.entity';
 import { Hotel } from '../hotels/hotel.entity';
@@ -22,6 +23,7 @@ import { OffersController } from './offers.controller';
       HotelAdmin,
       Store99Campaign,
       Store99Item,
+      HotelCampaignParticipation,
     ]),
   ],
   providers: [OffersService],

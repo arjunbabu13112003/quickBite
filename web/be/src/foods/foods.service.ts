@@ -164,10 +164,64 @@ export class FoodsService {
       });
     });
 
+    const now = new Date();
+    const activeCampaignItems = await this.dataSource.query(`
+      SELECT item."foodId", camp.id as "campaignId", camp.name, camp.price, camp."offerType",
+             camp."flatDiscountAmount", camp."percentageDiscount", camp."maxDiscount"
+      FROM store_99_items item
+      JOIN store_99_campaigns camp ON item."campaignId" = camp.id
+      JOIN hotel_campaign_participations part ON part."campaignId" = camp.id AND part."hotelId" = item."hotelId"
+      WHERE item."hotelId" = $1
+        AND camp."isActive" = true
+        AND camp."startAt" <= $2
+        AND camp."endAt" >= $3
+        AND part.status = 'participating'
+    `, [hotelId, now, now]);
+
+    const calculateDiscountedPrice = (originalPrice: number, campaign: any): number => {
+      const orig = Number(originalPrice) || 0;
+      const type = campaign.offerType || 'FIXED_PRICE';
+      if (type === 'FIXED_PRICE') {
+        return Number(campaign.price) || 0;
+      }
+      if (type === 'FLAT_DISCOUNT') {
+        return Math.max(0, orig - (Number(campaign.flatDiscountAmount) || 0));
+      }
+      if (type === 'PERCENTAGE_DISCOUNT') {
+        let disc = orig * (Number(campaign.percentageDiscount) || 0) / 100;
+        if (campaign.maxDiscount) {
+          disc = Math.min(disc, Number(campaign.maxDiscount));
+        }
+        return Math.max(0, orig - disc);
+      }
+      return orig;
+    };
+
+    const campaignMap = new Map<number, any[]>();
+    activeCampaignItems.forEach((row: any) => {
+      const fid = Number(row.foodId);
+      if (!campaignMap.has(fid)) campaignMap.set(fid, []);
+      campaignMap.get(fid).push(row);
+    });
+
     return foods.map((food) => {
       const stats = statsMap.get(food.id);
+      const campaigns = campaignMap.get(food.id);
+      let dynamicOfferPrice = food.offerPrice ? Number(food.offerPrice) : null;
+      if (campaigns && campaigns.length > 0) {
+        let bestPrice = Number(food.price);
+        campaigns.forEach(c => {
+          const discountPrice = calculateDiscountedPrice(food.price, c);
+          if (discountPrice < bestPrice) {
+            bestPrice = discountPrice;
+          }
+        });
+        dynamicOfferPrice = bestPrice;
+      }
+
       return {
         ...food,
+        offerPrice: dynamicOfferPrice,
         averageRating: stats ? stats.average : 0,
         ratingCount: stats ? stats.count : 0,
       };
@@ -186,6 +240,51 @@ export class FoodsService {
     if (!food) {
       throw new NotFoundException(`Food with ID ${id} not found`);
     }
+
+    const now = new Date();
+    const activeCampaignItems = await this.dataSource.query(`
+      SELECT item."foodId", camp.id as "campaignId", camp.name, camp.price, camp."offerType",
+             camp."flatDiscountAmount", camp."percentageDiscount", camp."maxDiscount"
+      FROM store_99_items item
+      JOIN store_99_campaigns camp ON item."campaignId" = camp.id
+      JOIN hotel_campaign_participations part ON part."campaignId" = camp.id AND part."hotelId" = item."hotelId"
+      WHERE item."foodId" = $1
+        AND camp."isActive" = true
+        AND camp."startAt" <= $2
+        AND camp."endAt" >= $3
+        AND part.status = 'participating'
+    `, [food.id, now, now]);
+
+    const calculateDiscountedPrice = (originalPrice: number, campaign: any): number => {
+      const orig = Number(originalPrice) || 0;
+      const type = campaign.offerType || 'FIXED_PRICE';
+      if (type === 'FIXED_PRICE') {
+        return Number(campaign.price) || 0;
+      }
+      if (type === 'FLAT_DISCOUNT') {
+        return Math.max(0, orig - (Number(campaign.flatDiscountAmount) || 0));
+      }
+      if (type === 'PERCENTAGE_DISCOUNT') {
+        let disc = orig * (Number(campaign.percentageDiscount) || 0) / 100;
+        if (campaign.maxDiscount) {
+          disc = Math.min(disc, Number(campaign.maxDiscount));
+        }
+        return Math.max(0, orig - disc);
+      }
+      return orig;
+    };
+
+    if (activeCampaignItems && activeCampaignItems.length > 0) {
+      let bestPrice = Number(food.price);
+      activeCampaignItems.forEach(c => {
+        const discountPrice = calculateDiscountedPrice(food.price, c);
+        if (discountPrice < bestPrice) {
+          bestPrice = discountPrice;
+        }
+      });
+      food.offerPrice = bestPrice;
+    }
+
     return food;
   }
 
