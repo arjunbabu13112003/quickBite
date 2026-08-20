@@ -9,7 +9,8 @@
       "supportsTablet": true
     },
     "android": {
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#ffffff",
+      "package": "com.anonymous.quickbitemobileapp"
     }
   }
 }

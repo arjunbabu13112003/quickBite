@@ -605,7 +605,14 @@ export default function App() {
   const [isSearchingLocation, setIsSearchingLocation] = useState(false);
 
   // Restaurant Detail & Product Detail Modal States
-  const [selectedRestaurant, setSelectedRestaurant] = useState(null);
+  const [selectedRestaurant, _setSelectedRestaurant] = useState(null);
+  const [modalOpenCount, setModalOpenCount] = useState(0);
+  const setSelectedRestaurant = useCallback((val) => {
+    if (val) {
+      setModalOpenCount(c => c + 1);
+    }
+    _setSelectedRestaurant(val);
+  }, []);
   const [restaurantOffers, setRestaurantOffers] = useState([]);
   const [loadingRestaurantOffers, setLoadingRestaurantOffers] = useState(false);
   const [isRestActionSheetOpen, setIsRestActionSheetOpen] = useState(false);
@@ -629,8 +636,9 @@ export default function App() {
       setMenuSearchQuery('');
       setPureVegFilter(false);
       setRecommendedCollapsed(false);
+      restScrollY.setValue(0);
     }
-  }, [selectedRestaurant?.id]);
+  }, [selectedRestaurant?.id, modalOpenCount]);
 
   // Fetch detailed restaurant profile when selectedRestaurant changes
   useEffect(() => {
@@ -1933,6 +1941,7 @@ export default function App() {
             token: backendData.accessToken
           };
           setCurrentUser(userObj);
+          setActiveTab('home');
           setIsLoadingAuth(false);
           triggerToastNotification(`🎉 Welcome back, ${userObj.name}!`);
           return;
@@ -1967,6 +1976,7 @@ export default function App() {
     }
     prevUserIdRef.current = null;
     setCurrentUser(null);
+    setActiveTab('home');
     setEmail('');
     setPassword('');
     setName('');
@@ -3757,9 +3767,15 @@ export default function App() {
           </Animated.View>
 
           {/* RESTAURANT DETAIL MODAL (FEATURE 1: STICKY TOP HEADER WITH CART ICON) */}
-          <Modal visible={!!selectedRestaurant} animationType="slide" statusBarTranslucent onRequestClose={() => setSelectedRestaurant(null)}>
+          <Modal
+            key={selectedRestaurant ? `restaurant-modal-${selectedRestaurant.id}-${modalOpenCount}` : 'restaurant-modal-closed'}
+            visible={!!selectedRestaurant}
+            animationType="slide"
+            statusBarTranslucent
+            onRequestClose={() => setSelectedRestaurant(null)}
+          >
             {selectedRestaurant && (
-              <View key={selectedRestaurant.id} style={{ flex: 1, backgroundColor: D.modalBg }}>
+              <View key={selectedRestaurant.id} style={{ height, width, backgroundColor: D.modalBg }}>
                 {renderToastBanner()}
                 
                 {/* ─── FIXED TOP HEADER ─── */}
@@ -3784,16 +3800,16 @@ export default function App() {
                 </View>
 
                 {/* ─── SCROLLABLE CONTENT ─── */}
-                <Animated.ScrollView
+                <ScrollView
                   style={{ flex: 1 }}
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ paddingBottom: 120, flexGrow: 1 }}
-                  onScroll={Animated.event(
-                    [{ nativeEvent: { contentOffset: { y: restScrollY } } }],
-                    { useNativeDriver: true }
-                  )}
+                  onScroll={(event) => {
+                    restScrollY.setValue(event.nativeEvent.contentOffset.y);
+                  }}
                   scrollEventThrottle={16}
                   stickyHeaderIndices={[1]}
+                  nestedScrollEnabled={true}
                 >
                   {/* Restaurant Details Card */}
                   <View style={[styles.rdRestaurantCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}>
@@ -3992,7 +4008,7 @@ export default function App() {
                       })}
                     </View>
                   )}
-                </Animated.ScrollView>
+                </ScrollView>
 
                 {/* Floating View Cart bar */}
                 {renderFloatingCartBar(Math.max(12, bottomInset) + 12, true)}
@@ -4083,6 +4099,7 @@ export default function App() {
 
           {/* Restaurant Details Modal */}
           <Modal
+            key={isRestDetailsModalOpen ? `info-modal-${selectedRestaurant?.id}-${modalOpenCount}` : 'info-modal-closed'}
             visible={isRestDetailsModalOpen}
             animationType="slide"
             statusBarTranslucent
@@ -4190,7 +4207,7 @@ export default function App() {
               };
 
               return (
-                <View key={data.id} style={{ flex: 1, backgroundColor: D.modalBg }}>
+                <View key={data.id} style={{ height, width, backgroundColor: D.modalBg }}>
                   {/* Header */}
                   <View style={[styles.rdFixedHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder, height: Platform.OS === 'android' ? STATUSBAR_HEIGHT + 56 : 64, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }]}>
                     <TouchableOpacity onPress={() => setIsRestDetailsModalOpen(false)} style={{ padding: 8 }}>
@@ -4216,6 +4233,7 @@ export default function App() {
                       style={{ flex: 1 }}
                       contentContainerStyle={{ padding: 16, paddingBottom: Math.max(32, bottomInset) + 40, flexGrow: 1 }}
                       showsVerticalScrollIndicator={false}
+                      nestedScrollEnabled={true}
                     >
                       {/* Hero Restaurant Card */}
                       <View style={{ backgroundColor: D.card, borderRadius: 20, borderWidth: 1, borderColor: D.cardBorder, overflow: 'hidden', marginBottom: 20, elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }}>
@@ -4605,7 +4623,7 @@ export default function App() {
               const isCustomizable = (currentProduct.customizationGroups && currentProduct.customizationGroups.length > 0) || nameLower.includes('mandi') || nameLower.includes('biriyani') || nameLower.includes('biryani');
 
               return (
-                <View style={{ flex: 1, backgroundColor: D.modalBg, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }}>
+                <View style={{ height, width, backgroundColor: D.modalBg, paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0 }}>
                   {renderToastBanner()}
                   
                   {/* ─── FIXED TOP HEADER ─── */}
@@ -4633,7 +4651,7 @@ export default function App() {
                   </View>
 
                   {/* ─── SCROLLABLE CONTENT ─── */}
-                  <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+                  <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
                     
                     {/* Food Image Carousel Card */}
                     {(() => {
