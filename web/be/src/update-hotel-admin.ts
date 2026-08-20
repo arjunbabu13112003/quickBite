@@ -5,8 +5,8 @@ import { User } from './users/user.entity';
 import { UserRole } from './users/user-role.enum';
 import * as bcrypt from 'bcrypt';
 
-const NEW_EMAIL = 'hotel_admin1@quickbite.com';
-const NEW_PASSWORD = 'hotel_admin1@123';
+const NEW_EMAIL = 'hoteladmin_1@gmail.com';
+const NEW_PASSWORD = 'admin123';
 
 async function run() {
   console.log('--- Updating Hotel Admin Credentials ---');
