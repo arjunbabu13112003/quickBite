@@ -69,7 +69,7 @@ export default function DeliveryPartnersList({ onNavigate }) {
   };
 
   const handleAddPartnerClick = () => {
-    onNavigate('/delivery-partners/new');
+    onNavigate('/super-admin/delivery-partners/new');
   };
 
   const handleActionClick = (actionName, partnerName) => {
@@ -608,7 +608,7 @@ export default function DeliveryPartnersList({ onNavigate }) {
                           <button
                             onClick={() => {
                               setActiveMenuId(null);
-                              onNavigate(`/delivery-partners/${partner.id}`);
+                              onNavigate(`/super-admin/delivery-partners/${partner.id}`);
                             }}
                             style={{
                               display: 'flex',

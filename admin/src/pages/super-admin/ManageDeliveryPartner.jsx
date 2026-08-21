@@ -193,7 +193,7 @@ export default function ManageDeliveryPartner({ id, onNavigate }) {
           The requested delivery partner account does not exist or has been removed.
         </p>
         <button
-          onClick={() => onNavigate('/delivery-partners')}
+          onClick={() => onNavigate('/super-admin/delivery-partners')}
           className="btn-primary"
           style={{ padding: '0.75rem 2rem' }}
         >
@@ -224,7 +224,7 @@ export default function ManageDeliveryPartner({ id, onNavigate }) {
         </p>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
           <button
-            onClick={() => onNavigate('/delivery-partners')}
+            onClick={() => onNavigate('/super-admin/delivery-partners')}
             className="btn-secondary"
             style={{ padding: '0.75rem 1.5rem' }}
           >
@@ -257,9 +257,9 @@ export default function ManageDeliveryPartner({ id, onNavigate }) {
         color: 'var(--text-subtle)',
         fontWeight: '700'
       }}>
-        <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/delivery-partners')}>Delivery Partners</span>
+        <span style={{ cursor: 'pointer' }} onClick={() => onNavigate('/super-admin/delivery-partners')}>Delivery Partners</span>
         <ChevronRight size={12} />
-        <span style={{ cursor: 'pointer' }} onClick={() => onNavigate(`/delivery-partners/${partner.id}`)}>{partner.user?.name}</span>
+        <span style={{ cursor: 'pointer' }} onClick={() => onNavigate(`/super-admin/delivery-partners/${partner.id}`)}>{partner.user?.name}</span>
         <ChevronRight size={12} />
         <span style={{ color: 'var(--primary)' }}>Manage</span>
       </div>

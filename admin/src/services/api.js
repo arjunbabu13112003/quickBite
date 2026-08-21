@@ -511,6 +511,15 @@ export const api = {
     return handleResponse(res);
   },
 
+  registerUser: async (payload) => {
+    const res = await fetch(`${API_BASE_URL}/users/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+  },
+
   verifyDeliveryPartner: async (id, isVerified) => {
     const res = await fetch(`${API_BASE_URL}/delivery-partners/${id}/verify`, {
       method: 'PATCH',

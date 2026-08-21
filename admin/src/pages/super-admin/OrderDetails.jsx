@@ -377,7 +377,7 @@ export default function OrderDetails({ id, onNavigate }) {
 
           <button
             type="button"
-            onClick={() => onNavigate(`/delivery-partners/${partner.id}`)}
+            onClick={() => onNavigate(`/super-admin/delivery-partners/${partner.id}`)}
             className="btn-secondary"
             style={{
               padding: '0.55rem 1rem',
