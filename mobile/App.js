@@ -22,7 +22,8 @@ import {
   Linking,
   NativeModules,
   AppState,
-  Share
+  Share,
+  BackHandler
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
@@ -110,7 +111,7 @@ const getExpoHostIp = () => {
   } catch (e) {
     console.warn('Expo hostUri detection:', e);
   }
-  return '192.168.1.3';
+  return '192.168.220.64';
 };
 
 const { width, height } = Dimensions.get('window');
@@ -287,7 +288,7 @@ const getBasePrice = (item, spiceLevel) => {
 };
 
 const resolveProductImage = (imgStr, activeBackend) => {
-  const host = activeBackend || 'http://192.168.1.3:5000';
+  const host = activeBackend || 'http://192.168.220.64:5000';
   if (!imgStr) return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
   
   let resolved = imgStr;
@@ -334,7 +335,7 @@ export default function App() {
   };
 
   // Backend API & Authentication State
-  const API_BASE_URL = 'http://192.168.1.3:5000'; // NestJS + PostgreSQL Backend
+  const API_BASE_URL = 'http://192.168.220.64:5000'; // NestJS + PostgreSQL Backend
   const [currentUser, setCurrentUser] = useState(null);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
@@ -1529,6 +1530,97 @@ export default function App() {
   const [editPhone, setEditPhone] = useState('');
   const [editAvatar, setEditAvatar] = useState('');
 
+  // ─── ANDROID HARDWARE BACK BUTTON HANDLER ─────────────────────────
+  useEffect(() => {
+    const handleBackButton = () => {
+      // 1. Close Platform Campaign Details overlay
+      if (activeCampaignId !== null) {
+        setActiveCampaignId(null);
+        setCampaignDetails(null);
+        return true;
+      }
+      // 2. Close Customizing Item Modal
+      if (customizingItem !== null) {
+        setCustomizingItem(null);
+        return true;
+      }
+      // 3. Close Viewing Product Modal
+      if (viewingProduct !== null) {
+        setViewingProduct(null);
+        return true;
+      }
+      // 4. Close Restaurant Detail Modal
+      if (selectedRestaurant !== null) {
+        setSelectedRestaurant(null);
+        return true;
+      }
+      // 5. Close Address Modal
+      if (isAddressModalOpen) {
+        setIsAddressModalOpen(false);
+        return true;
+      }
+      // 6. Close Coupon Modal
+      if (isCouponModalOpen) {
+        setIsCouponModalOpen(false);
+        return true;
+      }
+      // 7. Close Store 99 Modal
+      if (isStore99ModalOpen) {
+        setIsStore99ModalOpen(false);
+        return true;
+      }
+      // 8. Close Checkout Modal
+      if (isCheckoutOpen) {
+        if (!isProcessingCheckout) {
+          setIsCheckoutOpen(false);
+          setTimeout(() => setIsCartOpen(true), 150);
+        }
+        return true;
+      }
+      // 9. Close Cart Drawer Modal
+      if (isCartOpen) {
+        setIsCartOpen(false);
+        return true;
+      }
+      // 10. Close Order Detail Modal
+      if (selectedOrderForDetail !== null) {
+        setSelectedOrderForDetail(null);
+        return true;
+      }
+      // 11. Go back in tab navigation history
+      if (tabHistory.length > 1) {
+        goBack();
+        return true;
+      }
+      // 12. If activeTab is not home, go to home tab
+      if (activeTab !== 'home') {
+        setActiveTab('home');
+        return true;
+      }
+      // Let system handle it (minimize/exit app)
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', handleBackButton);
+    return () => {
+      subscription.remove();
+    };
+  }, [
+    activeCampaignId,
+    customizingItem,
+    viewingProduct,
+    selectedRestaurant,
+    isAddressModalOpen,
+    isCouponModalOpen,
+    isStore99ModalOpen,
+    isCheckoutOpen,
+    isProcessingCheckout,
+    isCartOpen,
+    selectedOrderForDetail,
+    tabHistory,
+    activeTab
+  ]);
+
   // ─── PERSISTENCE: Load saved session on app start ─────────────────────────
   useEffect(() => {
     const loadSession = async () => {
@@ -1788,7 +1880,7 @@ export default function App() {
     const detectedIp = getExpoHostIp();
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.1.3:5000',
+      'http://192.168.220.64:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];
@@ -2196,7 +2288,7 @@ export default function App() {
 
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.1.3:5000',
+      'http://192.168.220.64:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];

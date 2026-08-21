@@ -1059,7 +1059,18 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', padding: '1rem 0' }}>
       
       {/* Header Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        position: 'sticky',
+        top: '72px',
+        zIndex: 90,
+        background: 'var(--bg-main)',
+        padding: '1rem 0',
+        marginTop: '-1rem',
+        borderBottom: '1px solid var(--border-color)',
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <button onClick={() => onNavigate('/super-admin/offers')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}>
             <ArrowLeft size={20} />
@@ -1527,7 +1538,7 @@ export function SuperAdminCreateCampaign({ id, onNavigate }) {
         </div>
 
         {/* Right Panel: Customer App Sticky Mockup */}
-        <div style={{ position: 'sticky', top: '20px', zIndex: 10 }}>
+        <div style={{ position: 'sticky', top: '180px', zIndex: 10 }}>
           
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--text-main)', marginBottom: '0.2rem' }}>Customer App Preview</h3>
