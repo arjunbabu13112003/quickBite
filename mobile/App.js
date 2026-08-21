@@ -308,6 +308,7 @@ const FloatingCartBar = ({
   cartItems, 
   cartBarScrollTranslateY, 
   cartAnim, 
+  cartBounceAnim,
   bottomControlsVisibleRef, 
   setIsCartOpen, 
   bottomOffset = 68, 
@@ -352,7 +353,12 @@ const FloatingCartBar = ({
   });
 
   const scrollTranslateY = disableHide ? 0 : cartBarScrollTranslateY;
-  const totalTranslateY = Animated.add(entranceTranslateY, scrollTranslateY);
+  
+  // Combine entranceTranslateY, scrollTranslateY, and cartBounceAnim natively
+  const totalTranslateY = Animated.add(
+    entranceTranslateY, 
+    Animated.add(scrollTranslateY, cartBounceAnim)
+  );
 
   return (
     <Animated.View
@@ -1671,6 +1677,7 @@ export default function App() {
 
   // Animation & Toast Notification State (Slide in from RIGHT edge)
   const [cartAnim] = useState(new Animated.Value(1));
+  const cartBounceAnim = useRef(new Animated.Value(0)).current;
   const [toastAnimX] = useState(new Animated.Value(500));
   const [toastMessage, setToastMessage] = useState('');
 
@@ -1946,6 +1953,22 @@ export default function App() {
       Animated.spring(cartAnim, {
         toValue: 1,
         friction: 4,
+        useNativeDriver: false,
+      })
+    ]).start();
+
+    // 2. Vertical bounce animation (slides up by 15px and springs back down!)
+    cartBounceAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(cartBounceAnim, {
+        toValue: -15,
+        duration: 150,
+        useNativeDriver: false,
+      }),
+      Animated.spring(cartBounceAnim, {
+        toValue: 0,
+        friction: 4,
+        tension: 40,
         useNativeDriver: false,
       })
     ]).start();
@@ -2303,6 +2326,7 @@ export default function App() {
         cartItems={cartItems}
         cartBarScrollTranslateY={cartBarScrollTranslateY}
         cartAnim={cartAnim}
+        cartBounceAnim={cartBounceAnim}
         bottomControlsVisibleRef={bottomControlsVisibleRef}
         setIsCartOpen={setIsCartOpen}
         bottomOffset={bottomOffset}
