@@ -304,12 +304,110 @@ const resolveProductImage = (imgStr, activeBackend) => {
 
 let cachedBackendUrl = null;
 
+const FloatingCartBar = ({ 
+  cartItems, 
+  cartBarScrollTranslateY, 
+  cartAnim, 
+  bottomControlsVisibleRef, 
+  setIsCartOpen, 
+  bottomOffset = 68, 
+  disableHide = false 
+}) => {
+  const count = cartItems ? cartItems.length : 0;
+  const prevCartItemsCount = useRef(0);
+  const entranceAnim = useRef(new Animated.Value(count > 0 ? 1 : 0)).current;
+  const [shouldRender, setShouldRender] = useState(count > 0);
+
+  useEffect(() => {
+    const prevCount = prevCartItemsCount.current;
+    prevCartItemsCount.current = count;
+
+    if (count > 0 && prevCount === 0) {
+      setShouldRender(true);
+      entranceAnim.setValue(0);
+      Animated.spring(entranceAnim, {
+        toValue: 1,
+        friction: 6,
+        tension: 40,
+        useNativeDriver: false,
+      }).start();
+    } else if (count === 0 && prevCount > 0) {
+      Animated.timing(entranceAnim, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: false,
+      }).start(() => {
+        setShouldRender(false);
+      });
+    }
+  }, [count]);
+
+  if (!shouldRender) return null;
+
+  const totalItemCount = cartItems ? cartItems.reduce((acc, item) => acc + item.quantity, 0) : 0;
+
+  const entranceTranslateY = entranceAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [100, 0],
+  });
+
+  const scrollTranslateY = disableHide ? 0 : cartBarScrollTranslateY;
+  const totalTranslateY = Animated.add(entranceTranslateY, scrollTranslateY);
+
+  return (
+    <Animated.View
+      style={[
+        styles.swiggyGreenCartBar,
+        {
+          bottom: bottomOffset,
+          transform: [
+            { scale: cartAnim },
+            { translateY: totalTranslateY }
+          ]
+        }
+      ]}
+    >
+      <TouchableOpacity
+        style={styles.swiggyGreenCartContent}
+        activeOpacity={0.9}
+        onPress={() => {
+          if (bottomControlsVisibleRef && bottomControlsVisibleRef.current) {
+            setIsCartOpen(true);
+          }
+        }}
+      >
+        <Text style={styles.swiggyGreenCartLeftText}>
+          {totalItemCount} {totalItemCount === 1 ? 'Item' : 'Items'} added
+        </Text>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={styles.swiggyGreenCartRightText}>View Cart</Text>
+          <ChevronRight size={18} color="#ffffff" style={{ marginLeft: 2 }} />
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
 export default function App() {
   const bottomInset = initialWindowMetrics?.insets?.bottom || (Platform.OS === 'android' ? 24 : 34);
 
   // Navigation & Tab state: 'home' | 'wishlist' | 'orders' | 'profile' | 'admin'
   const [activeTab, _setActiveTab] = useState('home');
   const [tabHistory, setTabHistory] = useState(['home']);
+
+  // Offers Tab State
+  const [offersFilter, setOffersFilter] = useState('all');
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [activeOffersBannerIndex, setActiveOffersBannerIndex] = useState(0);
+  const offersBannerRef = useRef(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const setActiveTab = (tab) => {
     _setActiveTab(prev => {
@@ -576,6 +674,8 @@ export default function App() {
 
           const mappedFoods = (data.foods || []).map(f => ({
             ...f,
+            price: f.offerPrice !== undefined ? Number(f.offerPrice) : Number(f.price),
+            originalPrice: Number(f.price),
             image: resolveImage(f.image) || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
           }));
 
@@ -667,6 +767,17 @@ export default function App() {
     }, 4500);
     return () => clearInterval(timer);
   }, [banners.length]);
+
+  useEffect(() => {
+    if (platformCampaigns.length <= 1) return;
+    const timer = setInterval(() => {
+      const nextIndex = (activeOffersBannerIndex + 1) % platformCampaigns.length;
+      setActiveOffersBannerIndex(nextIndex);
+      offersBannerRef.current?.scrollTo({ x: nextIndex * (width - 14), animated: true });
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [platformCampaigns.length, activeOffersBannerIndex]);
+
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' or 'offers'
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
 
@@ -718,11 +829,85 @@ export default function App() {
     extrapolate: 'clamp',
   });
 
-  const clampedScroll = Animated.diffClamp(globalScrollY, 0, 150);
-  const bottomBarTranslateY = clampedScroll.interpolate({
-    inputRange: [0, 150],
+  const bottomControlsAnim = useRef(new Animated.Value(0)).current; // 0 = visible, 1 = hidden
+  const bottomControlsVisibleRef = useRef(true);
+  const lastScrollYRef = useRef(0);
+  const scrollDirectionRef = useRef('none');
+  const accumulatedDeltaRef = useRef(0);
+
+  const handleScroll = (yValue) => {
+    const currentY = Math.max(0, yValue);
+    const delta = currentY - lastScrollYRef.current;
+
+    let newDirection = 'none';
+    if (delta > 0) {
+      newDirection = 'down';
+    } else if (delta < 0) {
+      newDirection = 'up';
+    }
+
+    if (newDirection !== 'none') {
+      if (newDirection !== scrollDirectionRef.current) {
+        scrollDirectionRef.current = newDirection;
+        accumulatedDeltaRef.current = 0;
+      }
+      accumulatedDeltaRef.current += delta;
+    }
+
+    lastScrollYRef.current = currentY;
+
+    if (currentY <= 20) {
+      if (!bottomControlsVisibleRef.current) {
+        bottomControlsVisibleRef.current = true;
+        Animated.timing(bottomControlsAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: false,
+        }).start();
+      }
+      return;
+    }
+
+    const THRESHOLD = 12;
+
+    if (scrollDirectionRef.current === 'down') {
+      if (accumulatedDeltaRef.current >= THRESHOLD && bottomControlsVisibleRef.current) {
+        bottomControlsVisibleRef.current = false;
+        Animated.timing(bottomControlsAnim, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: false,
+        }).start();
+      }
+    } else if (scrollDirectionRef.current === 'up') {
+      if (accumulatedDeltaRef.current <= -THRESHOLD && !bottomControlsVisibleRef.current) {
+        bottomControlsVisibleRef.current = true;
+        Animated.timing(bottomControlsAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: false,
+        }).start();
+      }
+    }
+  };
+
+  useEffect(() => {
+    const id = globalScrollY.addListener(({ value }) => {
+      handleScroll(value);
+    });
+    return () => {
+      globalScrollY.removeListener(id);
+    };
+  }, [globalScrollY]);
+
+  const bottomNavTranslateY = bottomControlsAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 100],
+  });
+
+  const cartBarScrollTranslateY = bottomControlsAnim.interpolate({
+    inputRange: [0, 1],
     outputRange: [0, 150],
-    extrapolate: 'clamp',
   });
 
   // Live GPS Location States
@@ -1756,12 +1941,12 @@ export default function App() {
       Animated.timing(cartAnim, {
         toValue: 1.2,
         duration: 150,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
       Animated.spring(cartAnim, {
         toValue: 1,
         friction: 4,
-        useNativeDriver: true,
+        useNativeDriver: false,
       })
     ]).start();
   };
@@ -2113,31 +2298,16 @@ export default function App() {
 
   // Swiggy Green Floating Bottom Cart Bar Component (Updates Live on item add)
   const renderFloatingCartBar = (bottomOffset = 68, disableHide = false) => {
-    if (cartItems.length === 0) return null;
-    const totalItemCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
-
     return (
-      <Animated.View
-        style={[
-          styles.swiggyGreenCartBar,
-          { bottom: bottomOffset, transform: [{ scale: cartAnim }, disableHide ? { translateY: 0 } : { translateY: bottomBarTranslateY }] }
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.swiggyGreenCartContent}
-          activeOpacity={0.9}
-          onPress={() => setIsCartOpen(true)}
-        >
-          <Text style={styles.swiggyGreenCartLeftText}>
-            {totalItemCount} {totalItemCount === 1 ? 'Item' : 'Items'} added
-          </Text>
-
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={styles.swiggyGreenCartRightText}>View Cart</Text>
-            <ChevronRight size={18} color="#ffffff" style={{ marginLeft: 2 }} />
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
+      <FloatingCartBar
+        cartItems={cartItems}
+        cartBarScrollTranslateY={cartBarScrollTranslateY}
+        cartAnim={cartAnim}
+        bottomControlsVisibleRef={bottomControlsVisibleRef}
+        setIsCartOpen={setIsCartOpen}
+        bottomOffset={bottomOffset}
+        disableHide={disableHide}
+      />
     );
   };
 
@@ -2706,7 +2876,7 @@ export default function App() {
     const originalPrice = item.originalPrice || item.price;
 
     let campaignPrice = originalPrice;
-    if (item.campaignId) {
+    if (item.campaignId && activeCartPromo?.type === 'campaign' && Number(activeCartPromo.id) === Number(item.campaignId)) {
       const activeCampaign = platformCampaigns.find(camp => 
         Number(camp.id) === Number(item.campaignId)
       );
@@ -3729,150 +3899,502 @@ export default function App() {
                 </View>
 
                 {/* INDEX 2: MAIN SCROLLABLE CONTENT */}
-                {selectedCategory === 'offers' && searchQuery.trim() === '' ? (
-                  <View style={{ marginTop: 10, paddingTop: 0 }}>
-                    {/* Section 1: Offer Food Items */}
-                    <View style={{ paddingHorizontal: 14, marginTop: 8 }}>
-                      <View style={styles.sectionHeader}>
-                        <Text style={[styles.sectionTitle, { color: D.heading }]}>🔥 Best Food Offers</Text>
-                        <Text style={[styles.sectionCount, { color: D.textSub }]}>
-                          {activeHotelOfferFoods
-                            .filter(f => !onlyVeg || f.isVeg)
-                            .filter(f => searchQuery.trim() === '' || f.name.toLowerCase().includes(searchQuery.toLowerCase())).length} items
-                        </Text>
-                      </View>
+                {selectedCategory === 'offers' && searchQuery.trim() === '' ? (() => {
+                  // 1. Gather all active food offers from campaigns and activeHotelOfferFoods
+                  const campaignFoodOffers = [];
+                  platformCampaigns.forEach(camp => {
+                    const isExpired = new Date(camp.endAt).getTime() <= currentTime;
+                    if (!camp.isActive || isExpired) return;
 
-                      {loadingHotelOffers ? (
-                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
-                          <ActivityIndicator size="small" color="#FF5252" />
-                          <Text style={{ fontSize: 11, color: D.textSub, marginTop: 8 }}>Loading food offers...</Text>
-                        </View>
-                      ) : activeHotelOfferFoods.length === 0 ? (
-                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
-                          <Tag size={32} color={D.textSub} style={{ marginBottom: 8 }} />
-                          <Text style={{ fontSize: 13, color: D.textSub, fontWeight: '600' }}>No active food offers found today.</Text>
-                        </View>
-                      ) : (
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 }}>
-                          {activeHotelOfferFoods
-                            .filter(f => !onlyVeg || f.isVeg)
-                            .filter(f => searchQuery.trim() === '' || f.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                            .map((item, idx) => {
-                              const inCart = cartItems.some(c => c.itemId === item.id);
-                              const restaurantObj = restaurants.find(r => r.id === item.hotelId) || { id: item.hotelId, name: item.hotelName };
+                    (camp.items || []).forEach(item => {
+                      // Get offer label based on campaign type
+                      let label = '';
+                      if (camp.offerType === 'PERCENTAGE_DISCOUNT') label = `${Math.round(camp.percentageDiscount)}% OFF`;
+                      else if (camp.offerType === 'FLAT_DISCOUNT') label = `₹${Math.round(camp.flatDiscountAmount)} OFF`;
+                      else if (camp.offerType === 'FREE_DELIVERY') label = 'FREE DEL';
+                      else if (camp.offerType === 'FIXED_PRICE') label = `₹${Math.round(camp.price)} DEAL`;
+
+                      campaignFoodOffers.push({
+                        ...item,
+                        campaignId: camp.id,
+                        campaignEndAt: camp.endAt,
+                        campaignName: camp.name,
+                        offerLabel: label,
+                        offerType: camp.offerType,
+                        promoType: 'campaign',
+                        rating: item.rating || 4.2
+                      });
+                    });
+                  });
+
+                  const allFoodOffers = [...campaignFoodOffers];
+                  activeHotelOfferFoods.forEach(f => {
+                    if (!allFoodOffers.some(item => item.id === f.id)) {
+                      allFoodOffers.push({
+                        ...f,
+                        campaignId: null,
+                        campaignEndAt: null,
+                        campaignName: f.offerName,
+                        offerLabel: f.offerLabel,
+                        offerType: f.discountType,
+                        promoType: 'offer',
+                        rating: f.rating || 4.2
+                      });
+                    }
+                  });
+
+                  // 2. Filter by Veg toggle
+                  let filteredFoodOffers = allFoodOffers;
+                  if (onlyVeg) {
+                    filteredFoodOffers = filteredFoodOffers.filter(item => item.isVeg);
+                  }
+
+                  // 3. Filter by selected chip
+                  if (offersFilter === 'percentage') {
+                    filteredFoodOffers = filteredFoodOffers.filter(item => item.offerType === 'PERCENTAGE_DISCOUNT' || item.offerType === 'percentage');
+                  } else if (offersFilter === 'flat') {
+                    filteredFoodOffers = filteredFoodOffers.filter(item => item.offerType === 'FLAT_DISCOUNT' || item.offerType === 'flat');
+                  } else if (offersFilter === 'free_delivery') {
+                    filteredFoodOffers = filteredFoodOffers.filter(item => item.offerType === 'FREE_DELIVERY' || item.offerType === 'free_delivery');
+                  }
+
+                  // 4. Determine if there are Limited Time Deals
+                  const filteredLimitedDeals = filteredFoodOffers.filter(item => item.campaignEndAt !== null);
+
+                  // 5. Determine earliest expiry for section countdown
+                  const getEarliestExpiry = () => {
+                    const activeDeals = filteredLimitedDeals.filter(item => new Date(item.campaignEndAt).getTime() > currentTime);
+                    if (activeDeals.length === 0) return null;
+                    return Math.min(...activeDeals.map(item => new Date(item.campaignEndAt).getTime()));
+                  };
+                  const earliestExpiry = getEarliestExpiry();
+
+                  // 6. Filter active hotel offers
+                  const filteredHotelOffersList = activeHotelOffers
+                    .filter(h => !onlyVeg || h.isVeg);
+
+                  // 7. Check if entire Offers tab has absolutely no items
+                  const hasNoDeals = platformCampaigns.length === 0 && allFoodOffers.length === 0 && filteredHotelOffersList.length === 0;
+
+                  if (hasNoDeals) {
+                    return (
+                      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 80, paddingHorizontal: 20 }}>
+                        <Tag size={40} color={D.textSub} style={{ marginBottom: 12 }} />
+                        <Text style={{ fontSize: 16, fontWeight: '900', color: D.heading, textAlign: 'center' }}>No deals right now</Text>
+                        <Text style={{ fontSize: 12, color: D.textSub, textAlign: 'center', marginTop: 4 }}>Fresh offers are cooking. Check back soon.</Text>
+                      </View>
+                    );
+                  }
+
+                  const getRemainingTimeStr = (endTime) => {
+                    const diff = endTime - currentTime;
+                    if (diff <= 0) return null;
+                    const hours = Math.floor(diff / (1000 * 60 * 60));
+                    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                    if (hours > 0) return `${hours}h ${minutes}m`;
+                    if (minutes > 0) return `${minutes}m ${seconds}s`;
+                    return `${seconds}s`;
+                  };
+
+                  const renderAddBtn = (item) => {
+                    const inCart = cartItems.some(c => 
+                      c.itemId === item.id && 
+                      (c.campaignId || null) === (item.campaignId || null) && 
+                      (c.offerId || null) === (item.offerId || null)
+                    );
+                    const restaurantObj = restaurants.find(r => r.id === item.hotelId) || { id: item.hotelId, name: item.hotelName };
+                    return (
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (inCart) {
+                            setCartItems(prev => prev.filter(c => !(
+                              c.itemId === item.id &&
+                              (c.campaignId || null) === (item.campaignId || null) &&
+                              (c.offerId || null) === (item.offerId || null)
+                            )));
+                          } else {
+                            openCustomizer(item, restaurantObj);
+                          }
+                        }}
+                        style={{
+                          borderWidth: 1.5,
+                          borderColor: inCart ? '#10B981' : '#FF5252',
+                          backgroundColor: inCart ? '#10B981' : 'transparent',
+                          paddingHorizontal: 12,
+                          paddingVertical: 5,
+                          borderRadius: 8,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: 70
+                        }}
+                      >
+                        <Text style={{
+                          color: inCart ? '#ffffff' : '#FF5252',
+                          fontSize: 12,
+                          fontWeight: '900'
+                        }}>
+                          {inCart ? 'ADDED ✓' : 'ADD +'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  };
+
+                  return (
+                    <View style={{ marginTop: 10, paddingBottom: 40 }}>
+                      
+                      {/* Section A: Featured Campaign Banner Carousel */}
+                      {platformCampaigns.length > 0 && (
+                        <View style={{ marginBottom: 16 }}>
+                          <ScrollView
+                            ref={offersBannerRef}
+                            horizontal
+                            decelerationRate="fast"
+                            snapToInterval={width - 14}
+                            snapToAlignment="start"
+                            showsHorizontalScrollIndicator={false}
+                            onMomentumScrollEnd={(e) => {
+                              const offset = e.nativeEvent.contentOffset.x;
+                              const index = Math.round(offset / (width - 14));
+                              if (index !== activeOffersBannerIndex) {
+                                setActiveOffersBannerIndex(index);
+                              }
+                            }}
+                            contentContainerStyle={{ paddingHorizontal: 14 }}
+                          >
+                            {platformCampaigns.map((camp, idx) => {
+                              let bannerTypeLabel = camp.name || 'Featured Offer';
+                              let bannerTitle = camp.description || 'Special platform discount';
+                              let bannerDiscount = '';
+                              if (camp.offerType === 'PERCENTAGE_DISCOUNT') bannerDiscount = `${Math.round(camp.percentageDiscount)}% OFF`;
+                              else if (camp.offerType === 'FLAT_DISCOUNT') bannerDiscount = `₹${Math.round(camp.flatDiscountAmount)} OFF`;
+                              else if (camp.offerType === 'FREE_DELIVERY') bannerDiscount = 'FREE DELIVERY';
+                              else if (camp.offerType === 'FIXED_PRICE') bannerDiscount = `₹${Math.round(camp.price)} SPECIAL`;
 
                               return (
                                 <TouchableOpacity
-                                  key={`offer-dish-${item.id}-${idx}`}
-                                  style={[styles.offerFoodGridCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
-                                  activeOpacity={0.85}
-                                  onPress={() => openProductDetails(item, restaurantObj)}
+                                  key={`offers-banner-${camp.id}-${idx}`}
+                                  activeOpacity={0.9}
+                                  onPress={() => handleOpenCampaign(camp.id)}
+                                  style={{
+                                    width: width - 28,
+                                    marginRight: idx < platformCampaigns.length - 1 ? 14 : 28,
+                                  }}
+                                >
+                                  {camp.bannerUrl ? (
+                                    <Image
+                                      source={{ uri: camp.bannerUrl }}
+                                      style={{ width: '100%', height: 145, borderRadius: 16 }}
+                                      resizeMode="cover"
+                                    />
+                                  ) : (
+                                    <View style={{ width: '100%', height: 145, borderRadius: 16, backgroundColor: darkMode ? '#1E293B' : '#FEF2F2', padding: 16, justifyContent: 'space-between', borderWidth: 1, borderColor: D.cardBorder }}>
+                                      <View>
+                                        <View style={{ alignSelf: 'flex-start', backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, marginBottom: 6 }}>
+                                          <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '950', textTransform: 'uppercase' }}>{bannerTypeLabel}</Text>
+                                        </View>
+                                        <Text style={{ color: D.heading, fontSize: 24, fontWeight: '950' }}>{bannerDiscount}</Text>
+                                        <Text style={{ color: D.textSub, fontSize: 13, fontWeight: '800', marginTop: 2 }}>{bannerTitle}</Text>
+                                      </View>
+                                      <TouchableOpacity
+                                        onPress={() => handleOpenCampaign(camp.id)}
+                                        style={{ alignSelf: 'flex-start', backgroundColor: '#FF5252', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginTop: 8 }}
+                                      >
+                                        <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '900' }}>Explore Deals</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </ScrollView>
+
+                          {/* Banner Page Dots Indicator */}
+                          {platformCampaigns.length > 1 && (
+                            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 10 }}>
+                              {platformCampaigns.map((_, i) => (
+                                <View
+                                  key={`dot-${i}`}
+                                  style={{
+                                    width: activeOffersBannerIndex === i ? 16 : 6,
+                                    height: 6,
+                                    borderRadius: 3,
+                                    backgroundColor: activeOffersBannerIndex === i ? '#FF5252' : (darkMode ? '#475569' : '#CBD5E1'),
+                                    marginHorizontal: 3
+                                  }}
+                                />
+                              ))}
+                            </View>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Section B: Horizontal Offer Filters Row */}
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 8 }}>
+                        {[
+                          { id: 'all', label: 'All Deals' },
+                          { id: 'percentage', label: '% OFF' },
+                          { id: 'flat', label: 'Flat Off' },
+                          { id: 'free_delivery', label: 'Free Delivery' }
+                        ].map(chip => {
+                          const isSelected = offersFilter === chip.id;
+                          return (
+                            <TouchableOpacity
+                              key={`offers-filter-${chip.id}`}
+                              onPress={() => setOffersFilter(chip.id)}
+                              style={{
+                                backgroundColor: isSelected ? '#FF5252' : (darkMode ? '#1E293B' : '#F3F4F6'),
+                                paddingHorizontal: 16,
+                                paddingVertical: 8,
+                                borderRadius: 20,
+                                marginRight: 8,
+                                borderWidth: 1,
+                                borderColor: isSelected ? '#FF5252' : (darkMode ? '#334155' : '#E5E7EB'),
+                                justifyContent: 'center',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <Text style={{
+                                color: isSelected ? '#ffffff' : (darkMode ? '#94A3B8' : '#4B5563'),
+                                fontSize: 12,
+                                fontWeight: '800'
+                              }}>
+                                {chip.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+
+                      {/* Section C: Limited Time Deals Carousel */}
+                      {filteredLimitedDeals.length > 0 && (
+                        <View style={{ marginVertical: 14 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, marginBottom: 10 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Zap size={18} color="#F59E0B" fill="#F59E0B" />
+                              <Text style={{ fontSize: 16, fontWeight: '900', color: D.heading, marginLeft: 6 }}>Limited Time Deals</Text>
+                            </View>
+                            {earliestExpiry && (
+                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <Clock size={13} color="#FF5252" />
+                                <Text style={{ fontSize: 12, fontWeight: '900', color: '#FF5252', marginLeft: 4 }}>
+                                  Ends in {getRemainingTimeStr(earliestExpiry)}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={{ paddingHorizontal: 14 }}
+                          >
+                            {filteredLimitedDeals.map((item, idx) => {
+                              return (
+                                <View
+                                  key={`ltd-card-${item.id}-${idx}`}
+                                  style={{
+                                    width: 280,
+                                    backgroundColor: D.card,
+                                    borderColor: D.cardBorder,
+                                    borderWidth: 1,
+                                    borderRadius: 16,
+                                    padding: 10,
+                                    marginRight: idx < filteredLimitedDeals.length - 1 ? 12 : 28,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    elevation: 2,
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 2 },
+                                    shadowOpacity: 0.05,
+                                    shadowRadius: 8
+                                  }}
                                 >
                                   <View style={{ position: 'relative' }}>
-                                    <Image source={{ uri: item.image }} style={styles.offerFoodImg} />
+                                    <Image source={{ uri: item.image }} style={{ width: 85, height: 85, borderRadius: 12 }} />
                                     {item.offerLabel ? (
-                                      <View style={{ position: 'absolute', top: 6, left: 6, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                                        <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '900' }}>{item.offerLabel}</Text>
+                                      <View style={{ position: 'absolute', top: 0, left: 0, backgroundColor: '#EF4444', paddingHorizontal: 5, paddingVertical: 2, borderTopLeftRadius: 12, borderBottomRightRadius: 8 }}>
+                                        <Text style={{ color: '#ffffff', fontSize: 9, fontWeight: '950' }}>{item.offerLabel}</Text>
                                       </View>
                                     ) : null}
                                   </View>
-
-                                  <Text style={[styles.gridCardTitle, { color: D.text, marginTop: 8 }]} numberOfLines={1}>{item.name}</Text>
-                                  <Text style={[styles.gridCardSub, { color: D.textSub }]} numberOfLines={1}>by {item.hotelName}</Text>
-
-                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                      <Text style={{ fontSize: 14, fontWeight: '900', color: '#FF5252' }}>₹{item.offerPrice}</Text>
-                                      {item.price !== item.offerPrice ? (
-                                        <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginLeft: 4 }}>₹{item.price}</Text>
-                                      ) : null}
+                                  <View style={{ flex: 1, marginLeft: 10, justifyContent: 'space-between', height: 85 }}>
+                                    <View>
+                                      <Text style={{ fontSize: 13, fontWeight: '900', color: D.heading }} numberOfLines={1}>{item.name}</Text>
+                                      <Text style={{ fontSize: 10, color: D.textSub, marginTop: 1 }} numberOfLines={1}>{item.hotelName}</Text>
                                     </View>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '950', color: D.heading }}>₹{item.offerPrice}</Text>
+                                        {Number(item.price) !== Number(item.offerPrice) ? (
+                                          <Text style={{ fontSize: 10, textDecorationLine: 'line-through', color: D.textSub, marginLeft: 4 }}>₹{item.price}</Text>
+                                        ) : null}
+                                      </View>
+                                      {renderAddBtn(item)}
+                                    </View>
+                                  </View>
+                                </View>
+                              );
+                            })}
+                          </ScrollView>
+                        </View>
+                      )}
 
-                                    <TouchableOpacity
-                                      style={[styles.addBtn, inCart && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
-                                      onPress={(e) => { e.stopPropagation(); openCustomizer(item, restaurantObj); }}
-                                    >
-                                      <Text style={[styles.addBtnText, inCart && { color: '#ffffff' }]}>{inCart ? 'ADDED ✓' : 'ADD +'}</Text>
-                                    </TouchableOpacity>
+                      {/* Section D: Best Food Offers (Full Width Cards) */}
+                      {filteredFoodOffers.length > 0 && (
+                        <View style={{ paddingHorizontal: 14, marginTop: 12 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Flame size={18} color="#FF5252" fill="#FF5252" />
+                              <Text style={{ fontSize: 16, fontWeight: '900', color: D.heading, marginLeft: 6 }}>Best Food Offers</Text>
+                            </View>
+                            <Text style={{ fontSize: 12, color: D.textSub, fontWeight: '800' }}>
+                              {filteredFoodOffers.length} {filteredFoodOffers.length === 1 ? 'item' : 'items'}
+                            </Text>
+                          </View>
+
+                          <View style={{ flexDirection: 'column' }}>
+                            {filteredFoodOffers.map((item, idx) => {
+                              return (
+                                <View
+                                  key={`bfo-card-${item.id}-${idx}`}
+                                  style={{
+                                    backgroundColor: D.card,
+                                    borderColor: D.cardBorder,
+                                    borderWidth: 1,
+                                    borderRadius: 16,
+                                    padding: 12,
+                                    marginBottom: 10,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    elevation: 2,
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 2 },
+                                    shadowOpacity: 0.05,
+                                    shadowRadius: 8
+                                  }}
+                                >
+                                  {/* Left Side: Image and Badge */}
+                                  <View style={{ position: 'relative' }}>
+                                    <Image source={{ uri: item.image }} style={{ width: 100, height: 100, borderRadius: 12 }} />
+                                    {item.offerLabel ? (
+                                      <View style={{ position: 'absolute', top: 0, left: 0, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 3, borderTopLeftRadius: 12, borderBottomRightRadius: 8 }}>
+                                        <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '955' }}>{item.offerLabel}</Text>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                  
+                                  {/* Right Side: Details and Actions */}
+                                  <View style={{ flex: 1, marginLeft: 12, height: 100, justifyContent: 'space-between' }}>
+                                    <View>
+                                      <Text style={{ fontSize: 14, fontWeight: '900', color: D.heading }} numberOfLines={1}>
+                                        {item.name}
+                                      </Text>
+                                      <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }} numberOfLines={1}>
+                                        {item.hotelName}
+                                      </Text>
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                                        <Star size={12} color="#D97706" fill="#D97706" />
+                                        <Text style={{ fontSize: 11, fontWeight: '800', color: D.textSub, marginLeft: 3 }}>
+                                          {item.rating}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    
+                                    {/* Price & ADD Action Row */}
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                                        <Text style={{ fontSize: 16, fontWeight: '950', color: D.heading }}>
+                                          ₹{item.offerPrice}
+                                        </Text>
+                                        {Number(item.price) !== Number(item.offerPrice) ? (
+                                          <Text style={{ fontSize: 11, textDecorationLine: 'line-through', color: D.textSub, marginLeft: 6 }}>
+                                            ₹{item.price}
+                                          </Text>
+                                        ) : null}
+                                      </View>
+                                      {renderAddBtn(item)}
+                                    </View>
+                                  </View>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Section E: Restaurants With Offers */}
+                      {filteredHotelOffersList.length > 0 && (
+                        <View style={{ paddingHorizontal: 14, marginTop: 16 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Store size={18} color="#FF5252" />
+                              <Text style={{ fontSize: 16, fontWeight: '900', color: D.heading, marginLeft: 6 }}>🏨 Restaurants With Offers</Text>
+                            </View>
+                            <Text style={{ fontSize: 12, color: D.textSub, fontWeight: '800' }}>
+                              {filteredHotelOffersList.length} {filteredHotelOffersList.length === 1 ? 'place' : 'places'}
+                            </Text>
+                          </View>
+
+                          <View style={{ flexDirection: 'column' }}>
+                            {filteredHotelOffersList.map((restaurant, rIdx) => {
+                              const fullRest = restaurants.find(r => r.id === restaurant.id) || restaurant;
+                              return (
+                                <TouchableOpacity
+                                  key={`offers-rest-card-${restaurant.id}-${rIdx}`}
+                                  onPress={() => setSelectedRestaurant(fullRest)}
+                                  activeOpacity={0.9}
+                                  style={{
+                                    backgroundColor: D.card,
+                                    borderColor: D.cardBorder,
+                                    borderWidth: 1,
+                                    borderRadius: 16,
+                                    padding: 12,
+                                    marginBottom: 10,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    elevation: 2,
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 2 },
+                                    shadowOpacity: 0.05,
+                                    shadowRadius: 8
+                                  }}
+                                >
+                                  <Image source={{ uri: restaurant.image }} style={{ width: 90, height: 90, borderRadius: 12 }} />
+                                  <View style={{ flex: 1, marginLeft: 12, height: 90, justifyContent: 'space-between' }}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                      <Text style={{ fontSize: 14, fontWeight: '900', color: D.heading, flex: 1 }} numberOfLines={1}>
+                                        {restaurant.name}
+                                      </Text>
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 6 }}>
+                                        <Star size={10} color="#ffffff" fill="#ffffff" />
+                                        <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '900', marginLeft: 2 }}>{restaurant.rating || '4.8'}</Text>
+                                      </View>
+                                    </View>
+                                    <Text style={{ fontSize: 11, color: D.textSub }} numberOfLines={1}>
+                                      {restaurant.deliveryTime} • {restaurant.description || 'Deals on your favorites'}
+                                    </Text>
+                                    
+                                    {restaurant.offerText ? (
+                                      <View style={{ alignSelf: 'flex-start', backgroundColor: darkMode ? '#3D1A1A' : '#FEF2F2', borderColor: darkMode ? '#5C2D2D' : '#FEE2E2', borderWidth: 1, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                                        <Text style={{ color: '#EF4444', fontSize: 11, fontWeight: '900' }}>
+                                          🔥 {restaurant.offerText}
+                                        </Text>
+                                      </View>
+                                    ) : null}
                                   </View>
                                 </TouchableOpacity>
                               );
                             })}
+                          </View>
                         </View>
                       )}
+
+                      {/* Spacer to avoid floating cart bar overlap */}
+                      <View style={{ height: cartItems.length > 0 ? 120 : 40 }} />
                     </View>
-
-                    {/* Section 2: Offer Hotels */}
-                    <View style={{ paddingHorizontal: 14, marginTop: 20 }}>
-                      <View style={styles.sectionHeader}>
-                        <Text style={[styles.sectionTitle, { color: D.heading }]}>🏨 Restaurants With Offers</Text>
-                        <Text style={[styles.sectionCount, { color: D.textSub }]}>
-                          {(() => {
-                            const count = activeHotelOffers
-                              .filter(h => !onlyVeg || h.isVeg)
-                              .filter(h => searchQuery.trim() === '' || h.name.toLowerCase().includes(searchQuery.toLowerCase())).length;
-                            return `${count} ${count === 1 ? 'place' : 'places'}`;
-                          })()}
-                        </Text>
-                      </View>
-
-                      {loadingHotelOffers ? (
-                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
-                          <ActivityIndicator size="small" color="#FF5252" />
-                        </View>
-                      ) : activeHotelOffers.length === 0 ? (
-                        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
-                          <Store size={32} color={D.textSub} style={{ marginBottom: 8 }} />
-                          <Text style={{ fontSize: 13, color: D.textSub, fontWeight: '600' }}>No active restaurant offers found today.</Text>
-                        </View>
-                      ) : (
-                        activeHotelOffers
-                          .filter(h => !onlyVeg || h.isVeg)
-                          .filter(h => searchQuery.trim() === '' || h.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                          .map(restaurant => {
-                            const isFav = favorites.includes(restaurant.id);
-                            const fullRest = restaurants.find(r => r.id === restaurant.id) || restaurant;
-
-                            return (
-                              <TouchableOpacity
-                                key={`offer-rest-${restaurant.id}`}
-                                style={[styles.restaurantCard, { backgroundColor: D.card, borderColor: D.cardBorder }]}
-                                activeOpacity={0.9}
-                                onPress={() => setSelectedRestaurant(fullRest)}
-                              >
-                                <View style={{ position: 'relative' }}>
-                                  <Image source={{ uri: restaurant.image }} style={styles.restaurantImg} />
-                                  {restaurant.offerText ? (
-                                    <View style={styles.offerBadge}>
-                                      <Text style={styles.offerText}>{restaurant.offerText}</Text>
-                                    </View>
-                                  ) : null}
-
-                                  <TouchableOpacity
-                                    style={styles.favFloatingBtn}
-                                    onPress={() => toggleFavorite(restaurant.id)}
-                                  >
-                                    <Heart size={18} color={isFav ? '#FF5252' : '#ffffff'} fill={isFav ? '#FF5252' : 'transparent'} />
-                                  </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.cardContent}>
-                                  <View style={styles.cardRow}>
-                                    <Text style={[styles.restaurantTitle, { color: D.heading }]} numberOfLines={1}>{restaurant.name}</Text>
-                                    <View style={styles.ratingBadge}>
-                                      <Star size={12} color="#ffffff" fill="#ffffff" />
-                                      <Text style={styles.ratingText}>{restaurant.rating || '4.8'}</Text>
-                                    </View>
-                                  </View>
-                                  <Text style={[styles.restaurantDesc, { color: D.textSub }]} numberOfLines={2}>{restaurant.description || 'Special deals and delicious food'}</Text>
-                                </View>
-                              </TouchableOpacity>
-                            );
-                          })
-                      )}
-                    </View>
-                  </View>
-                ) : (
+                  );
+                })() : (
                   <>
                     {/* 3. SEARCH MATCHING FOOD ITEMS / KHAO GULLY BANNER */}
                     {searchQuery.trim() !== '' ? (
@@ -4541,26 +5063,26 @@ export default function App() {
           </View>
 
           {/* Sticky Swiggy Green Floating Cart Bar (Appears on tabs where items are added) */}
-          {(activeTab === 'home' || activeTab === 'wishlist') && !selectedRestaurant && activeCampaignId === null && renderFloatingCartBar(66)}
+          {(activeTab === 'home' || activeTab === 'wishlist') && !selectedRestaurant && activeCampaignId === null && renderFloatingCartBar(66, false)}
 
           {/* FEATURE 4: Bottom Navigation Bar with Explore Click Reset */}
-          <Animated.View style={[styles.bottomNav, { backgroundColor: D.navBg, borderTopColor: D.navBorder, transform: [{ translateY: bottomBarTranslateY }] }]}>
-            <TouchableOpacity style={styles.navBtn} onPress={() => handleHeavyAction(handleExploreClick)}>
+          <Animated.View style={[styles.bottomNav, { backgroundColor: D.navBg, borderTopColor: D.navBorder, transform: [{ translateY: bottomNavTranslateY }] }]}>
+            <TouchableOpacity style={styles.navBtn} onPress={() => { if (bottomControlsVisibleRef.current) handleHeavyAction(handleExploreClick); }}>
               <Home size={20} color={activeTab === 'home' ? '#FF5252' : (darkMode ? '#64748B' : '#9CA3AF')} />
               <Text style={[styles.navLabel, { color: darkMode ? '#64748B' : '#9CA3AF' }, activeTab === 'home' && styles.navLabelActive]}>Explore</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.navBtn} onPress={() => handleHeavyAction(() => setActiveTab('wishlist'))}>
+            <TouchableOpacity style={styles.navBtn} onPress={() => { if (bottomControlsVisibleRef.current) handleHeavyAction(() => setActiveTab('wishlist')); }}>
               <Heart size={20} color={activeTab === 'wishlist' ? '#FF5252' : (darkMode ? '#64748B' : '#9CA3AF')} />
               <Text style={[styles.navLabel, { color: darkMode ? '#64748B' : '#9CA3AF' }, activeTab === 'wishlist' && styles.navLabelActive]}>Favorites</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.navBtn} onPress={() => handleHeavyAction(() => setActiveTab('orders'))}>
+            <TouchableOpacity style={styles.navBtn} onPress={() => { if (bottomControlsVisibleRef.current) handleHeavyAction(() => setActiveTab('orders')); }}>
               <Truck size={20} color={activeTab === 'orders' ? '#FF5252' : (darkMode ? '#64748B' : '#9CA3AF')} />
               <Text style={[styles.navLabel, { color: darkMode ? '#64748B' : '#9CA3AF' }, activeTab === 'orders' && styles.navLabelActive]}>Orders</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.navBtn} onPress={() => handleHeavyAction(() => setActiveTab('profile'))}>
+            <TouchableOpacity style={styles.navBtn} onPress={() => { if (bottomControlsVisibleRef.current) handleHeavyAction(() => setActiveTab('profile')); }}>
               <User size={20} color={activeTab === 'profile' ? '#FF5252' : (darkMode ? '#64748B' : '#9CA3AF')} />
               <Text style={[styles.navLabel, { color: darkMode ? '#64748B' : '#9CA3AF' }, activeTab === 'profile' && styles.navLabelActive]}>Profile</Text>
             </TouchableOpacity>
