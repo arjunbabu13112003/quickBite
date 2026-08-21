@@ -31,6 +31,15 @@ export class DeliveryPartner {
   @Column({ type: 'varchar', length: 100, nullable: true })
   licenseNumber?: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  preferredZone?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  secondaryZone?: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  deliveryType?: string;
+
   @Column({ type: 'boolean', default: false })
   isVerified: boolean;
 

@@ -472,26 +472,28 @@ export default function AddDeliveryPartner({ onNavigate }) {
       // Normalize mobile number
       let rawMobile = formData.mobileNumber.trim().replace(/^\+91\s*/, '').replace(/^91\s*/, '').replace(/[\s-]/g, '');
 
-      // 1. Create a new user account first
-      const registerRes = await api.registerUser({
-        name: formData.name.trim(),
-        email: formData.email.trim(),
+      // Normalize zones
+      const normPrefZone = formData.preferredZone.replace(/\s+/g, ' ').trim();
+      const normSecZone = formData.secondaryZone && formData.secondaryZone.trim() 
+        ? formData.secondaryZone.replace(/\s+/g, ' ').trim() 
+        : undefined;
+
+      // Map vehicle type and delivery type to canonical backend values
+      const backendVehType = formData.vehicleType.toUpperCase(); // BIKE, SCOOTER, BICYCLE, CAR
+      const backendDelType = formData.deliveryType === 'Full Time' ? 'FULL_TIME' : 'PART_TIME';
+
+      // One atomic backend call
+      const partnerRes = await api.createDeliveryPartnerAccount({
+        fullName: formData.name.trim(),
         mobileNumber: rawMobile,
-        password: formData.password
-      });
-
-      const newUserId = registerRes?.user?.id;
-      if (!newUserId) {
-        throw new Error('Failed to retrieve registered user ID from response.');
-      }
-
-      // 2. Link the user to the delivery partner profile
-      const partnerRes = await api.createDeliveryPartner({
-        userId: newUserId,
-        phoneNumber: rawMobile,
-        vehicleType: formData.vehicleType,
-        vehicleNumber: formData.vehicleType === 'Bicycle' ? undefined : formData.vehicleNumber.trim().replace(/[\s-]/g, '').toUpperCase(),
-        licenseNumber: formData.vehicleType === 'Bicycle' ? undefined : formData.licenseNumber.trim().replace(/[\s-]/g, '').toUpperCase()
+        email: formData.email.trim(),
+        temporaryPassword: formData.password,
+        vehicleType: backendVehType,
+        vehicleNumber: backendVehType === 'BICYCLE' ? undefined : formData.vehicleNumber.trim(),
+        driversLicenseNumber: backendVehType === 'BICYCLE' ? undefined : formData.licenseNumber.trim(),
+        preferredZone: normPrefZone,
+        secondaryZone: normSecZone,
+        deliveryType: backendDelType
       });
 
       setSuccessData({

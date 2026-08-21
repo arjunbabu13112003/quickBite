@@ -353,7 +353,7 @@ export default function OrderDetails({ id, onNavigate }) {
                 {partner.user?.name}
               </span>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                {partner.vehicleType} • {partner.vehicleNumber || 'No Plate'}
+                {['BIKE', 'SCOOTER', 'BICYCLE', 'CAR'].includes(partner.vehicleType?.toUpperCase()) ? { 'BIKE': 'Bike', 'SCOOTER': 'Scooter', 'BICYCLE': 'Bicycle', 'CAR': 'Car' }[partner.vehicleType.toUpperCase()] : partner.vehicleType} • {partner.vehicleNumber || 'No Plate'}
               </span>
             </div>
           </div>

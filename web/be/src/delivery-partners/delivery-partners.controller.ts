@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { DeliveryPartnersService } from './delivery-partners.service';
 import { CreateDeliveryPartnerDto } from './dto/create-delivery-partner.dto';
+import { AdminCreateDeliveryPartnerDto } from './dto/admin-create-delivery-partner.dto';
 import { UpdateDeliveryPartnerStatusDto } from './dto/update-delivery-partner-status.dto';
 import { VerifyDeliveryPartnerDto } from './dto/verify-delivery-partner.dto';
 import { AssignDeliveryPartnerDto } from './dto/assign-delivery-partner.dto';
@@ -32,6 +33,12 @@ export class DeliveryPartnersController {
   ) {}
 
   // --- SUPER_ADMIN ROUTES ---
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('delivery-partners/admin-create')
+  adminCreate(@Body() dto: AdminCreateDeliveryPartnerDto) {
+    return this.partnersService.adminCreate(dto);
+  }
 
   @Roles(UserRole.SUPER_ADMIN)
   @Post('delivery-partners')

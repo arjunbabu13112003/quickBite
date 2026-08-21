@@ -5,7 +5,8 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, ILike, Like } from 'typeorm';
+import * as bcrypt from 'bcrypt';
 import { DeliveryPartner } from './delivery-partner.entity';
 import { DeliveryAssignment } from './delivery-assignment.entity';
 import { User } from '../users/user.entity';
@@ -14,7 +15,10 @@ import { UserRole } from '../users/user-role.enum';
 import { OrderStatus } from '../orders/enums/order-status.enum';
 import { PaymentsService } from '../payments/payments.service';
 import { CreateDeliveryPartnerDto } from './dto/create-delivery-partner.dto';
+import { AdminCreateDeliveryPartnerDto } from './dto/admin-create-delivery-partner.dto';
 import { UpdateDeliveryPartnerStatusDto } from './dto/update-delivery-partner-status.dto';
+import { VehicleType } from './enums/vehicle-type.enum';
+import { DeliveryType } from './enums/delivery-type.enum';
 
 @Injectable()
 export class DeliveryPartnersService {
@@ -30,6 +34,101 @@ export class DeliveryPartnersService {
     private readonly dataSource: DataSource,
     private readonly paymentsService: PaymentsService,
   ) {}
+
+  async adminCreate(dto: AdminCreateDeliveryPartnerDto): Promise<DeliveryPartner> {
+    // 1. Mobile number normalization and validation
+    const rawMobile = dto.mobileNumber.trim().replace(/^\+91\s*/, '').replace(/^91\s*/, '').replace(/[\s-]/g, '');
+    if (!/^\d{10}$/.test(rawMobile)) {
+      throw new BadRequestException('Enter a valid 10-digit mobile number.');
+    }
+
+    // 2. Email normalization
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    if (!/\S+@\S+\.\S+/.test(normalizedEmail)) {
+      throw new BadRequestException('Enter a valid email address.');
+    }
+
+    // 3. Zone duplicate checks & normalization
+    const normPrefZone = dto.preferredZone.replace(/\s+/g, ' ').trim();
+    let normSecZone = null;
+    if (dto.secondaryZone && dto.secondaryZone.trim()) {
+      normSecZone = dto.secondaryZone.replace(/\s+/g, ' ').trim();
+      if (normPrefZone.toLowerCase() === normSecZone.toLowerCase()) {
+        throw new BadRequestException('Secondary zone must be different from preferred zone.');
+      }
+    }
+
+    // 4. Vehicle Type conditionals
+    if (dto.vehicleType !== VehicleType.BICYCLE) {
+      if (!dto.vehicleNumber || !dto.vehicleNumber.trim()) {
+        throw new BadRequestException('Enter a valid vehicle registration number.');
+      }
+      if (!dto.driversLicenseNumber || !dto.driversLicenseNumber.trim()) {
+        throw new BadRequestException("Enter a valid driver's license number.");
+      }
+    }
+
+    const finalVehNum = dto.vehicleType === VehicleType.BICYCLE ? undefined : dto.vehicleNumber.trim().replace(/[\s-]/g, '').toUpperCase();
+    const finalLicNum = dto.vehicleType === VehicleType.BICYCLE ? undefined : dto.driversLicenseNumber.trim().replace(/[\s-]/g, '').toUpperCase();
+
+    // Perform database writes inside transaction
+    return await this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const partnerRepo = manager.getRepository(DeliveryPartner);
+
+      // Case-insensitive duplicate check for email using ILike
+      const existingEmail = await userRepo.findOne({
+        where: { email: ILike(normalizedEmail) }
+      });
+      if (existingEmail) {
+        throw new ConflictException('Email is already registered');
+      }
+
+      // Legacy-aware duplicate check for mobile number using memory normalization
+      const last4 = rawMobile.slice(-4);
+      const mobileCandidates = await userRepo.find({
+        where: { mobileNumber: Like(`%${last4}`) }
+      });
+      const hasMobileDuplicate = mobileCandidates.some(u => {
+        const norm = u.mobileNumber.replace(/^\+91\s*/, '').replace(/^91\s*/, '').replace(/[\s-]/g, '');
+        return norm === rawMobile;
+      });
+      if (hasMobileDuplicate) {
+        throw new ConflictException('Mobile number is already registered');
+      }
+
+      // Hash password using 10 rounds bcrypt rounds configuration
+      const hashedPassword = await bcrypt.hash(dto.temporaryPassword, 10);
+
+      // Create new Auth User record with DELIVERY_PARTNER role
+      const newUser = userRepo.create({
+        name: dto.fullName.trim(),
+        email: normalizedEmail,
+        mobileNumber: rawMobile,
+        password: hashedPassword,
+        role: UserRole.DELIVERY_PARTNER
+      });
+      const savedUser = await userRepo.save(newUser);
+
+      // Create Delivery Partner Profile record linking User
+      const newPartner = partnerRepo.create({
+        userId: savedUser.id,
+        phoneNumber: rawMobile,
+        vehicleType: dto.vehicleType,
+        vehicleNumber: finalVehNum,
+        licenseNumber: finalLicNum,
+        preferredZone: normPrefZone,
+        secondaryZone: normSecZone,
+        deliveryType: dto.deliveryType,
+        isVerified: false,
+        isOnline: false,
+        isAvailable: false,
+        isActive: true
+      });
+
+      return await partnerRepo.save(newPartner);
+    });
+  }
 
   async createProfile(
     dto: CreateDeliveryPartnerDto,

@@ -361,7 +361,7 @@ export default function DeliveryPartnerDetails({ id, onNavigate }) {
                 </div>
                 <div>
                   <p style={{ fontSize: '0.88rem', color: 'var(--text-main)', fontWeight: '850', margin: 0 }}>
-                    {partner.vehicleType || '—'}
+                    {['BIKE', 'SCOOTER', 'BICYCLE', 'CAR'].includes(partner.vehicleType?.toUpperCase()) ? { 'BIKE': 'Bike', 'SCOOTER': 'Scooter', 'BICYCLE': 'Bicycle', 'CAR': 'Car' }[partner.vehicleType.toUpperCase()] : (partner.vehicleType || '—')}
                   </p>
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: '600', margin: 0 }}>
                     License Plate: {partner.vehicleNumber || '—'}

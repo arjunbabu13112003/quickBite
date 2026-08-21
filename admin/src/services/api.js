@@ -511,6 +511,15 @@ export const api = {
     return handleResponse(res);
   },
 
+  createDeliveryPartnerAccount: async (payload) => {
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/admin-create`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+  },
+
   registerUser: async (payload) => {
     const res = await fetch(`${API_BASE_URL}/users/register`, {
       method: 'POST',

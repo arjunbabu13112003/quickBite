@@ -304,7 +304,7 @@ export default function ManageDeliveryPartner({ id, onNavigate }) {
             <span>•</span>
             <span>{partner.phoneNumber}</span>
             <span>•</span>
-            <span>{partner.vehicleType} {partner.vehicleNumber ? `(${partner.vehicleNumber})` : ''}</span>
+            <span>{['BIKE', 'SCOOTER', 'BICYCLE', 'CAR'].includes(partner.vehicleType?.toUpperCase()) ? { 'BIKE': 'Bike', 'SCOOTER': 'Scooter', 'BICYCLE': 'Bicycle', 'CAR': 'Car' }[partner.vehicleType.toUpperCase()] : partner.vehicleType} {partner.vehicleNumber ? `(${partner.vehicleNumber})` : ''}</span>
           </div>
         </div>
       </div>
@@ -465,7 +465,7 @@ export default function ManageDeliveryPartner({ id, onNavigate }) {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', borderBottom: '1px solid #f8fafc', paddingBottom: '0.5rem' }}>
                 <span style={{ color: 'var(--text-muted)', fontWeight: '700' }}>Vehicle Type</span>
-                <span style={{ fontWeight: '800', color: 'var(--text-main)' }}>{partner.vehicleType}</span>
+                 <span style={{ fontWeight: '800', color: 'var(--text-main)' }}>{['BIKE', 'SCOOTER', 'BICYCLE', 'CAR'].includes(partner.vehicleType?.toUpperCase()) ? { 'BIKE': 'Bike', 'SCOOTER': 'Scooter', 'BICYCLE': 'Bicycle', 'CAR': 'Car' }[partner.vehicleType.toUpperCase()] : partner.vehicleType}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', borderBottom: '1px solid #f8fafc', paddingBottom: '0.5rem' }}>
                 <span style={{ color: 'var(--text-muted)', fontWeight: '700' }}>Vehicle Number</span>

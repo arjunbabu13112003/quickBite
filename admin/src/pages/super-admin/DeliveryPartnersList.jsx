@@ -552,7 +552,7 @@ export default function DeliveryPartnersList({ onNavigate }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Bike size={16} style={{ color: 'var(--primary)' }} />
                         <span style={{ fontSize: '0.85rem', color: 'var(--text-main)', fontWeight: '700' }}>
-                          {partner.vehicleType || '—'}
+                          {['BIKE', 'SCOOTER', 'BICYCLE', 'CAR'].includes(partner.vehicleType?.toUpperCase()) ? { 'BIKE': 'Bike', 'SCOOTER': 'Scooter', 'BICYCLE': 'Bicycle', 'CAR': 'Car' }[partner.vehicleType.toUpperCase()] : (partner.vehicleType || '—')}
                         </span>
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>·</span>
                         <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '800' }}>
