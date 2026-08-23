@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
+    "@maplibre/maplibre-react-native": "^11.3.7",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "expo": "~54.0.0",
     "expo-location": "~19.0.8",
@@ -18,7 +19,6 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-maps": "^1.20.1",
     "react-native-razorpay": "^3.0.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",

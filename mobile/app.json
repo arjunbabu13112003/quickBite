@@ -12,6 +12,9 @@
     "android": {
       "backgroundColor": "#ffffff",
       "package": "com.anonymous.quickbitemobileapp"
-    }
+    },
+    "plugins": [
+      "@maplibre/maplibre-react-native"
+    ]
   }
 }

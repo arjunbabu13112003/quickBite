@@ -28,7 +28,7 @@ import {
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
+import { MapView, Camera as MapCamera, MarkerView } from '@maplibre/maplibre-react-native';
 import {
   Sparkles,
   Flame,
@@ -8208,8 +8208,23 @@ export default function App() {
                           const custLat = activeOrderDetail?.deliveryAddress?.latitude;
                           const custLng = activeOrderDetail?.deliveryAddress?.longitude;
 
+                          const isValidCoordinate = (lat, lng) => {
+                            const latitude = parseFloat(lat);
+                            const longitude = parseFloat(lng);
+                            return (
+                              !isNaN(latitude) &&
+                              !isNaN(longitude) &&
+                              isFinite(latitude) &&
+                              isFinite(longitude) &&
+                              latitude >= -90 &&
+                              latitude <= 90 &&
+                              longitude >= -180 &&
+                              longitude <= 180
+                            );
+                          };
+
                           const openMaps = () => {
-                            if (riderLat && riderLng) {
+                            if (riderLat && riderLng && isValidCoordinate(riderLat, riderLng)) {
                               const label = encodeURIComponent('Delivery Partner');
                               const url = Platform.OS === 'ios'
                                 ? `maps://?q=${label}&ll=${riderLat},${riderLng}`
@@ -8222,47 +8237,85 @@ export default function App() {
 
                           return (
                             <View>
-                              {riderLat && riderLng ? (
+                              {riderLat && riderLng && isValidCoordinate(riderLat, riderLng) ? (
                                 <View>
-                                  {/* MapView Container */}
+                                  {/* MapLibre Map Container */}
                                   <View style={{ height: 180, borderRadius: 12, marginBottom: 12, overflow: 'hidden' }}>
                                     <MapView
                                       style={{ width: '100%', height: '100%' }}
-                                      initialRegion={{
-                                        latitude: riderLat,
-                                        longitude: riderLng,
-                                        latitudeDelta: 0.015,
-                                        longitudeDelta: 0.015,
-                                      }}
+                                      styleURL={darkMode 
+                                        ? "https://tiles.openfreemap.org/styles/dark" 
+                                        : "https://tiles.openfreemap.org/styles/positron"
+                                      }
+                                      logoEnabled={false}
+                                      attributionEnabled={false}
                                     >
-                                      <Marker 
-                                        coordinate={{ latitude: riderLat, longitude: riderLng }} 
-                                        title={partner?.user?.name || 'Delivery Partner'} 
-                                        description="🛵 On the way" 
+                                      <MapCamera
+                                        defaultSettings={{
+                                          centerCoordinate: [parseFloat(riderLng), parseFloat(riderLat)],
+                                          zoomLevel: 14,
+                                        }}
                                       />
-                                      {custLat && custLng && (
-                                        <Marker 
-                                          coordinate={{ latitude: custLat, longitude: custLng }} 
-                                          title="Your Location" 
-                                          pinColor="blue" 
-                                        />
+                                      
+                                      <MarkerView coordinate={[parseFloat(riderLng), parseFloat(riderLat)]}>
+                                        <View style={{
+                                          width: 32, height: 32, borderRadius: 16,
+                                          backgroundColor: '#059669',
+                                          alignItems: 'center', justifyContent: 'center',
+                                          borderWidth: 2, borderColor: '#ffffff',
+                                          elevation: 4, shadowColor: '#000',
+                                          shadowOffset: { width: 0, height: 2 },
+                                          shadowOpacity: 0.25, shadowRadius: 3.84
+                                        }}>
+                                          <Text style={{ fontSize: 16 }}>🛵</Text>
+                                        </View>
+                                      </MarkerView>
+
+                                      {custLat && custLng && isValidCoordinate(custLat, custLng) && (
+                                        <MarkerView coordinate={[parseFloat(custLng), parseFloat(custLat)]}>
+                                          <View style={{
+                                            width: 32, height: 32, borderRadius: 16,
+                                            backgroundColor: '#3b82f6',
+                                            alignItems: 'center', justifyContent: 'center',
+                                            borderWidth: 2, borderColor: '#ffffff',
+                                            elevation: 4, shadowColor: '#000',
+                                            shadowOffset: { width: 0, height: 2 },
+                                            shadowOpacity: 0.25, shadowRadius: 3.84
+                                          }}>
+                                            <Text style={{ fontSize: 16 }}>📍</Text>
+                                          </View>
+                                        </MarkerView>
                                       )}
+
                                       {(() => {
                                         const hLat = activeOrderDetail?.hotel?.latitude ? parseFloat(activeOrderDetail.hotel.latitude.toString()) : null;
                                         const hLng = activeOrderDetail?.hotel?.longitude ? parseFloat(activeOrderDetail.hotel.longitude.toString()) : null;
-                                        if (hLat && hLng) {
+                                        if (hLat && hLng && isValidCoordinate(hLat, hLng)) {
                                           return (
-                                            <Marker 
-                                              coordinate={{ latitude: hLat, longitude: hLng }} 
-                                              title={activeOrderDetail.hotel?.name || 'Restaurant'} 
-                                              pinColor="orange" 
-                                            />
+                                            <MarkerView coordinate={[hLng, hLat]}>
+                                              <View style={{
+                                                width: 32, height: 32, borderRadius: 16,
+                                                backgroundColor: '#f59e0b',
+                                                alignItems: 'center', justifyContent: 'center',
+                                                borderWidth: 2, borderColor: '#ffffff',
+                                                elevation: 4, shadowColor: '#000',
+                                                shadowOffset: { width: 0, height: 2 },
+                                                shadowOpacity: 0.25, shadowRadius: 3.84
+                                              }}>
+                                                <Text style={{ fontSize: 16 }}>🍔</Text>
+                                              </View>
+                                            </MarkerView>
                                           );
                                         }
                                         return null;
                                       })()}
                                     </MapView>
                                   </View>
+
+                                  {/* Map attribution notice */}
+                                  <Text style={{ fontSize: 9, color: D.textSub, textAlign: 'right', marginBottom: 8, marginRight: 4 }}>
+                                    © OpenStreetMap, © OpenFreeMap
+                                  </Text>
 
                                   {/* Rider location row */}
                                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
@@ -8279,7 +8332,7 @@ export default function App() {
                                         {partner?.user?.name || 'Delivery Partner'}
                                       </Text>
                                       <Text style={{ fontSize: 11, color: D.textSub, marginTop: 2 }}>
-                                        Lat: {riderLat.toFixed(5)}, Lng: {riderLng.toFixed(5)}
+                                        Lat: {parseFloat(riderLat).toFixed(5)}, Lng: {parseFloat(riderLng).toFixed(5)}
                                       </Text>
                                       {updatedAt && (
                                         <Text style={{ fontSize: 10, color: D.textSub, marginTop: 1 }}>
@@ -8290,7 +8343,7 @@ export default function App() {
                                   </View>
 
                                   {/* Customer destination row */}
-                                  {custLat && custLng && (
+                                  {custLat && custLng && isValidCoordinate(custLat, custLng) && (
                                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 }}>
                                       <View style={{
                                         width: 32, height: 32, borderRadius: 16,
