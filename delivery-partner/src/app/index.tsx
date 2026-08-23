@@ -20,6 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { api, getAuthToken, setAuthToken } from '../services/api';
+import * as Location from 'expo-location';
 
 // Import Reusable Components
 import Header from '../components/header';
@@ -360,7 +361,16 @@ export default function AppIndex() {
               const deliveryData = await api.getActiveDelivery();
               if (deliveryData && deliveryData.assignment) {
                 setActiveAssignment(deliveryData.assignment);
-                setDeliveryState('active-restaurant');
+                const status = deliveryData.assignment.order?.orderStatus;
+                if (status === 'picked_up') {
+                  setDeliveryState('active-start-delivery');
+                } else if (status === 'out_for_delivery') {
+                  setDeliveryState('active-delivery');
+                } else if (status === 'ready_for_pickup') {
+                  setDeliveryState('active-pickup');
+                } else {
+                  setDeliveryState('active-restaurant');
+                }
                 setIsAvailable(false);
                 if (deliveryData.assignment.order && deliveryData.assignment.order.cashCollectedAt) {
                   setIsCashCollected(true);
@@ -393,6 +403,76 @@ export default function AppIndex() {
       subscription.remove();
     };
   }, []);
+
+  const locationWatcherRef = useRef<any>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const startWatcher = async () => {
+      if (locationWatcherRef.current) {
+        try {
+          locationWatcherRef.current.remove();
+        } catch (e) {}
+        locationWatcherRef.current = null;
+      }
+
+      const isApproved = accountStatus === 'APPROVED' || currentPartner?.accountStatus === 'APPROVED';
+      const hasActiveDelivery = deliveryState === 'active-delivery' || activeAssignment?.order?.orderStatus === 'out_for_delivery';
+
+      if (!isAuthenticated || !isApproved || !hasActiveDelivery || appState !== 'active') {
+        return;
+      }
+
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('[WATCHER] Location permission not granted, skipping watcher.');
+        return;
+      }
+
+      console.log('[WATCHER] Starting foreground location watcher...');
+      try {
+        locationWatcherRef.current = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 15,
+            timeInterval: 10000,
+          },
+          async (loc) => {
+            if (!active) return;
+            try {
+              console.log('[WATCHER] Position updated:', loc.coords.latitude, loc.coords.longitude);
+              await api.updateActiveDeliveryLocation({
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude,
+                accuracy: loc.coords.accuracy || undefined,
+                heading: loc.coords.heading || undefined,
+                speed: loc.coords.speed !== null && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
+                capturedAt: new Date(loc.timestamp).toISOString(),
+              });
+            } catch (err) {
+              console.error('[WATCHER] Failed to send location update:', err);
+            }
+          }
+        );
+      } catch (err) {
+        console.error('[WATCHER] Failed to start watchPositionAsync:', err);
+      }
+    };
+
+    startWatcher();
+
+    return () => {
+      active = false;
+      if (locationWatcherRef.current) {
+        try {
+          locationWatcherRef.current.remove();
+        } catch (e) {}
+        locationWatcherRef.current = null;
+        console.log('[WATCHER] Stopped foreground location watcher.');
+      }
+    };
+  }, [isAuthenticated, accountStatus, currentPartner?.accountStatus, deliveryState, activeAssignment?.order?.orderStatus, appState]);
 
   useEffect(() => {
     let intervalId: any = null;
@@ -1125,6 +1205,26 @@ export default function AppIndex() {
           await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'picked_up');
           changeDeliveryState('active-start-delivery');
         } else if (currentStep === 'start-delivery') {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== 'granted') {
+            alert('Location access is required to start live delivery tracking.');
+            return;
+          }
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            await api.updateActiveDeliveryLocation({
+              latitude: loc.coords.latitude,
+              longitude: loc.coords.longitude,
+              accuracy: loc.coords.accuracy || undefined,
+              heading: loc.coords.heading || undefined,
+              speed: loc.coords.speed !== null && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
+              capturedAt: new Date(loc.timestamp).toISOString(),
+            });
+          } catch (locErr) {
+            alert('Unable to retrieve current GPS location. Please ensure location services are enabled.');
+            return;
+          }
+
           await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'out_for_delivery');
           changeDeliveryState('active-delivery');
         }

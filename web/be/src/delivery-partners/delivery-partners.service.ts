@@ -31,6 +31,7 @@ import { VerifyDocumentDto } from './dto/verify-document.dto';
 import { UpdatePartnerStatusDto } from './dto/update-partner-status.dto';
 import { JwtService } from '@nestjs/jwt';
 import { DeliveryPartnerLoginDto } from './dto/delivery-partner-login.dto';
+import { UpdateActiveDeliveryLocationDto } from './dto/update-active-delivery-location.dto';
 
 @Injectable()
 export class DeliveryPartnersService implements OnModuleInit {
@@ -553,6 +554,61 @@ export class DeliveryPartnersService implements OnModuleInit {
     profile.currentLatitude = latitude;
     profile.currentLongitude = longitude;
     profile.locationUpdatedAt = new Date();
+    await this.partnerRepository.save(profile);
+    return { success: true };
+  }
+
+  async updateActiveDeliveryLocation(
+    userId: number,
+    dto: UpdateActiveDeliveryLocationDto,
+  ): Promise<{ success: boolean }> {
+    const profile = await this.partnerRepository.findOne({ where: { userId } });
+    if (!profile) {
+      throw new NotFoundException('Delivery partner profile not found');
+    }
+
+    if (
+      profile.accountStatus !== 'APPROVED' ||
+      !profile.isVerified ||
+      !profile.isActive ||
+      !profile.isOnline
+    ) {
+      throw new ForbiddenException('Delivery partner is not active, verified, or online');
+    }
+
+    const assignment = await this.assignmentRepository.findOne({
+      where: {
+        deliveryPartnerId: profile.id,
+        status: DeliveryAssignmentStatus.ACCEPTED,
+        isActive: true,
+      },
+      relations: ['order'],
+    });
+
+    if (!assignment || !assignment.order) {
+      throw new ConflictException('No active accepted delivery assignment found');
+    }
+
+    const order = assignment.order;
+    if (order.deliveryPartnerId !== profile.id) {
+      throw new ForbiddenException('Rider is not assigned to this order');
+    }
+
+    if (
+      order.orderStatus === OrderStatus.DELIVERED ||
+      order.orderStatus === OrderStatus.CANCELLED ||
+      order.orderStatus === OrderStatus.REJECTED
+    ) {
+      throw new ConflictException('Order is already delivered, cancelled, or rejected');
+    }
+
+    profile.currentLatitude = dto.latitude;
+    profile.currentLongitude = dto.longitude;
+    profile.locationAccuracy = dto.accuracy !== undefined ? dto.accuracy : null;
+    profile.locationHeading = dto.heading !== undefined ? dto.heading : null;
+    profile.locationSpeed = dto.speed !== undefined ? dto.speed : null;
+    profile.locationUpdatedAt = new Date();
+
     await this.partnerRepository.save(profile);
     return { success: true };
   }

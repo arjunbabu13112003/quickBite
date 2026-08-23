@@ -77,6 +77,15 @@ export class DeliveryPartner {
   @Column({ type: 'timestamp', nullable: true })
   locationUpdatedAt?: Date;
 
+  @Column({ type: 'decimal', precision: 10, scale: 4, nullable: true })
+  locationAccuracy?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 4, nullable: true })
+  locationHeading?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 4, nullable: true })
+  locationSpeed?: number;
+
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;

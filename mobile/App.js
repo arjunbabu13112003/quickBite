@@ -28,6 +28,7 @@ import {
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
 import * as Location from 'expo-location';
+import MapView, { Marker } from 'react-native-maps';
 import {
   Sparkles,
   Flame,
@@ -8223,6 +8224,46 @@ export default function App() {
                             <View>
                               {riderLat && riderLng ? (
                                 <View>
+                                  {/* MapView Container */}
+                                  <View style={{ height: 180, borderRadius: 12, marginBottom: 12, overflow: 'hidden' }}>
+                                    <MapView
+                                      style={{ width: '100%', height: '100%' }}
+                                      initialRegion={{
+                                        latitude: riderLat,
+                                        longitude: riderLng,
+                                        latitudeDelta: 0.015,
+                                        longitudeDelta: 0.015,
+                                      }}
+                                    >
+                                      <Marker 
+                                        coordinate={{ latitude: riderLat, longitude: riderLng }} 
+                                        title={partner?.user?.name || 'Delivery Partner'} 
+                                        description="🛵 On the way" 
+                                      />
+                                      {custLat && custLng && (
+                                        <Marker 
+                                          coordinate={{ latitude: custLat, longitude: custLng }} 
+                                          title="Your Location" 
+                                          pinColor="blue" 
+                                        />
+                                      )}
+                                      {(() => {
+                                        const hLat = activeOrderDetail?.hotel?.latitude ? parseFloat(activeOrderDetail.hotel.latitude.toString()) : null;
+                                        const hLng = activeOrderDetail?.hotel?.longitude ? parseFloat(activeOrderDetail.hotel.longitude.toString()) : null;
+                                        if (hLat && hLng) {
+                                          return (
+                                            <Marker 
+                                              coordinate={{ latitude: hLat, longitude: hLng }} 
+                                              title={activeOrderDetail.hotel?.name || 'Restaurant'} 
+                                              pinColor="orange" 
+                                            />
+                                          );
+                                        }
+                                        return null;
+                                      })()}
+                                    </MapView>
+                                  </View>
+
                                   {/* Rider location row */}
                                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
                                     <View style={{

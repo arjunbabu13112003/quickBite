@@ -31,6 +31,7 @@ import { UpdateDeliveryOrderStatusDto } from './dto/update-delivery-order-status
 import { VerifyDocumentDto } from './dto/verify-document.dto';
 import { UpdatePartnerStatusDto } from './dto/update-partner-status.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { UpdateActiveDeliveryLocationDto } from './dto/update-active-delivery-location.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { DeliveryPartnerLoginDto } from './dto/delivery-partner-login.dto';
 import { UpdateOnlineStatusDto } from './dto/update-online-status.dto';
@@ -172,6 +173,15 @@ export class DeliveryPartnersController {
       throw new ForbiddenException('Forbidden resource');
     }
     return this.partnersService.updateLocation(req.user.userId, dto.latitude, dto.longitude);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Patch('delivery-partners/me/active-delivery/location')
+  updateActiveDeliveryLocation(@Body() dto: UpdateActiveDeliveryLocationDto, @Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.updateActiveDeliveryLocation(req.user.userId, dto);
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)

@@ -609,22 +609,29 @@ export class OrdersService {
         ? {
             id: activeAssignment.id,
             deliveryPartner: activeAssignment.deliveryPartner
-              ? {
-                  id: activeAssignment.deliveryPartner.id,
-                  phoneNumber: activeAssignment.deliveryPartner.phoneNumber,
-                  vehicleType: activeAssignment.deliveryPartner.vehicleType,
-                  vehicleNumber: activeAssignment.deliveryPartner.vehicleNumber,
-                  currentLatitude: activeAssignment.deliveryPartner.currentLatitude
-                    ? parseFloat(activeAssignment.deliveryPartner.currentLatitude.toString())
-                    : null,
-                  currentLongitude: activeAssignment.deliveryPartner.currentLongitude
-                    ? parseFloat(activeAssignment.deliveryPartner.currentLongitude.toString())
-                    : null,
-                  locationUpdatedAt: activeAssignment.deliveryPartner.locationUpdatedAt || null,
-                  user: activeAssignment.deliveryPartner.user
-                    ? { name: activeAssignment.deliveryPartner.user.name }
-                    : null,
-                }
+              ? (() => {
+                  const shouldShowLocation =
+                    order.orderStatus === OrderStatus.OUT_FOR_DELIVERY &&
+                    activeAssignment.status === 'ACCEPTED';
+                  return {
+                    id: activeAssignment.deliveryPartner.id,
+                    phoneNumber: activeAssignment.deliveryPartner.phoneNumber,
+                    vehicleType: activeAssignment.deliveryPartner.vehicleType,
+                    vehicleNumber: activeAssignment.deliveryPartner.vehicleNumber,
+                    currentLatitude: (shouldShowLocation && activeAssignment.deliveryPartner.currentLatitude)
+                      ? parseFloat(activeAssignment.deliveryPartner.currentLatitude.toString())
+                      : null,
+                    currentLongitude: (shouldShowLocation && activeAssignment.deliveryPartner.currentLongitude)
+                      ? parseFloat(activeAssignment.deliveryPartner.currentLongitude.toString())
+                      : null,
+                    locationUpdatedAt: shouldShowLocation
+                      ? activeAssignment.deliveryPartner.locationUpdatedAt || null
+                      : null,
+                    user: activeAssignment.deliveryPartner.user
+                      ? { name: activeAssignment.deliveryPartner.user.name }
+                      : null,
+                  };
+                })()
               : null,
           }
         : null,

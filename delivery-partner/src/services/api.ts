@@ -339,4 +339,37 @@ export const api = {
 
     return await res.json();
   },
+
+  updateActiveDeliveryLocation: async (dto: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    heading?: number;
+    speed?: number;
+    capturedAt?: string;
+  }) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error('No token found');
+
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/active-delivery/location`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(dto),
+    });
+
+    if (res.status === 401) {
+      await setAuthToken(null);
+      throw new Error('Unauthorized');
+    }
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to update active delivery location');
+    }
+
+    return await res.json();
+  },
 };
