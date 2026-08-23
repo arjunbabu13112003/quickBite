@@ -581,7 +581,7 @@ export const api = {
 
   getAvailableDeliveryPartners: async () => {
     const res = await fetch(
-      `${API_BASE_URL}/delivery-partners?online=true&available=true&verified=true&active=true`,
+      `${API_BASE_URL}/delivery-partners?online=true&available=true&verified=true&active=true&status=APPROVED`,
       { headers: { ...getAuthHeaders() } }
     );
     return handleResponse(res);

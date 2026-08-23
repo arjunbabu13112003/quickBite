@@ -343,7 +343,7 @@ export class PaymentsService {
     // 5. Delivery Partner Earning Credit (if partner assignment exists)
     const assignmentRepository = manager.getRepository('DeliveryAssignment');
     const assignment = await assignmentRepository.findOne({
-      where: { orderId: order.id, isActive: true },
+      where: { orderId: order.id, deliveryPartnerId: order.deliveryPartnerId },
       relations: ['deliveryPartner'],
     }) as any;
 

@@ -128,7 +128,7 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
         padding: '1.25rem',
         borderTop: '1px solid var(--border-color)',
         display: 'flex', flexDirection: 'column', gap: '1rem',
-        background: 'var(--bg-main)',
+        background: 'var(--bg-sidebar)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           {currentUser?.profileImage ? (
@@ -181,7 +181,7 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
           onMouseLeave={(e) => {
             e.currentTarget.style.borderColor = 'var(--border-color)';
             e.currentTarget.style.color = 'var(--text-muted)';
-            e.currentTarget.style.backgroundColor = '#ffffff';
+            e.currentTarget.style.backgroundColor = 'var(--bg-card)';
           }}
         >
           <LogOut size={16} />

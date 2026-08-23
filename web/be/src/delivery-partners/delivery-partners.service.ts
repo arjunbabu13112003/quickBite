@@ -8,7 +8,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, ILike, Like } from 'typeorm';
+import { Repository, DataSource, ILike, Like, IsNull, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { unlinkSync, existsSync } from 'fs';
 import { DeliveryPartner, DeliveryPartnerAccountStatus } from './delivery-partner.entity';
@@ -20,6 +20,7 @@ import { Order } from '../orders/order.entity';
 import { UserRole } from '../users/user-role.enum';
 import { OrderStatus } from '../orders/enums/order-status.enum';
 import { PaymentsService } from '../payments/payments.service';
+import { OrderFinancialAllocation } from '../payments/entities/order-financial-allocation.entity';
 import { CreateDeliveryPartnerDto } from './dto/create-delivery-partner.dto';
 import { AdminCreateDeliveryPartnerDto } from './dto/admin-create-delivery-partner.dto';
 import { UpdateDeliveryPartnerStatusDto } from './dto/update-delivery-partner-status.dto';
@@ -456,6 +457,56 @@ export class DeliveryPartnersService implements OnModuleInit {
     };
   }
 
+  async getDashboardStats(userId: number): Promise<any> {
+    const partner = await this.partnerRepository.findOne({
+      where: { userId },
+    });
+    if (!partner) {
+      throw new NotFoundException('Delivery partner profile not found.');
+    }
+
+    // Calculate start of current day in IST (UTC+5:30) and convert to UTC for database comparison
+    const now = new Date();
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const istTime = new Date(utcTime + (3600000 * 5.5));
+    istTime.setHours(0, 0, 0, 0);
+    const todayStart = new Date(istTime.getTime() - (3600000 * 5.5));
+
+    // Calculate today's completed deliveries
+    const completedAssignments = await this.assignmentRepository.createQueryBuilder('assignment')
+      .innerJoinAndSelect('assignment.order', 'order')
+      .where('assignment.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('assignment.isActive = :isActive', { isActive: false })
+      .andWhere('assignment.status = :status', { status: DeliveryAssignmentStatus.ACCEPTED })
+      .andWhere('order.orderStatus = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
+      .andWhere('assignment.unassignedAt >= :todayStart', { todayStart })
+      .getMany();
+
+    const todayDeliveries = completedAssignments.length;
+
+    // Calculate today's earnings using correct lowercased ledger entryType and direction values
+    const ledgerRepo = this.dataSource.getRepository('LedgerEntry');
+    const ledgerEntries = await ledgerRepo.createQueryBuilder('le')
+      .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
+      .andWhere('le.direction = :direction', { direction: 'credit' })
+      .andWhere('le.createdAt >= :todayStart', { todayStart })
+      .getMany();
+
+    const todayEarnings = ledgerEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+
+    // Online time: since online session tracking is not implemented, we return 0
+    const onlineMinutes = 0;
+
+    const stats = {
+      todayEarnings,
+      todayDeliveries,
+      onlineMinutes,
+    };
+    console.log('[Dashboard Stats Dev Log]:', stats);
+    return stats;
+  }
+
   async updateStatus(
     userId: number,
     dto: UpdateDeliveryPartnerStatusDto,
@@ -551,9 +602,14 @@ export class DeliveryPartnersService implements OnModuleInit {
       throw new BadRequestException('Delivery partner is inactive or not found');
     }
 
-    if (!partner.isVerified || !partner.isOnline || !partner.isAvailable) {
+    if (
+      !partner.isVerified ||
+      !partner.isOnline ||
+      !partner.isAvailable ||
+      partner.accountStatus !== DeliveryPartnerAccountStatus.APPROVED
+    ) {
       throw new BadRequestException(
-        'Delivery partner is not verified, online or available',
+        'Delivery partner is not eligible for assignment (must be approved, verified, active, online, and available)',
       );
     }
 
@@ -576,13 +632,62 @@ export class DeliveryPartnersService implements OnModuleInit {
     }
 
     return await this.dataSource.transaction(async (manager) => {
-      partner.isAvailable = false;
-      await manager.save(DeliveryPartner, partner);
+      // Re-verify and lock inside transaction to protect concurrency
+      const lockedPartner = await manager.findOne(DeliveryPartner, {
+        where: { id: partnerId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        !lockedPartner ||
+        lockedPartner.accountStatus !== DeliveryPartnerAccountStatus.APPROVED ||
+        !lockedPartner.isVerified ||
+        !lockedPartner.isActive ||
+        !lockedPartner.isOnline ||
+        !lockedPartner.isAvailable
+      ) {
+        throw new BadRequestException(
+          'Delivery partner is not eligible or available for assignment.',
+        );
+      }
+
+      const lockedOrder = await manager.findOne(Order, {
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedOrder) {
+        throw new NotFoundException(`Order with ID ${orderId} not found`);
+      }
+      if (lockedOrder.deliveryPartnerId) {
+        throw new ConflictException('Order already has an assigned rider.');
+      }
+
+      // Check active assignment for this order
+      const existingAssignment = await manager.findOne(DeliveryAssignment, {
+        where: { orderId, isActive: true },
+      });
+      if (existingAssignment) {
+        throw new ConflictException('Order already has an active assignment');
+      }
+
+      // Check active assignment for this partner
+      const existingPartnerAssignment = await manager.findOne(DeliveryAssignment, {
+        where: { deliveryPartnerId: partnerId, isActive: true },
+      });
+      if (existingPartnerAssignment) {
+        throw new ConflictException('Delivery partner already has an active assignment');
+      }
+
+      const offeredAt = new Date();
+      const expiresAt = new Date(offeredAt.getTime() + 23 * 1000); // 23 seconds
 
       const assignment = manager.create(DeliveryAssignment, {
         orderId,
         deliveryPartnerId: partnerId,
         isActive: true,
+        status: DeliveryAssignmentStatus.OFFERED,
+        offeredAt,
+        expiresAt,
+        assignedAt: offeredAt,
       });
 
       return await manager.save(DeliveryAssignment, assignment);
@@ -855,16 +960,18 @@ export class DeliveryPartnersService implements OnModuleInit {
     }
 
     if (nextStatus === 'delivered') {
+      if (order.paymentMethod?.toLowerCase() === 'cod') {
+        if (!order.cashCollectedAt) {
+          throw new ConflictException('Confirm cash collection before completing this delivery.');
+        }
+      }
+
       // Step 1: Commit the delivery state change atomically.
       // The finalization hook is called AFTER this transaction commits so that
       // checkAndFinalizeOrderAllocation sees the fresh orderStatus=delivered row.
-      const result = await this.dataSource.transaction(async (manager) => {
+      await this.dataSource.transaction(async (manager) => {
         order.orderStatus = OrderStatus.DELIVERED;
         order.deliveredAt = now;
-
-        // NOTE: COD cash collection is a separate explicit action.
-        // Delivery completion alone does NOT mark paymentStatus=paid for COD.
-        // The partner must call POST /orders/:orderId/cod/collect separately.
 
         assignment.isActive = false;
         assignment.unassignedAt = now;
@@ -889,30 +996,42 @@ export class DeliveryPartnersService implements OnModuleInit {
         if (freshPartner) {
           await manager.save(DeliveryPartner, freshPartner);
         }
-
-        return {
-          message: 'Order status updated to delivered successfully',
-          orderId: order.id,
-          orderStatus: order.orderStatus,
-          paymentStatus: order.paymentStatus,
-        };
       });
 
       // Step 2: After the delivery transaction commits, trigger the financial
       // finalization check. This opens its own transaction inside PaymentsService.
-      //
-      // Finalization will proceed only if BOTH conditions are true:
-      //   orderStatus === 'delivered'  (just set above)
-      //   paymentStatus === 'paid'     (set by COD collection or online capture)
-      //
-      // Safe to call here because:
-      //   - The delivery row is fully committed before this point
-      //   - PaymentsService.checkAndFinalizeOrderAllocation is idempotent
-      //   - For unpaid COD orders paymentStatus is still 'pending' → no-op
-      //   - For pre-paid orders (online or COD already collected) → finalizes once
       await this.paymentsService.checkAndFinalizeOrderAllocation(order.id);
 
-      return result;
+      // Step 3: Fetch the allocation to retrieve the actual delivery partner earning
+      const allocation = await this.dataSource.getRepository(OrderFinancialAllocation).findOne({
+        where: { orderId: order.id },
+      });
+      const partnerEarning = allocation ? parseFloat(allocation.deliveryPartnerEarning.toString()) : 0;
+
+      // Fetch fresh partner state
+      const freshPartner = await this.partnerRepository.findOne({
+        where: { id: partner.id },
+      });
+
+      return {
+        success: true,
+        message: 'Order status updated to delivered successfully',
+        order: {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          orderStatus: order.orderStatus,
+          paymentStatus: order.paymentStatus,
+          paymentMethod: order.paymentMethod,
+          totalAmount: parseFloat(order.totalAmount.toString()),
+        },
+        assignmentClosed: true,
+        rider: {
+          isOnline: freshPartner ? freshPartner.isOnline : false,
+          isAvailable: freshPartner ? freshPartner.isAvailable : false,
+        },
+        partnerEarning,
+        earning: partnerEarning,
+      };
     }
   }
 
@@ -930,11 +1049,22 @@ export class DeliveryPartnersService implements OnModuleInit {
       order: { unassignedAt: 'DESC' },
     });
 
+    const orderIds = assignments.map((a) => a.orderId).filter(Boolean);
+    const allocations = orderIds.length > 0
+      ? await this.dataSource.getRepository(OrderFinancialAllocation).find({
+          where: { orderId: In(orderIds) },
+        })
+      : [];
+    const allocationMap = new Map(
+      allocations.map((al) => [al.orderId, parseFloat(al.deliveryPartnerEarning.toString())]),
+    );
+
     const history = assignments
       .filter((a) => a.order && a.order.orderStatus === OrderStatus.DELIVERED)
       .map((a) => {
         const order = a.order;
         const hotel = order.hotel;
+        const partnerEarning = allocationMap.get(order.id) || 0;
         return {
           orderId: order.id,
           orderNumber: order.orderNumber,
@@ -969,6 +1099,8 @@ export class DeliveryPartnersService implements OnModuleInit {
           paymentStatus: order.paymentStatus,
           assignedAt: a.assignedAt,
           deliveredAt: order.deliveredAt,
+          partnerEarning: partnerEarning,
+          earning: partnerEarning,
         };
       });
 
@@ -976,6 +1108,155 @@ export class DeliveryPartnersService implements OnModuleInit {
       (a, b) => b.deliveredAt.getTime() - a.deliveredAt.getTime(),
     );
   }
+
+  async getAvailableOrders(userId: number): Promise<any[]> {
+    const partner = await this.partnerRepository.findOne({
+      where: { userId },
+    });
+    if (
+      !partner ||
+      partner.accountStatus !== DeliveryPartnerAccountStatus.APPROVED ||
+      !partner.isVerified ||
+      !partner.isActive ||
+      !partner.isOnline ||
+      !partner.isAvailable
+    ) {
+      return [];
+    }
+
+    const orderRepo = this.dataSource.getRepository(Order);
+    const orders = await orderRepo.find({
+      where: { orderStatus: OrderStatus.READY_FOR_PICKUP, deliveryPartnerId: IsNull() },
+      relations: ['hotel', 'items'],
+    });
+
+    const activeAssignments = await this.dataSource.getRepository(DeliveryAssignment).find({
+      where: { isActive: true },
+    });
+
+    const now = new Date();
+    const excludedOrderIds = activeAssignments
+      .filter((a) => a.status === 'ACCEPTED' || (a.status === 'OFFERED' && new Date(a.expiresAt) > now))
+      .map((a) => a.orderId);
+
+    const declinedAssignments = await this.dataSource.getRepository(DeliveryAssignment).find({
+      where: { deliveryPartnerId: partner.id, status: DeliveryAssignmentStatus.DECLINED },
+    });
+    const declinedOrderIds = declinedAssignments.map((a) => a.orderId);
+
+    const availableOrders = orders.filter((order) => {
+      if (excludedOrderIds.includes(order.id)) return false;
+      if (declinedOrderIds.includes(order.id)) return false;
+
+      const hotelArea = order.hotel?.area?.trim().toLowerCase();
+      const deliveryArea = order.deliveryArea?.trim().toLowerCase();
+      const pref = partner.preferredZone?.trim().toLowerCase();
+      const sec = partner.secondaryZone?.trim().toLowerCase();
+
+      const zoneMatch =
+        (pref && (pref === hotelArea || pref === deliveryArea)) ||
+        (sec && (sec === hotelArea || sec === deliveryArea));
+      return !!zoneMatch;
+    });
+
+    return availableOrders.map((order) => ({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      restaurantName: order.hotel?.name || 'QuickBite Kitchen',
+      pickupAddress: order.hotel?.address || 'Restaurant Address',
+      deliveryAddress: order.deliveryAddressLine1 || 'Drop Address',
+      paymentMethod: order.paymentMethod === 'cod' ? 'COD' : 'Prepaid',
+      amount: parseFloat(order.totalAmount.toString()),
+      itemCount: order.items?.length || 0,
+    }));
+  }
+
+  async claimAvailableOrder(userId: number, orderId: number): Promise<any> {
+    return await this.dataSource.transaction(async (manager) => {
+      const partner = await manager.findOne(DeliveryPartner, {
+        where: { userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!partner) {
+        throw new NotFoundException('Delivery partner profile not found.');
+      }
+
+      if (
+        partner.accountStatus !== DeliveryPartnerAccountStatus.APPROVED ||
+        !partner.isVerified ||
+        !partner.isActive ||
+        !partner.isOnline ||
+        !partner.isAvailable
+      ) {
+        throw new BadRequestException('You are not eligible to claim this order.');
+      }
+
+      const activePartnerAssignment = await manager.findOne(DeliveryAssignment, {
+        where: { deliveryPartnerId: partner.id, isActive: true },
+      });
+      if (activePartnerAssignment) {
+        throw new ConflictException('You already have an active delivery assignment.');
+      }
+
+      const order = await manager.findOne(Order, {
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!order) {
+        throw new NotFoundException('Order not found.');
+      }
+
+      if (order.deliveryPartnerId) {
+        throw new ConflictException('Order has already been assigned to another rider.');
+      }
+
+      if (order.orderStatus !== OrderStatus.READY_FOR_PICKUP) {
+        throw new BadRequestException('Order is no longer ready for pickup.');
+      }
+
+      const acceptedAssignment = await manager.findOne(DeliveryAssignment, {
+        where: { orderId: order.id, status: DeliveryAssignmentStatus.ACCEPTED, isActive: true },
+      });
+      if (acceptedAssignment) {
+        throw new ConflictException('Order has already been accepted by another rider.');
+      }
+
+      // Deactivate any old OFFERED active assignments for this order
+      const pendingOffers = await manager.find(DeliveryAssignment, {
+        where: { orderId: order.id, status: DeliveryAssignmentStatus.OFFERED, isActive: true },
+      });
+      for (const offer of pendingOffers) {
+        offer.isActive = false;
+        offer.status = DeliveryAssignmentStatus.CANCELLED;
+        offer.unassignedAt = new Date();
+        await manager.save(DeliveryAssignment, offer);
+      }
+
+      const now = new Date();
+      const newAssignment = manager.create(DeliveryAssignment, {
+        orderId: order.id,
+        deliveryPartnerId: partner.id,
+        status: DeliveryAssignmentStatus.ACCEPTED,
+        isActive: true,
+        assignedAt: now,
+        acceptedAt: now,
+      });
+      await manager.save(DeliveryAssignment, newAssignment);
+
+      order.deliveryPartnerId = partner.id;
+      order.orderStatus = OrderStatus.ACCEPTED;
+      await manager.save(Order, order);
+
+      partner.isAvailable = false;
+      await manager.save(DeliveryPartner, partner);
+
+      return {
+        success: true,
+        assignment: newAssignment,
+      };
+    });
+  }
+
   async getPartnerDetailsForAdmin(id: number): Promise<any> {
     const partner = await this.partnerRepository.findOne({
       where: { id },
@@ -1503,6 +1784,8 @@ export class DeliveryPartnersService implements OnModuleInit {
           paymentMethod: order.paymentMethod,
           amount: Number(order.totalAmount),
           itemCount,
+          cashCollectedAt: order.cashCollectedAt,
+          paymentStatus: order.paymentStatus,
         }
       }
     };
@@ -1681,6 +1964,8 @@ export class DeliveryPartnersService implements OnModuleInit {
           paymentMethod: order.paymentMethod,
           amount: Number(order.totalAmount),
           itemCount,
+          cashCollectedAt: order.cashCollectedAt,
+          paymentStatus: order.paymentStatus,
         }
       }
     };

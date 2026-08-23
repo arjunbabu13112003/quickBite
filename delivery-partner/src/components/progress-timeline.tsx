@@ -4,9 +4,17 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 interface ProgressTimelineProps {
   currentStep: 'reach-restaurant' | 'pickup' | 'start-delivery';
+  restaurantName?: string;
+  itemCount?: number;
+  deliveryAddress?: string;
 }
 
-export default function ProgressTimeline({ currentStep }: ProgressTimelineProps) {
+export default function ProgressTimeline({ 
+  currentStep, 
+  restaurantName, 
+  itemCount, 
+  deliveryAddress 
+}: ProgressTimelineProps) {
   const steps = [
     {
       id: 'accepted',
@@ -18,21 +26,21 @@ export default function ProgressTimeline({ currentStep }: ProgressTimelineProps)
     {
       id: 'reach-restaurant',
       title: 'Reach Restaurant',
-      subtitle: 'Khao Gully, MG Road • 1.2km',
+      subtitle: restaurantName || 'Khao Gully',
       icon: 'storefront',
       iconType: 'ionicons' as const,
     },
     {
       id: 'pickup',
       title: 'Pickup Items',
-      subtitle: '2 Items',
+      subtitle: itemCount !== undefined ? `${itemCount} Items` : 'Items',
       icon: 'bag-handle',
       iconType: 'ionicons' as const,
     },
     {
       id: 'start-delivery',
       title: 'Out for Delivery',
-      subtitle: 'Apt 4B, Panampilly Nagar',
+      subtitle: deliveryAddress || 'Delivery Address',
       icon: 'bicycle',
       iconType: 'ionicons' as const,
     },

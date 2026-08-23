@@ -25,13 +25,13 @@ export default function SuperAdminLayout({ currentUser, currentTab, onNavigate, 
         flexDirection: 'column',
         minWidth: 0,
         height: '100vh',
-        overflowY: 'auto',
+        overflow: 'hidden',
       }}>
         {/* Header bar */}
         <SuperAdminHeader currentUser={currentUser} theme={theme} setTheme={setTheme} />
 
         {/* Content body */}
-        <main className="main-content">
+        <main className="main-content" style={{ flex: 1, overflowY: 'auto' }}>
           {children}
         </main>
       </div>

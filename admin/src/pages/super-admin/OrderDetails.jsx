@@ -98,6 +98,48 @@ export default function OrderDetails({ id, onNavigate }) {
     fetchOrderDetails();
   }, [id]);
 
+  // Polling available partners when assign modal is open
+  useEffect(() => {
+    let intervalId = null;
+    if (showAssignModal) {
+      fetchAvailablePartners();
+      intervalId = setInterval(async () => {
+        try {
+          const partners = await api.getAvailableDeliveryPartners();
+          const list = partners || [];
+          setAvailablePartners(list);
+          setSelectedPartnerId(prevId => {
+            if (prevId && !list.some(p => p.id === prevId)) {
+              return null;
+            }
+            return prevId;
+          });
+        } catch (err) {
+          console.error('[Polling] Available partners failed:', err);
+        }
+      }, 5000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [showAssignModal]);
+
+  // Polling order details when order is active
+  useEffect(() => {
+    let intervalId = null;
+    const orderStatus = data?.order?.orderStatus;
+    const isActive = orderStatus && orderStatus !== 'delivered' && orderStatus !== 'cancelled' && orderStatus !== 'rejected';
+    
+    if (isActive) {
+      intervalId = setInterval(() => {
+        fetchOrderDetails();
+      }, 4000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [data?.order?.orderStatus]);
+
   const handleAssignPartnerClick = () => {
     setShowAssignModal(true);
     fetchAvailablePartners();
@@ -326,8 +368,8 @@ export default function OrderDetails({ id, onNavigate }) {
       );
     }
 
-    // CASE B: Partner Assigned
-    if (activeAssignment && activeAssignment.deliveryPartner) {
+    // CASE B: Partner Assigned (Active)
+    if (activeAssignment && activeAssignment.deliveryPartner && activeAssignment.isActive) {
       const partner = activeAssignment.deliveryPartner;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -364,13 +406,13 @@ export default function OrderDetails({ id, onNavigate }) {
               <span style={{ fontWeight: '800', color: 'var(--text-main)' }}>{partner.phoneNumber}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Assigned At</span>
+              <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>{activeAssignment.status === 'OFFERED' ? 'Offered At' : 'Assigned At'}</span>
               <span style={{ fontWeight: '800', color: 'var(--text-main)' }}>{formatTime(activeAssignment.assignedAt)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Delivery Status</span>
               <span style={{ fontWeight: '850', color: 'var(--primary)', textTransform: 'uppercase' }}>
-                {getOrderStatusLabel(status)}
+                {status === 'delivered' ? 'DELIVERED' : (activeAssignment.status === 'OFFERED' ? 'AWAITING ACCEPTANCE' : getOrderStatusLabel(status))}
               </span>
             </div>
           </div>
@@ -391,6 +433,46 @@ export default function OrderDetails({ id, onNavigate }) {
           >
             <span>View Partner Profile</span>
             <ArrowRight size={13} />
+          </button>
+        </div>
+      );
+    }
+
+    // CASE B.2: Partner Assignment Inactive (Declined, Expired, Cancelled)
+    if (activeAssignment && activeAssignment.deliveryPartner && !activeAssignment.isActive) {
+      const partner = activeAssignment.deliveryPartner;
+      let statusLabel = 'Assignment Closed';
+      if (activeAssignment.status === 'DECLINED') statusLabel = 'Rider Declined';
+      else if (activeAssignment.status === 'EXPIRED') statusLabel = 'No Response / Offer Expired';
+      else if (activeAssignment.status === 'CANCELLED') statusLabel = 'Request Cancelled';
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '0.5rem 0' }}>
+          <div>
+            <h4 style={{ fontSize: '0.95rem', fontWeight: '900', color: 'var(--text-main)', margin: '0 0 0.25rem' }}>{statusLabel}</h4>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
+              Offered rider: {partner.user?.name || 'Unknown'} ({partner.phoneNumber || 'No phone'})
+            </p>
+          </div>
+          
+          <button
+            type="button"
+            onClick={handleAssignPartnerClick}
+            className="btn-primary"
+            style={{
+              padding: '0.65rem 1.25rem',
+              fontSize: '0.82rem',
+              fontWeight: '855',
+              borderRadius: 'var(--radius-md)',
+              justifyContent: 'center',
+              background: 'var(--primary)',
+              color: '#ffffff',
+              gap: '0.35rem',
+              marginTop: '0.25rem'
+            }}
+          >
+            <Bike size={15} />
+            <span>Assign Delivery Partner</span>
           </button>
         </div>
       );
@@ -1267,7 +1349,7 @@ export default function OrderDetails({ id, onNavigate }) {
               {activeAssignment && activeAssignment.deliveryPartner ? (
                 <div style={{ border: '1px solid #e5e7eb', padding: '1rem 1.25rem', borderRadius: '6px', fontSize: '0.8rem' }}>
                   <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.82rem', fontWeight: '850', color: '#111827', textTransform: 'uppercase' }}>
-                    Assigned Courier
+                    {order.orderStatus === 'delivered' ? 'Delivered By' : (activeAssignment.status === 'OFFERED' ? 'Offered Courier (Pending Accept)' : 'Assigned Courier')}
                   </h4>
                   <p style={{ margin: 0, fontWeight: 'bold', color: '#374151' }}>
                     {activeAssignment.deliveryPartner.user?.name}

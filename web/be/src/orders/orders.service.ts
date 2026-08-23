@@ -945,8 +945,9 @@ export class OrdersService {
 
     const orderIds = orders.map((o) => o.id);
     const assignments = await this.dataSource.getRepository('DeliveryAssignment').find({
-      where: { orderId: In(orderIds), isActive: true },
+      where: { orderId: In(orderIds) },
       relations: ['deliveryPartner', 'deliveryPartner.user'],
+      order: { id: 'DESC' },
     });
 
     return orders.map((order) => {
@@ -958,6 +959,7 @@ export class OrdersService {
               id: activeAssignment.id,
               assignedAt: activeAssignment.assignedAt,
               isActive: activeAssignment.isActive,
+              status: activeAssignment.status,
               deliveryPartner: activeAssignment.deliveryPartner
                 ? {
                     id: activeAssignment.deliveryPartner.id,
@@ -996,8 +998,9 @@ export class OrdersService {
     }
 
     const activeAssignment = await this.dataSource.getRepository('DeliveryAssignment').findOne({
-      where: { orderId: id, isActive: true },
+      where: { orderId: id },
       relations: ['deliveryPartner', 'deliveryPartner.user'],
+      order: { id: 'DESC' },
     });
 
     return {
@@ -1007,6 +1010,7 @@ export class OrdersService {
             id: activeAssignment.id,
             assignedAt: activeAssignment.assignedAt,
             isActive: activeAssignment.isActive,
+            status: activeAssignment.status,
             deliveryPartner: activeAssignment.deliveryPartner
               ? {
                   id: activeAssignment.deliveryPartner.id,

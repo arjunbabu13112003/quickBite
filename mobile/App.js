@@ -111,7 +111,7 @@ const getExpoHostIp = () => {
   } catch (e) {
     console.warn('Expo hostUri detection:', e);
   }
-  return '192.168.220.64';
+  return '192.168.1.8';
 };
 
 const { width, height } = Dimensions.get('window');
@@ -288,7 +288,7 @@ const getBasePrice = (item, spiceLevel) => {
 };
 
 const resolveProductImage = (imgStr, activeBackend) => {
-  const host = activeBackend || 'http://192.168.220.64:5000';
+  const host = activeBackend || 'http://192.168.1.8:5000';
   if (!imgStr) return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
   
   let resolved = imgStr;
@@ -377,9 +377,7 @@ const FloatingCartBar = ({
         style={styles.swiggyGreenCartContent}
         activeOpacity={0.9}
         onPress={() => {
-          if (bottomControlsVisibleRef && bottomControlsVisibleRef.current) {
-            setIsCartOpen(true);
-          }
+          setIsCartOpen(true);
         }}
       >
         <Text style={styles.swiggyGreenCartLeftText}>
@@ -439,7 +437,7 @@ export default function App() {
   };
 
   // Backend API & Authentication State
-  const API_BASE_URL = 'http://192.168.220.64:5000'; // NestJS + PostgreSQL Backend
+  const API_BASE_URL = 'http://192.168.1.8:5000'; // NestJS + PostgreSQL Backend
   const [currentUser, setCurrentUser] = useState(null);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
@@ -1612,8 +1610,8 @@ export default function App() {
     // Clear old details immediately when selected order changes/opens
     setActiveOrderDetail(null);
     
-    if (selectedOrderForDetail && selectedOrderForDetail.orderId) {
-      const orderId = selectedOrderForDetail.orderId;
+    if (selectedOrderForDetail && (selectedOrderForDetail.id || selectedOrderForDetail.orderId)) {
+      const orderId = selectedOrderForDetail.id || selectedOrderForDetail.orderId;
       
       const fetchStatus = async () => {
         try {
@@ -2088,7 +2086,7 @@ export default function App() {
     const detectedIp = getExpoHostIp();
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.220.64:5000',
+      'http://192.168.1.8:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];
@@ -2482,7 +2480,7 @@ export default function App() {
 
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.220.64:5000',
+      'http://192.168.1.8:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];

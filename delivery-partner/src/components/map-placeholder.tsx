@@ -5,11 +5,13 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 interface MapPlaceholderProps {
   eta: string;
   etaPosition?: 'top-left' | 'bottom-right';
+  destinationName?: string;
 }
 
 export default function MapPlaceholder({
   eta = '8 mins',
-  etaPosition = 'top-left'
+  etaPosition = 'top-left',
+  destinationName
 }: MapPlaceholderProps) {
   return (
     <View style={styles.container}>
@@ -49,7 +51,7 @@ export default function MapPlaceholder({
         <View style={styles.destPin}>
           <Ionicons name="location" size={16} color="#FF7A00" />
         </View>
-        <Text style={styles.destLabel}>Khao Gully</Text>
+        <Text style={styles.destLabel}>{destinationName || 'Restaurant'}</Text>
       </View>
 
       {/* 5. Floating Estimated Time Badge */}

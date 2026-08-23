@@ -49,6 +49,15 @@ export default function OrdersList({ onNavigate }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
+  const silentFetchOrders = async () => {
+    try {
+      const data = await api.getAllPlatformOrders();
+      setOrders(data || []);
+    } catch (err) {
+      console.error('Silent fetch orders failed:', err);
+    }
+  };
+
   const fetchOrders = async () => {
     setLoading(true);
     setError(null);
@@ -66,6 +75,47 @@ export default function OrdersList({ onNavigate }) {
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  // Polling available partners when assign drawer is open
+  useEffect(() => {
+    let intervalId = null;
+    if (showAssignDrawer) {
+      fetchAvailablePartners();
+      intervalId = setInterval(async () => {
+        try {
+          const partners = await api.getAvailableDeliveryPartners();
+          const list = partners || [];
+          setAvailablePartners(list);
+          setSelectedPartnerId(prevId => {
+            if (prevId && !list.some(p => p.id === prevId)) {
+              return null;
+            }
+            return prevId;
+          });
+        } catch (err) {
+          console.error('[Polling] Available partners failed:', err);
+        }
+      }, 5000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [showAssignDrawer]);
+
+  // Polling order list silently when there is any active order
+  useEffect(() => {
+    let intervalId = null;
+    const hasAnyActive = orders.some(o => o.orderStatus !== 'delivered' && o.orderStatus !== 'cancelled' && o.orderStatus !== 'rejected');
+    
+    if (hasAnyActive) {
+      intervalId = setInterval(() => {
+        silentFetchOrders();
+      }, 4000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [orders]);
 
   // Reset to page 1 when filter changes
   useEffect(() => {
@@ -775,7 +825,7 @@ export default function OrdersList({ onNavigate }) {
               {paginatedOrders.length > 0 ? (
                 paginatedOrders.map((order) => {
                   const isReadyForPickup = order.orderStatus === 'ready_for_pickup';
-                  const hasActiveAssignment = !!order.activeAssignment;
+                  const hasActiveAssignment = !!(order.activeAssignment && order.activeAssignment.isActive);
                   const partnerName = order.activeAssignment?.deliveryPartner?.user?.name || 'Partner';
                   
                   return (
@@ -877,10 +927,10 @@ export default function OrdersList({ onNavigate }) {
                           ) : isReadyForPickup && hasActiveAssignment ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.15rem' }}>
                               <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
-                                Assigned to {partnerName}
+                                {order.activeAssignment.status === 'OFFERED' ? `Offered to ${partnerName}` : `Assigned to ${partnerName}`}
                               </span>
                               <span style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: '800', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
-                                Waiting for pickup
+                                {order.activeAssignment.status === 'OFFERED' ? 'Awaiting Acceptance' : 'Waiting for pickup'}
                               </span>
                               <button
                                 type="button"
@@ -1331,6 +1381,12 @@ export default function OrdersList({ onNavigate }) {
                       <label
                         key={partner.id}
                         onClick={() => setSelectedPartnerId(partner.id)}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--bg-main)';
+                        }}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -1338,7 +1394,7 @@ export default function OrdersList({ onNavigate }) {
                           padding: '0.85rem 1rem',
                           borderRadius: 'var(--radius-lg)',
                           border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-                          background: isSelected ? 'var(--bg-warning-subtle)' : '#ffffff',
+                          background: isSelected ? 'var(--bg-warning-subtle)' : 'var(--bg-main)',
                           cursor: 'pointer',
                           transition: 'all var(--transition-fast)',
                           userSelect: 'none',
@@ -1352,8 +1408,8 @@ export default function OrdersList({ onNavigate }) {
                             width: '40px',
                             height: '40px',
                             borderRadius: '50%',
-                            background: '#ffedd5',
-                            color: 'var(--text-warning)',
+                            background: 'var(--primary-light)',
+                            color: 'var(--primary)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',

@@ -4,9 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 
 // 1. Home Stats Card (3-column layout)
 export function HomeStatsCard({
-  earnings = 850,
-  deliveries = 7,
-  onlineTime = '4h 30m'
+  earnings = 0,
+  deliveries = 0,
+  onlineTime = '—'
 }: {
   earnings?: number;
   deliveries?: number;
@@ -35,7 +35,7 @@ export function HomeStatsCard({
 // 2. Large Orange Earnings Card
 export function LargeEarningsCard({
   title = "Today's Earnings",
-  amount = 850
+  amount = 0
 }: {
   title?: string;
   amount?: number;
@@ -66,9 +66,9 @@ export function PeriodStatsCard({
 
 // 4. Earnings Breakdown Card
 export function EarningsBreakdown({
-  orderEarnings = 720,
-  incentives = 100,
-  tips = 30
+  orderEarnings = 0,
+  incentives = 0,
+  tips = 0
 }: {
   orderEarnings?: number;
   incentives?: number;

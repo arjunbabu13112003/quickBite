@@ -99,6 +99,15 @@ export class DeliveryPartnersController {
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('delivery-partners/me/dashboard')
+  getDashboardStats(@Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.getDashboardStats(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
   @Patch('delivery-partners/me/online-status')
   updateOnlineStatus(@Body() dto: UpdateOnlineStatusDto, @Request() req) {
     if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
@@ -181,6 +190,27 @@ export class DeliveryPartnersController {
       throw new ForbiddenException('Forbidden resource');
     }
     return this.partnersService.getDeliveryHistory(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('delivery-partners/me/available-orders')
+  getAvailableOrders(@Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.getAvailableOrders(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/orders/:orderId/claim')
+  claimAvailableOrder(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Request() req,
+  ) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.claimAvailableOrder(req.user.userId, orderId);
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)

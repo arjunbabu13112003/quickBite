@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -13,7 +13,8 @@ import {
   TextInput,
   ActivityIndicator,
   AppState,
-  AppStateStatus
+  AppStateStatus,
+  BackHandler
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -118,6 +119,19 @@ const initialMockCompletedOrders = [
 ];
 
 export default function AppIndex() {
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) {
+      return 'Good Morning';
+    } else if (hour >= 12 && hour < 17) {
+      return 'Good Afternoon';
+    } else if (hour >= 17 && hour < 21) {
+      return 'Good Evening';
+    } else {
+      return 'Good Night';
+    }
+  };
+
   const insets = useSafeAreaInsets();
   const bottomNavHeight = 60 + Math.max(0, insets.bottom - 10);
 
@@ -139,8 +153,20 @@ export default function AppIndex() {
   const [isMutatingOnline, setIsMutatingOnline] = useState(false);
   const [isCashCollected, setIsCashCollected] = useState(false);
   const [countdown, setCountdown] = useState(23);
-  const [ordersSubTab, setOrdersSubTab] = useState<'current' | 'completed'>('current');
-  const [completedOrders, setCompletedOrders] = useState<any[]>(initialMockCompletedOrders);
+  const [ordersSubTab, setOrdersSubTab] = useState<'available' | 'current' | 'completed'>('available');
+  const [viewingActiveOrder, setViewingActiveOrder] = useState(false);
+  const [justCompletedOrder, setJustCompletedOrder] = useState<any>(null);
+  const [availableOrders, setAvailableOrders] = useState<any[]>([]);
+  const [completedOrders, setCompletedOrders] = useState<any[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<{
+    todayEarnings: number;
+    todayDeliveries: number;
+    onlineMinutes: number;
+  }>({
+    todayEarnings: 0,
+    todayDeliveries: 0,
+    onlineMinutes: 0,
+  });
   const [completedFilter, setCompletedFilter] = useState<'today' | 'week' | 'month'>('today');
   const [showFilterPicker, setShowFilterPicker] = useState(false);
 
@@ -249,22 +275,71 @@ export default function AppIndex() {
     }
   };
 
-  const completeActiveOrder = () => {
-    const order = activeAssignment?.order || {};
-    const newCompletedOrder = {
-      orderId: `Order ${order.orderNumber || ''}`,
-      date: new Date().toLocaleString(),
-      filterGroup: ['today', 'week', 'month'],
-      status: 'Delivered',
-      restaurantName: order.restaurantName || 'QuickBite Kitchen',
-      dropArea: order.deliveryAddress || 'Drop Location',
-      distance: '2.5 km',
-      paymentMode: order.paymentMethod || 'Prepaid',
-      codAmount: order.paymentMethod === 'COD' ? order.amount : undefined,
-      earnings: 65
-    };
-    setCompletedOrders(prev => [newCompletedOrder, ...prev]);
-    changeDeliveryState('delivery-completed');
+  const completeActiveOrder = async () => {
+    if (!activeAssignment || !activeAssignment.order) return;
+    setIsAcceptingDeclining(true);
+    try {
+      const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'delivered');
+      
+      const order = activeAssignment.order;
+      const earningsAmount = result.partnerEarning !== undefined ? result.partnerEarning : 65;
+      
+      // Store justCompletedOrder details for rendering on success screen
+      setJustCompletedOrder({
+        orderNumber: order.orderNumber,
+        paymentMethod: order.paymentMethod,
+        amount: order.amount,
+        restaurantName: order.restaurantName,
+        partnerEarning: earningsAmount,
+      });
+
+      // Post-completion mobile cleanup in deterministic order:
+      // 1. stop active-delivery polling/timers (none running)
+      // 2. clear incoming assignment
+      setIncomingAssignment(null);
+      // 3. clear activeAssignment
+      setActiveAssignment(null);
+      // 4. reset delivery lifecycle step/state (will change to 'delivery-completed')
+      // 5. clear COD local confirmation state
+      setIsCashCollected(false);
+      // 6. clear loading/mutation flags (in finally)
+      // 7. refresh authenticated /me state
+      try {
+        const profile = await api.getMe();
+        setCurrentUser(profile.partner.user);
+        setCurrentPartner(profile.partner);
+        setAccountStatus(profile.partner.accountStatus);
+        setIsOnline(profile.partner.isOnline);
+        setIsAvailable(profile.partner.isAvailable);
+      } catch (meErr) {
+        console.error('Failed to refresh profile:', meErr);
+      }
+      // 8. refresh dashboard stats
+      await fetchDashboardStats();
+      // 9. refresh completed orders
+      await fetchCompletedOrders();
+      
+      // Update local state to show completed order with exact backend earnings
+      const newCompletedOrder = {
+        orderId: `Order ${order.orderNumber || ''}`,
+        date: new Date().toLocaleString(),
+        filterGroup: ['today', 'week', 'month'],
+        status: 'Delivered',
+        restaurantName: order.restaurantName || 'QuickBite Kitchen',
+        dropArea: order.deliveryAddress || 'Drop Location',
+        distance: '—',
+        paymentMode: order.paymentMethod?.toUpperCase() === 'COD' ? 'COD' : 'Prepaid',
+        codAmount: order.paymentMethod?.toUpperCase() === 'COD' ? order.amount : undefined,
+        earnings: earningsAmount
+      };
+      setCompletedOrders(prev => [newCompletedOrder, ...prev]);
+      
+      changeDeliveryState('delivery-completed');
+    } catch (err: any) {
+      alert(err.message || 'Failed to complete delivery');
+    } finally {
+      setIsAcceptingDeclining(false);
+    }
   };
 
   useEffect(() => {
@@ -287,6 +362,11 @@ export default function AppIndex() {
                 setActiveAssignment(deliveryData.assignment);
                 setDeliveryState('active-restaurant');
                 setIsAvailable(false);
+                if (deliveryData.assignment.order && deliveryData.assignment.order.cashCollectedAt) {
+                  setIsCashCollected(true);
+                } else {
+                  setIsCashCollected(false);
+                }
               }
             } catch (activeErr) {
               console.error('Failed to restore active delivery:', activeErr);
@@ -358,31 +438,137 @@ export default function AppIndex() {
     };
   }, [isAuthenticated, appState]);
 
+  const checkIncomingAssignment = useCallback(async () => {
+    try {
+      const data = await api.getIncomingAssignment();
+      if (data && data.assignment) {
+        setIncomingAssignment(data.assignment);
+        changeDeliveryState('incoming-request', data.assignment.expiresAt);
+      } else {
+        if (deliveryState === 'incoming-request') {
+          changeDeliveryState('none');
+          setIncomingAssignment(null);
+        }
+      }
+    } catch (err) {
+      console.error('[Polling] Fetch incoming assignment failed:', err);
+    }
+  }, [deliveryState]);
+
+  const fetchCompletedOrders = useCallback(async () => {
+    try {
+      const data = await api.getCompletedOrders();
+      const mapped = data.map((order: any) => {
+        const orderDate = new Date(order.deliveredAt || order.assignedAt);
+        const diffMs = Date.now() - orderDate.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        
+        const filterGroup = ['month'];
+        if (diffDays <= 1) filterGroup.push('today');
+        if (diffDays <= 7) filterGroup.push('week');
+        
+        return {
+          orderId: `Order #${order.orderNumber || order.orderId}`,
+          date: orderDate.toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          filterGroup,
+          status: 'Delivered',
+          restaurantName: order.hotel?.name || 'QuickBite Kitchen',
+          dropArea: order.deliveryAddress?.area || order.deliveryAddress?.addressLine1 || 'Drop Location',
+          distance: '—',
+          paymentMode: order.paymentMethod?.toUpperCase() === 'COD' ? 'COD' : 'Prepaid',
+          codAmount: order.paymentMethod?.toUpperCase() === 'COD' ? order.totalAmount : undefined,
+          earnings: order.partnerEarning !== undefined ? order.partnerEarning : (order.earning !== undefined ? order.earning : 0),
+        };
+      });
+      setCompletedOrders(mapped);
+    } catch (err) {
+      console.error('[Orders] Fetch completed orders failed:', err);
+    }
+  }, []);
+
+  const fetchAvailableOrders = useCallback(async () => {
+    try {
+      const data = await api.getAvailableOrders();
+      setAvailableOrders(data || []);
+    } catch (err) {
+      console.error('[Orders] Fetch available orders failed:', err);
+    }
+  }, []);
+
+  const handleClaimAvailableOrder = async (orderId: number) => {
+    setIsAcceptingDeclining(true);
+    try {
+      await api.claimAvailableOrder(orderId);
+      await fetchAvailableOrders();
+      const data = await api.getIncomingAssignment();
+      if (data && data.assignment) {
+        setActiveAssignment(data.assignment);
+        setIsAvailable(false);
+        setIsCashCollected(false);
+        changeDeliveryState('active-restaurant');
+        setViewingActiveOrder(true);
+      } else {
+        const activeData = await api.getActiveDelivery();
+        if (activeData && activeData.assignment) {
+          setActiveAssignment(activeData.assignment);
+          setIsAvailable(false);
+          setIsCashCollected(false);
+          changeDeliveryState('active-restaurant');
+          setViewingActiveOrder(true);
+        }
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to claim order. It might have been accepted by another rider.');
+      await fetchAvailableOrders();
+    } finally {
+      setIsAcceptingDeclining(false);
+    }
+  };
+
+  const handleCollectCod = async () => {
+    if (!activeAssignment || !activeAssignment.order) return;
+    setIsAcceptingDeclining(true);
+    try {
+      await api.collectCodCash(activeAssignment.order.id);
+      setIsCashCollected(true);
+    } catch (err: any) {
+      alert(err.message || 'Failed to record cash collection');
+    } finally {
+      setIsAcceptingDeclining(false);
+    }
+  };
+
+  const fetchDashboardStats = useCallback(async () => {
+    try {
+      const stats = await api.getDashboardStats();
+      setDashboardStats(stats);
+    } catch (err) {
+      console.error('[Dashboard] Fetch stats failed:', err);
+    }
+  }, []);
+
+  const handleManualRefresh = useCallback(async () => {
+    await checkIncomingAssignment();
+    if (isOnline) {
+      await fetchDashboardStats();
+    }
+  }, [checkIncomingAssignment, fetchDashboardStats, isOnline]);
+
   // Polling incoming assignments
   useEffect(() => {
     let intervalId: any = null;
     let isPolling = false;
 
-    const checkIncoming = async () => {
+    const poll = async () => {
       if (isPolling) return;
       isPolling = true;
-
-      try {
-        const data = await api.getIncomingAssignment();
-        if (data && data.assignment) {
-          setIncomingAssignment(data.assignment);
-          changeDeliveryState('incoming-request', data.assignment.expiresAt);
-        } else {
-          if (deliveryState === 'incoming-request') {
-            changeDeliveryState('none');
-            setIncomingAssignment(null);
-          }
-        }
-      } catch (err) {
-        console.error('[Polling] Fetch incoming assignment failed:', err);
-      } finally {
-        isPolling = false;
-      }
+      await checkIncomingAssignment();
+      isPolling = false;
     };
 
     const shouldPoll = 
@@ -390,12 +576,11 @@ export default function AppIndex() {
       accountStatus === 'APPROVED' && 
       isOnline && 
       isAvailable && 
-      deliveryState === 'none' && 
       appState === 'active';
 
     if (shouldPoll) {
-      checkIncoming();
-      intervalId = setInterval(checkIncoming, 4000);
+      poll();
+      intervalId = setInterval(poll, 4000);
     }
 
     return () => {
@@ -403,7 +588,76 @@ export default function AppIndex() {
         clearInterval(intervalId);
       }
     };
-  }, [isAuthenticated, accountStatus, isOnline, isAvailable, deliveryState, appState]);
+  }, [isAuthenticated, accountStatus, isOnline, isAvailable, appState, checkIncomingAssignment]);
+
+  // Poll Dashboard Stats when online
+  useEffect(() => {
+    let intervalId: any = null;
+
+    const shouldPollStats = 
+      isAuthenticated && 
+      accountStatus === 'APPROVED' && 
+      isOnline && 
+      appState === 'active';
+
+    if (shouldPollStats) {
+      fetchDashboardStats();
+      intervalId = setInterval(fetchDashboardStats, 15000); // 15 seconds
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isAuthenticated, accountStatus, isOnline, appState, fetchDashboardStats]);
+
+  // Fetch completed orders when orders or earnings tab is focused
+  useEffect(() => {
+    if (isAuthenticated && (activeTab === 'orders' || activeTab === 'earnings')) {
+      fetchCompletedOrders();
+    }
+  }, [isAuthenticated, activeTab, fetchCompletedOrders]);
+
+  // Handle Android back button when viewing active order
+  useEffect(() => {
+    const handleBackButton = () => {
+      if (viewingActiveOrder) {
+        setViewingActiveOrder(false);
+        return true; // Intercept press
+      }
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', handleBackButton);
+    return () => {
+      subscription.remove();
+    };
+  }, [viewingActiveOrder]);
+
+  // Poll Available Orders
+  useEffect(() => {
+    let intervalId: any = null;
+
+    const shouldPollAvailable = 
+      isAuthenticated && 
+      activeTab === 'orders' && 
+      ordersSubTab === 'available' && 
+      isOnline && 
+      isAvailable && 
+      appState === 'active';
+
+    if (shouldPollAvailable) {
+      fetchAvailableOrders();
+      intervalId = setInterval(fetchAvailableOrders, 5000); // 5 seconds
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isAuthenticated, activeTab, ordersSubTab, isOnline, isAvailable, appState, fetchAvailableOrders]);
 
   useEffect(() => {
     return () => {
@@ -424,7 +678,9 @@ export default function AppIndex() {
       setActiveAssignment(incomingAssignment);
       setIncomingAssignment(null);
       setIsAvailable(false);
+      setIsCashCollected(false);
       changeDeliveryState('active-restaurant');
+      setViewingActiveOrder(true);
     } catch (err) {
       const error = err as any;
       alert(error.message || 'Failed to accept assignment.');
@@ -463,6 +719,12 @@ export default function AppIndex() {
       const data = await api.updateOnlineStatus(targetOnline);
       setIsOnline(data.isOnline);
       setIsAvailable(data.isAvailable);
+      if (!data.isOnline) {
+        setIncomingAssignment(null);
+        if (deliveryState === 'incoming-request') {
+          changeDeliveryState('none');
+        }
+      }
     } catch (err) {
       const error = err as any;
       console.error('Failed to toggle online status:', error.message);
@@ -486,6 +748,11 @@ export default function AppIndex() {
 
   // Helper to render the appropriate screen inside the active tab
   const renderTabContent = () => {
+    // Only incoming offered requests take global precedence.
+    if (deliveryState === 'incoming-request') {
+      return renderHomeTab();
+    }
+
     switch (activeTab) {
       case 'home':
         return renderHomeTab();
@@ -502,17 +769,24 @@ export default function AppIndex() {
 
   // 1. HOME TAB ROUTER
   const renderHomeTab = () => {
+    if (viewingActiveOrder) {
+      switch (deliveryState) {
+        case 'active-restaurant':
+          return renderActiveDeliveryScreen('reach-restaurant');
+        case 'active-pickup':
+          return renderActiveDeliveryScreen('pickup');
+        case 'active-start-delivery':
+          return renderActiveDeliveryScreen('start-delivery');
+        case 'active-delivery':
+          return renderCustomerDeliveryScreen();
+        default:
+          return renderHomeScreen();
+      }
+    }
+
     switch (deliveryState) {
       case 'incoming-request':
         return renderIncomingRequestScreen();
-      case 'active-restaurant':
-        return renderActiveDeliveryScreen('reach-restaurant');
-      case 'active-pickup':
-        return renderActiveDeliveryScreen('pickup');
-      case 'active-start-delivery':
-        return renderActiveDeliveryScreen('start-delivery');
-      case 'active-delivery':
-        return renderCustomerDeliveryScreen();
       case 'delivery-completed':
         return renderDeliveryCompletedScreen();
       default:
@@ -539,7 +813,7 @@ export default function AppIndex() {
           {/* Welcome User Row */}
           <View style={styles.welcomeRow}>
             <View>
-              <Text style={styles.greetingText}>Good Morning,</Text>
+              <Text style={styles.greetingText}>{getGreeting()},</Text>
               <Text style={styles.riderNameText}>{currentUser?.name?.split(' ')[0] || 'Partner'}</Text>
             </View>
             <View style={styles.rightActionsRow}>
@@ -575,8 +849,10 @@ export default function AppIndex() {
               <Text style={styles.offlineEarningsTitle}>Today's Earnings</Text>
               <Ionicons name="chevron-forward" size={16} color="#8A7A6E" />
             </View>
-            <Text style={styles.offlineEarningsAmount}>₹850</Text>
-            <Text style={styles.offlineEarningsCount}>3 deliveries completed</Text>
+            <Text style={styles.offlineEarningsAmount}>₹{dashboardStats.todayEarnings}</Text>
+            <Text style={styles.offlineEarningsCount}>
+              {dashboardStats.todayDeliveries} {dashboardStats.todayDeliveries === 1 ? 'delivery' : 'deliveries'} completed
+            </Text>
           </View>
 
           {!isOnline ? (
@@ -601,7 +877,52 @@ export default function AppIndex() {
             </View>
           ) : (
             // Online stats summary card
-            <HomeStatsCard earnings={850} deliveries={7} onlineTime="4h 30m" />
+            <HomeStatsCard 
+              earnings={dashboardStats.todayEarnings} 
+              deliveries={dashboardStats.todayDeliveries} 
+              onlineTime={dashboardStats.onlineMinutes > 0 ? `${dashboardStats.onlineMinutes}m` : '—'} 
+            />
+          )}
+
+          {/* Active Delivery / Current Order Card */}
+          {activeAssignment && activeAssignment.order && (
+            <View style={[styles.currentOrderCard, { marginTop: 16, marginBottom: 8 }]}>
+              <View style={styles.currentOrderCardHeader}>
+                <Text style={styles.currentOrderCardTitle}>ACTIVE DELIVERY</Text>
+                <View style={[styles.currentOrderStatusBadge, { backgroundColor: '#FFF7ED', borderColor: '#FF7A00', borderWidth: 1 }]}>
+                  <Ionicons name="bicycle" size={12} color="#FF7A00" style={{ marginRight: 4 }} />
+                  <Text style={[styles.currentOrderStatusText, { color: '#FF7A00' }]}>In Progress</Text>
+                </View>
+              </View>
+
+              <View style={styles.currentOrderRouteContainer}>
+                <View style={styles.currentOrderRouteRow}>
+                  <View style={[styles.routeDotMini, styles.pickupDotColor]} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.currentOrderRouteTitle}>{activeAssignment.order.restaurantName || 'QuickBite Kitchen'}</Text>
+                    <Text style={styles.currentOrderRouteSubtitle}>Pickup • {activeAssignment.order.pickupAddress || 'Restaurant Address'}</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.currentOrderRouteConnector} />
+
+                <View style={styles.currentOrderRouteRow}>
+                  <View style={[styles.routeDotMini, styles.dropDotColor]} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.currentOrderRouteTitle}>{activeAssignment.order.customerName || 'Customer'}</Text>
+                    <Text style={styles.currentOrderRouteSubtitle}>Dropoff • {activeAssignment.order.deliveryAddress || 'Drop Location'}</Text>
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity 
+                activeOpacity={0.8}
+                onPress={() => setViewingActiveOrder(true)}
+                style={styles.continueDeliveryBtn}
+              >
+                <Text style={styles.continueDeliveryBtnText}>View Active Delivery / Track Order →</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           {/* Section Header */}
@@ -609,17 +930,11 @@ export default function AppIndex() {
             <Text style={styles.sectionTitle}>Available Deliveries</Text>
             {isOnline && (
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                {/* Temporary simulation trigger */}
                 <TouchableOpacity 
-                  style={[styles.refreshButton, { marginRight: 14 }]} 
+                  style={styles.refreshButton} 
                   activeOpacity={0.7}
-                  onPress={() => changeDeliveryState('incoming-request')}
+                  onPress={handleManualRefresh}
                 >
-                  <Ionicons name="sparkles" size={13} color="#F97316" style={{ marginRight: 4 }} />
-                  <Text style={styles.refreshText}>Simulate Request</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity style={styles.refreshButton} activeOpacity={0.7}>
                   <Ionicons name="refresh-sharp" size={13} color="#F97316" style={{ marginRight: 4 }} />
                   <Text style={styles.refreshText}>Refresh</Text>
                 </TouchableOpacity>
@@ -628,24 +943,16 @@ export default function AppIndex() {
           </View>
 
           {isOnline ? (
-            /* Available Order Card */
-            <DeliveryCard 
-              restaurantName="Khao Gully"
-              orderId="#QB1024"
-              earnings={65}
-              itemsCount={2}
-              paymentMode="COD"
-              pickupDistance="1.2km"
-              dropDistance="3.4km"
-              onViewDetails={() => {
-                changeDeliveryState('active-restaurant');
-                setIsCashCollected(false);
-              }}
-              onAccept={() => {
-                changeDeliveryState('active-restaurant');
-                setIsCashCollected(false);
-              }}
-            />
+            /* Go online to receive deliveries offline message card, but for online status */
+            <View style={styles.offlineDeliveriesCard}>
+              <View style={[styles.offlineDeliveriesIconContainer, { backgroundColor: '#F0FDFA' }]}>
+                <Ionicons name="bicycle" size={24} color="#0D9488" />
+              </View>
+              <Text style={styles.offlineDeliveriesTitle}>Waiting for delivery requests...</Text>
+              <Text style={styles.offlineDeliveriesSub}>
+                You are online and ready. Incoming delivery requests will pop up automatically.
+              </Text>
+            </View>
           ) : (
             /* Go online to receive deliveries offline message card */
             <View style={styles.offlineDeliveriesCard}>
@@ -670,7 +977,7 @@ export default function AppIndex() {
       <View style={styles.incomingRequestContainer}>
         {/* Muted Map Background */}
         <View style={styles.incomingMapWrapper}>
-          <MapPlaceholder eta="8 mins" etaPosition="top-left" />
+          <MapPlaceholder eta="N/A" etaPosition="top-left" destinationName={order.restaurantName} />
           <View style={styles.incomingMapOverlay} />
         </View>
 
@@ -683,7 +990,7 @@ export default function AppIndex() {
         </View>
 
         {/* Bottom Request Bottom Sheet/Card */}
-        <View style={styles.incomingRequestSheet}>
+        <View style={[styles.incomingRequestSheet, { paddingBottom: Math.max(16, insets.bottom + 12) }]}>
           <View style={styles.incomingSheetHandle} />
           
           <View style={styles.incomingHeaderRow}>
@@ -705,13 +1012,13 @@ export default function AppIndex() {
           <View style={styles.incomingQuickInfoRow}>
             <View style={styles.incomingQuickInfoCol}>
               <Ionicons name="time" size={16} color="#8A7A6E" />
-              <Text style={styles.incomingQuickInfoValue}>22</Text>
-              <Text style={styles.incomingQuickInfoLabel}>MINS</Text>
+              <Text style={styles.incomingQuickInfoValue}>—</Text>
+              <Text style={styles.incomingQuickInfoLabel}>ETA</Text>
             </View>
             <View style={styles.incomingQuickInfoDivider} />
             <View style={styles.incomingQuickInfoCol}>
               <Ionicons name="git-commit" size={16} color="#8A7A6E" />
-              <Text style={styles.incomingQuickInfoValue}>2.5</Text>
+              <Text style={styles.incomingQuickInfoValue}>—</Text>
               <Text style={styles.incomingQuickInfoLabel}>KM TOTAL</Text>
             </View>
             <View style={styles.incomingQuickInfoDivider} />
@@ -730,7 +1037,7 @@ export default function AppIndex() {
                 <View style={styles.incomingRouteTextRow}>
                   <Text style={styles.incomingRouteTitle}>{order.restaurantName || 'QuickBite Kitchen'}</Text>
                   <View style={styles.routeDistanceBadge}>
-                    <Text style={styles.routeDistanceText}>1.2 KM</Text>
+                    <Text style={styles.routeDistanceText}>N/A</Text>
                   </View>
                 </View>
                 <Text style={styles.incomingRouteSubtitle}>{order.pickupAddress || 'Restaurant Pickup'}</Text>
@@ -745,7 +1052,7 @@ export default function AppIndex() {
                 <View style={styles.incomingRouteTextRow}>
                   <Text style={styles.incomingRouteTitle}>{order.customerName || 'Customer'}</Text>
                   <View style={styles.routeDistanceBadge}>
-                    <Text style={styles.routeDistanceText}>3.4 KM</Text>
+                    <Text style={styles.routeDistanceText}>N/A</Text>
                   </View>
                 </View>
                 <Text style={styles.incomingRouteSubtitle}>{order.deliveryAddress || 'Drop Location'}</Text>
@@ -808,13 +1115,23 @@ export default function AppIndex() {
       currentCtaText = 'Start Delivery →';
     }
 
-    const handleStepCtaPress = () => {
-      if (currentStep === 'reach-restaurant') {
-        changeDeliveryState('active-pickup');
-      } else if (currentStep === 'pickup') {
-        changeDeliveryState('active-start-delivery');
-      } else if (currentStep === 'start-delivery') {
-        changeDeliveryState('active-delivery');
+    const handleStepCtaPress = async () => {
+      if (!activeAssignment || !activeAssignment.order) return;
+      setIsAcceptingDeclining(true);
+      try {
+        if (currentStep === 'reach-restaurant') {
+          changeDeliveryState('active-pickup');
+        } else if (currentStep === 'pickup') {
+          await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'picked_up');
+          changeDeliveryState('active-start-delivery');
+        } else if (currentStep === 'start-delivery') {
+          await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'out_for_delivery');
+          changeDeliveryState('active-delivery');
+        }
+      } catch (err: any) {
+        alert(err.message || 'Failed to update order status');
+      } finally {
+        setIsAcceptingDeclining(false);
       }
     };
 
@@ -824,7 +1141,8 @@ export default function AppIndex() {
           title="QuickBite Partner" 
           isOnline={isOnline} 
           isAvailable={isAvailable}
-          showBack={false}
+          showBack={true}
+          onBackPress={() => setViewingActiveOrder(false)}
         />
 
         <ScrollView 
@@ -842,10 +1160,15 @@ export default function AppIndex() {
           </View>
 
           {/* Map Preview */}
-          <MapPlaceholder eta="8 mins" etaPosition="top-left" />
+          <MapPlaceholder eta="N/A" etaPosition="top-left" destinationName={order.restaurantName} />
 
           {/* Progress Timeline */}
-          <ProgressTimeline currentStep={currentStep} />
+          <ProgressTimeline 
+            currentStep={currentStep} 
+            restaurantName={order.restaurantName}
+            itemCount={order.itemCount}
+            deliveryAddress={order.deliveryAddress}
+          />
 
           {/* Pickup Details Card */}
           <View style={styles.pickupCard}>
@@ -857,7 +1180,7 @@ export default function AppIndex() {
               </View>
               <View style={styles.distanceBadge}>
                 <Ionicons name="walk" size={12} color="#8A7A6E" style={{ marginRight: 3 }} />
-                <Text style={styles.distanceText}>1.2 km</Text>
+                <Text style={styles.distanceText}>N/A</Text>
               </View>
             </View>
 
@@ -892,9 +1215,14 @@ export default function AppIndex() {
           <TouchableOpacity 
             activeOpacity={0.8}
             onPress={handleStepCtaPress}
-            style={styles.stickyFooterButton}
+            disabled={isAcceptingDeclining}
+            style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
           >
-            <Text style={styles.stickyFooterButtonText}>{currentCtaText}</Text>
+            {isAcceptingDeclining ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.stickyFooterButtonText}>{currentCtaText}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -910,7 +1238,8 @@ export default function AppIndex() {
           title="QuickBite Partner" 
           isOnline={isOnline} 
           isAvailable={isAvailable}
-          showBack={false}
+          showBack={true}
+          onBackPress={() => setViewingActiveOrder(false)}
         />
 
         <ScrollView 
@@ -933,7 +1262,7 @@ export default function AppIndex() {
           </View>
 
           {/* Map Preview */}
-          <MapPlaceholder eta="5 mins" etaPosition="bottom-right" />
+          <MapPlaceholder eta="N/A" etaPosition="bottom-right" destinationName={order.customerName} />
 
           {/* Customer Instructions */}
           <View style={styles.instructionCard}>
@@ -949,26 +1278,26 @@ export default function AppIndex() {
           {/* CASH ON DELIVERY COLLECTED STATUS */}
           <View style={[
             styles.codBox,
-            (isCashCollected || order.paymentMethod !== 'COD') && styles.codBoxSuccess
+            (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codBoxSuccess
           ]}>
             <View style={styles.codBoxHeader}>
               <Ionicons 
                 name="cash" 
                 size={18} 
-                color={(isCashCollected || order.paymentMethod !== 'COD') ? '#137333' : '#B91C1C'} 
+                color={(isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') ? '#137333' : '#B91C1C'} 
                 style={{ marginRight: 8 }} 
               />
               <Text style={[
                 styles.codBoxTitle,
-                (isCashCollected || order.paymentMethod !== 'COD') && styles.codBoxTitleSuccess
+                (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codBoxTitleSuccess
               ]}>
-                {order.paymentMethod === 'COD' ? 'CASH ON DELIVERY' : 'ONLINE PREPAID'}
+                {order.paymentMethod?.toUpperCase() === 'COD' ? 'CASH ON DELIVERY' : 'ONLINE PREPAID'}
               </Text>
             </View>
             
             <View style={styles.codDetailsRow}>
               <View>
-                {order.paymentMethod !== 'COD' ? (
+                {order.paymentMethod?.toUpperCase() !== 'COD' ? (
                   <View style={styles.confirmedCashBadge}>
                     <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 4 }} />
                     <Text style={styles.confirmedCashText}>Prepaid Order ✓</Text>
@@ -984,7 +1313,7 @@ export default function AppIndex() {
               </View>
               <Text style={[
                 styles.codAmountText,
-                (isCashCollected || order.paymentMethod !== 'COD') && styles.codAmountTextSuccess
+                (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codAmountTextSuccess
               ]}>
                 ₹{order.amount || 0}
               </Text>
@@ -994,13 +1323,18 @@ export default function AppIndex() {
 
         {/* Sticky Action Button Container */}
         <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
-          {order.paymentMethod === 'COD' && !isCashCollected ? (
+          {order.paymentMethod?.toUpperCase() === 'COD' && !isCashCollected ? (
             <TouchableOpacity 
               activeOpacity={0.8}
-              onPress={() => setIsCashCollected(true)}
-              style={styles.stickyFooterButton}
+              onPress={handleCollectCod}
+              disabled={isAcceptingDeclining}
+              style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
             >
-              <Text style={styles.stickyFooterButtonText}>Confirm ₹{order.amount || 0} Cash Collected</Text>
+              {isAcceptingDeclining ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.stickyFooterButtonText}>Confirm ₹{order.amount || 0} Cash Collected</Text>
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity 
@@ -1021,7 +1355,8 @@ export default function AppIndex() {
 
   // SCREEN 3.5: DELIVERY COMPLETED SUCCESS SCREEN
   const renderDeliveryCompletedScreen = () => {
-    const order = activeAssignment?.order || {};
+    const order = justCompletedOrder || {};
+    const earningsAmount = order.partnerEarning !== undefined ? order.partnerEarning : 65;
     return (
       <View style={styles.completedScreenContainer}>
         <View style={styles.completedContentContainer}>
@@ -1031,12 +1366,12 @@ export default function AppIndex() {
           </View>
 
           <Text style={styles.completedTitle}>Delivery Completed!</Text>
-          <Text style={styles.completedOrderText}>{order.orderNumber || 'Order'}</Text>
+          <Text style={styles.completedOrderText}>ORDER #{order.orderNumber || ''}</Text>
 
           {/* Earning Card */}
           <View style={styles.completedEarningCard}>
             <Text style={styles.completedEarningSub}>You earned</Text>
-            <Text style={styles.completedEarningValue}>₹65</Text>
+            <Text style={styles.completedEarningValue}>₹{earningsAmount}</Text>
             
             {/* Split statistics */}
             <View style={styles.completedStatsRow}>
@@ -1049,13 +1384,13 @@ export default function AppIndex() {
               <View style={styles.completedStatCol}>
                 <Ionicons name="git-commit-outline" size={16} color="#8A7A6E" />
                 <Text style={styles.completedStatTitle}>Distance</Text>
-                <Text style={styles.completedStatValue}>2.5 km</Text>
+                <Text style={styles.completedStatValue}>—</Text>
               </View>
             </View>
           </View>
 
           {/* Cash Collected Confirmation Badge */}
-          {order.paymentMethod === 'COD' && (
+          {order.paymentMethod?.toUpperCase() === 'COD' && (
             <View style={styles.completedCashCollectedCard}>
               <Ionicons name="cash-outline" size={16} color="#78350F" style={{ marginRight: 8 }} />
               <Text style={styles.completedCashCollectedText}>₹{order.amount || 0} collected ✓</Text>
@@ -1070,6 +1405,7 @@ export default function AppIndex() {
             onPress={() => {
               changeDeliveryState('none');
               setActiveAssignment(null);
+              setJustCompletedOrder(null);
               setIsOnline(true);
               setIsAvailable(true);
             }}
@@ -1083,6 +1419,7 @@ export default function AppIndex() {
             onPress={() => {
               changeDeliveryState('none');
               setActiveAssignment(null);
+              setJustCompletedOrder(null);
               setIsOnline(true);
               setIsAvailable(true);
             }}
@@ -1129,6 +1466,20 @@ export default function AppIndex() {
         {/* Custom Tab selector row with filter icon */}
         <View style={styles.ordersTabsRow}>
           <View style={styles.ordersSubTabsContainer}>
+            <TouchableOpacity 
+              activeOpacity={0.8}
+              onPress={() => setOrdersSubTab('available')}
+              style={[
+                styles.ordersSubTab,
+                ordersSubTab === 'available' && styles.ordersSubTabActive
+              ]}
+            >
+              <Text style={[
+                styles.ordersSubTabText,
+                ordersSubTab === 'available' && styles.ordersSubTabTextActive
+              ]}>Available</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity 
               activeOpacity={0.8}
               onPress={() => setOrdersSubTab('current')}
@@ -1221,18 +1572,97 @@ export default function AppIndex() {
           </View>
         )}
 
-        {ordersSubTab === 'current' ? (
+        {ordersSubTab === 'available' ? (
+          // Available orders tab content
+          <ScrollView 
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollPadding}
+            style={styles.screenBg}
+          >
+            {availableOrders.length > 0 ? (
+              availableOrders.map((order) => (
+                <View key={order.id} style={styles.currentOrderCard}>
+                  <View style={styles.currentOrderCardHeader}>
+                    <Text style={styles.currentOrderCardTitle}>ORDER #{order.orderNumber}</Text>
+                    <View style={styles.currentOrderStatusBadge}>
+                      <Ionicons name="gift-outline" size={12} color="#F97316" style={{ marginRight: 4 }} />
+                      <Text style={styles.currentOrderStatusText}>Available</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.currentOrderRouteContainer}>
+                    <View style={styles.currentOrderRouteRow}>
+                      <View style={[styles.routeDotMini, styles.pickupDotColor]} />
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.currentOrderRouteTitle}>{order.restaurantName}</Text>
+                        <Text style={styles.currentOrderRouteSubtitle}>Pickup • {order.pickupAddress}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.currentOrderRouteConnector} />
+
+                    <View style={styles.currentOrderRouteRow}>
+                      <View style={[styles.routeDotMini, styles.dropDotColor]} />
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.currentOrderRouteTitle}>Delivery Destination</Text>
+                        <Text style={styles.currentOrderRouteSubtitle}>Dropoff • {order.deliveryAddress}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.currentOrderSummaryBox}>
+                    <View style={styles.currentOrderSummaryCol}>
+                      <Text style={styles.currentOrderSummaryLabel}>Payment Method</Text>
+                      <View style={styles.currentOrderSummaryValueRow}>
+                        <View style={styles.ordersCodMiniBadge}>
+                          <Text style={styles.ordersCodMiniBadgeText}>{order.paymentMethod}</Text>
+                        </View>
+                        <Text style={styles.ordersCodAmountText}>₹{order.amount}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.currentOrderSummaryDivider} />
+                    <View style={styles.currentOrderSummaryCol}>
+                      <Text style={styles.currentOrderSummaryLabel}>Est. Earnings</Text>
+                      <Text style={styles.ordersEarningsText}>₹65</Text>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity 
+                    activeOpacity={0.8}
+                    onPress={() => handleClaimAvailableOrder(order.id)}
+                    disabled={isAcceptingDeclining}
+                    style={[styles.continueDeliveryBtn, isAcceptingDeclining && { opacity: 0.7 }]}
+                  >
+                    {isAcceptingDeclining ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.continueDeliveryBtnText}>Claim Order ✓</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ))
+            ) : (
+              <View style={styles.emptyStateContainer}>
+                <Ionicons name="document-text-outline" size={48} color="#94A3B8" style={{ marginBottom: 12 }} />
+                <Text style={styles.emptyStateTitle}>No available orders</Text>
+                <Text style={styles.emptyStateSubtitle}>
+                  Waiting for new ready orders in your zone...
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        ) : ordersSubTab === 'current' ? (
           // Current orders tab content
           <ScrollView 
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollPadding}
             style={styles.screenBg}
           >
-            {isOrderActive ? (
+            {isOrderActive && activeAssignment ? (
               // Active Order Card
               <View style={styles.currentOrderCard}>
                 <View style={styles.currentOrderCardHeader}>
-                  <Text style={styles.currentOrderCardTitle}>ORDER #QB1024</Text>
+                  <Text style={styles.currentOrderCardTitle}>ORDER #{activeAssignment.order?.orderNumber || activeAssignment.order?.id}</Text>
                   <View style={styles.currentOrderStatusBadge}>
                     <Ionicons name="bicycle" size={12} color="#F97316" style={{ marginRight: 4 }} />
                     <Text style={styles.currentOrderStatusText}>{orderStatusText}</Text>
@@ -1244,8 +1674,8 @@ export default function AppIndex() {
                   <View style={styles.currentOrderRouteRow}>
                     <View style={[styles.routeDotMini, styles.pickupDotColor]} />
                     <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={styles.currentOrderRouteTitle}>Khao Gully</Text>
-                      <Text style={styles.currentOrderRouteSubtitle}>Pickup • 2.4 km away</Text>
+                      <Text style={styles.currentOrderRouteTitle}>{activeAssignment.order?.restaurantName || 'QuickBite Kitchen'}</Text>
+                      <Text style={styles.currentOrderRouteSubtitle}>Pickup • {activeAssignment.order?.pickupAddress || 'Restaurant Address'}</Text>
                     </View>
                   </View>
                   
@@ -1254,8 +1684,8 @@ export default function AppIndex() {
                   <View style={styles.currentOrderRouteRow}>
                     <View style={[styles.routeDotMini, styles.dropDotColor]} />
                     <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={styles.currentOrderRouteTitle}>Panampilly Nagar</Text>
-                      <Text style={styles.currentOrderRouteSubtitle}>Dropoff • Customer: Arjun T.</Text>
+                      <Text style={styles.currentOrderRouteTitle}>{activeAssignment.order?.customerName || 'Customer'}</Text>
+                      <Text style={styles.currentOrderRouteSubtitle}>Dropoff • {activeAssignment.order?.deliveryAddress || 'Drop Location'}</Text>
                     </View>
                   </View>
                 </View>
@@ -1266,9 +1696,9 @@ export default function AppIndex() {
                     <Text style={styles.currentOrderSummaryLabel}>Payment Method</Text>
                     <View style={styles.currentOrderSummaryValueRow}>
                       <View style={styles.ordersCodMiniBadge}>
-                        <Text style={styles.ordersCodMiniBadgeText}>COD</Text>
+                        <Text style={styles.ordersCodMiniBadgeText}>{activeAssignment.order?.paymentMethod || 'Prepaid'}</Text>
                       </View>
-                      <Text style={styles.ordersCodAmountText}>₹320</Text>
+                      <Text style={styles.ordersCodAmountText}>₹{activeAssignment.order?.amount || 0}</Text>
                     </View>
                   </View>
                   <View style={styles.currentOrderSummaryDivider} />
@@ -1313,16 +1743,9 @@ export default function AppIndex() {
                     {completedFilter === 'today' ? 'TODAY' : completedFilter === 'week' ? 'THIS WEEK' : 'THIS MONTH'}
                   </Text>
                   
-                  {/* Subtle testing trigger: tap this to clear/populate history */}
                   <TouchableOpacity 
                     activeOpacity={0.7}
-                    onPress={() => {
-                      if (completedOrders.length > 0) {
-                        setCompletedOrders([]);
-                      } else {
-                        setCompletedOrders(initialMockCompletedOrders);
-                      }
-                    }}
+                    onPress={fetchCompletedOrders}
                   >
                     <Text style={styles.completedSectionHeaderCount}>
                       {filteredCompletedOrders.length} {filteredCompletedOrders.length === 1 ? 'Order' : 'Orders'} 🔄
@@ -1398,13 +1821,12 @@ export default function AppIndex() {
                   Your successfully completed orders will appear here.
                 </Text>
                 
-                {/* Subtle trigger to restore state when empty */}
                 <TouchableOpacity 
                   activeOpacity={0.7}
-                  onPress={() => setCompletedOrders(initialMockCompletedOrders)}
+                  onPress={fetchCompletedOrders}
                   style={styles.completedEmptyRestoreBtn}
                 >
-                  <Text style={styles.completedEmptyRestoreBtnText}>Restore Completed Orders 🔄</Text>
+                  <Text style={styles.completedEmptyRestoreBtnText}>Refresh History 🔄</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1418,13 +1840,13 @@ export default function AppIndex() {
   const renderEarningsTab = () => {
     // Custom Daily trend chart mock details
     const chartDays = [
-      { day: 'M', value: 400, height: 40 },
-      { day: 'T', value: 500, height: 50 },
-      { day: 'W', value: 300, height: 30 },
-      { day: 'T', value: 600, height: 60 },
-      { day: 'F', value: 450, height: 45 },
-      { day: 'S', value: 700, height: 70 },
-      { day: 'S', value: 850, height: 90, selected: true } // Selected day is Sunday matching the reference
+      { day: 'M', value: 0, height: 5 },
+      { day: 'T', value: 0, height: 5 },
+      { day: 'W', value: 0, height: 5 },
+      { day: 'T', value: 0, height: 5 },
+      { day: 'F', value: 0, height: 5 },
+      { day: 'S', value: 0, height: 5 },
+      { day: 'S', value: dashboardStats.todayEarnings, height: dashboardStats.todayEarnings > 0 ? 80 : 5, selected: true }
     ];
 
     return (
@@ -1437,16 +1859,16 @@ export default function AppIndex() {
           style={styles.screenBg}
         >
           {/* Today's Earnings large card */}
-          <LargeEarningsCard title="Today's Earnings" amount={850} />
+          <LargeEarningsCard title="Today's Earnings" amount={dashboardStats.todayEarnings} />
 
           {/* Period totals side-by-side cards */}
           <View style={styles.periodCardsRow}>
-            <PeriodStatsCard label="THIS WEEK" amount="₹4,250" />
-            <PeriodStatsCard label="THIS MONTH" amount="₹16,800" />
+            <PeriodStatsCard label="THIS WEEK" amount={`₹${dashboardStats.todayEarnings}`} />
+            <PeriodStatsCard label="THIS MONTH" amount={`₹${dashboardStats.todayEarnings}`} />
           </View>
 
           {/* Earnings breakdown details card */}
-          <EarningsBreakdown orderEarnings={720} incentives={100} tips={30} />
+          <EarningsBreakdown orderEarnings={dashboardStats.todayEarnings} incentives={0} tips={0} />
 
           {/* Daily Trend simple bar chart */}
           <View style={styles.chartContainer}>
@@ -1489,39 +1911,46 @@ export default function AppIndex() {
             <Text style={styles.transactionsTitle}>Recent Transactions</Text>
             
             <View style={styles.transactionsListCard}>
-              {/* Transaction 1 */}
-              <View style={[styles.transactionRow, styles.transactionRowDivider]}>
-                <View style={styles.transactionLeft}>
-                  <View style={styles.iconCircleBg}>
-                    <Ionicons name="bicycle" size={16} color="#8A7A6E" />
+              {completedOrders.length > 0 ? (
+                completedOrders.slice(0, 5).map((order, idx) => (
+                  <View 
+                    key={idx} 
+                    style={[
+                      styles.transactionRow,
+                      idx < Math.min(completedOrders.length, 5) - 1 && styles.transactionRowDivider
+                    ]}
+                  >
+                    <View style={styles.transactionLeft}>
+                      <View style={styles.iconCircleBg}>
+                        <Ionicons name="bicycle" size={16} color="#8A7A6E" />
+                      </View>
+                      <View style={{ marginLeft: 12 }}>
+                        <Text style={styles.transactionItemTitle}>{order.orderId}</Text>
+                        <Text style={styles.transactionItemSub}>Completed • {order.date}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.transactionAmountText}>+₹{order.earnings}</Text>
                   </View>
-                  <View style={{ marginLeft: 12 }}>
-                    <Text style={styles.transactionItemTitle}>Order #QB1024</Text>
-                    <Text style={styles.transactionItemSub}>Completed • 2:30 PM</Text>
-                  </View>
+                ))
+              ) : (
+                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 13, color: '#8A7A6E', fontWeight: '500' }}>No recent transactions</Text>
                 </View>
-                <Text style={styles.transactionAmountText}>+₹65</Text>
-              </View>
-
-              {/* Transaction 2 */}
-              <View style={styles.transactionRow}>
-                <View style={styles.transactionLeft}>
-                  <View style={styles.iconCircleBg}>
-                    <Ionicons name="bicycle" size={16} color="#8A7A6E" />
-                  </View>
-                  <View style={{ marginLeft: 12 }}>
-                    <Text style={styles.transactionItemTitle}>Order #QB1023</Text>
-                    <Text style={styles.transactionItemSub}>Completed • 1:15 PM</Text>
-                  </View>
-                </View>
-                <Text style={styles.transactionAmountText}>+₹58</Text>
-              </View>
+              )}
             </View>
 
-            {/* VIEW ALL Button */}
-            <TouchableOpacity style={styles.viewAllButton} activeOpacity={0.7}>
-              <Text style={styles.viewAllText}>VIEW ALL</Text>
-            </TouchableOpacity>
+            {completedOrders.length > 5 && (
+              <TouchableOpacity 
+                style={styles.viewAllButton} 
+                activeOpacity={0.7}
+                onPress={() => {
+                  setActiveTab('orders');
+                  setOrdersSubTab('completed');
+                }}
+              >
+                <Text style={styles.viewAllText}>VIEW ALL</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </ScrollView>
       </View>

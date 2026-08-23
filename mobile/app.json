@@ -2,6 +2,7 @@
   "expo": {
     "name": "QuickBite Mobile App",
     "slug": "quickbite-mobile-app",
+    "scheme": "quickbitemobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
