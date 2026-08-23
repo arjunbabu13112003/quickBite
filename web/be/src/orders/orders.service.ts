@@ -23,6 +23,7 @@ import { resolveHotelOfferForFood } from '../offers/offer-pricing.helper';
 import { Food } from '../foods/food.entity';
 import { Offer } from '../offers/offer.entity';
 import { Store99Campaign } from '../offers/store99-campaign.entity';
+import { DeliveryPartnersService } from '../delivery-partners/delivery-partners.service';
 
 @Injectable()
 export class OrdersService {
@@ -39,6 +40,7 @@ export class OrdersService {
     private readonly hotelRepository: Repository<Hotel>,
     private readonly dataSource: DataSource,
     private readonly offersService: OffersService,
+    private readonly deliveryPartnersService: DeliveryPartnersService,
   ) {}
 
   private async calculateEffectiveFoodPrice(food: Food, selectedCampaignId?: number, now = new Date()): Promise<number> {
@@ -882,6 +884,12 @@ export class OrdersService {
     }
 
     await this.orderRepository.save(order);
+
+    if (nextStatus === 'accepted') {
+      this.deliveryPartnersService.triggerDispatchForOrder(order.id).catch(err => {
+        console.error(`[Dispatch Error] Failed to dispatch order ${order.id}:`, err);
+      });
+    }
 
     return {
       message: `Order status updated to ${nextStatus}`,

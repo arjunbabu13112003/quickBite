@@ -482,19 +482,50 @@ export default function AddDeliveryPartner({ onNavigate }) {
       const backendVehType = formData.vehicleType.toUpperCase(); // BIKE, SCOOTER, BICYCLE, CAR
       const backendDelType = formData.deliveryType === 'Full Time' ? 'FULL_TIME' : 'PART_TIME';
 
+      // Build FormData payload
+      const formPayload = new FormData();
+      formPayload.append('fullName', formData.name.trim());
+      formPayload.append('mobileNumber', rawMobile);
+      formPayload.append('email', formData.email.trim());
+      formPayload.append('temporaryPassword', formData.password);
+      formPayload.append('vehicleType', backendVehType);
+      
+      if (backendVehType !== 'BICYCLE') {
+        formPayload.append('vehicleNumber', formData.vehicleNumber.trim());
+        formPayload.append('driversLicenseNumber', formData.licenseNumber.trim());
+      }
+      
+      formPayload.append('preferredZone', normPrefZone);
+      if (normSecZone) {
+        formPayload.append('secondaryZone', normSecZone);
+      }
+      formPayload.append('deliveryType', backendDelType);
+
+      // Payout details
+      formPayload.append('accountHolderName', formData.accountHolderName.trim());
+      formPayload.append('bankAccountNumber', formData.bankAccountNumber.replace(/\s/g, ''));
+      formPayload.append('confirmBankAccountNumber', formData.confirmBankAccountNumber.replace(/\s/g, ''));
+      formPayload.append('ifscCode', formData.ifscCode.trim().toUpperCase());
+      if (formData.upiId && formData.upiId.trim()) {
+        formPayload.append('upiId', formData.upiId.trim());
+      }
+
+      // Files
+      if (profilePhoto) {
+        formPayload.append('profilePhoto', profilePhoto);
+      }
+      if (drivingLicense) {
+        formPayload.append('drivingLicense', drivingLicense);
+      }
+      if (vehicleRc) {
+        formPayload.append('vehicleRc', vehicleRc);
+      }
+      if (vehicleInsurance) {
+        formPayload.append('vehicleInsurance', vehicleInsurance);
+      }
+
       // One atomic backend call
-      const partnerRes = await api.createDeliveryPartnerAccount({
-        fullName: formData.name.trim(),
-        mobileNumber: rawMobile,
-        email: formData.email.trim(),
-        temporaryPassword: formData.password,
-        vehicleType: backendVehType,
-        vehicleNumber: backendVehType === 'BICYCLE' ? undefined : formData.vehicleNumber.trim(),
-        driversLicenseNumber: backendVehType === 'BICYCLE' ? undefined : formData.licenseNumber.trim(),
-        preferredZone: normPrefZone,
-        secondaryZone: normSecZone,
-        deliveryType: backendDelType
-      });
+      const partnerRes = await api.createDeliveryPartnerAccount(formPayload);
 
       setSuccessData({
         partnerId: partnerRes?.id || 'N/A',
@@ -538,19 +569,25 @@ export default function AddDeliveryPartner({ onNavigate }) {
     if (!formData.preferredZone) return false;
     if (formData.secondaryZone && formData.preferredZone === formData.secondaryZone) return false;
 
-    const hasBank = formData.bankAccountNumber.trim() || formData.ifscCode.trim() || formData.accountHolderName.trim();
-    if (hasBank) {
-      if (formData.accountHolderName.trim().length < 2) return false;
-      const acNum = formData.bankAccountNumber.trim().replace(/[\s-]/g, '');
-      if (!acNum || !/^\d{9,18}$/.test(acNum)) return false;
-      if (formData.bankAccountNumber !== formData.confirmBankAccountNumber) return false;
-      if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formData.ifscCode.toUpperCase().trim())) return false;
-    }
+    // Bank Details are required
+    if (formData.accountHolderName.trim().length < 2) return false;
+    const acNum = formData.bankAccountNumber.trim().replace(/[\s-]/g, '');
+    if (!acNum || !/^\d{9,18}$/.test(acNum)) return false;
+    if (formData.bankAccountNumber !== formData.confirmBankAccountNumber) return false;
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formData.ifscCode.toUpperCase().trim())) return false;
 
     if (formData.upiId.trim() && !/^[\w.-]+@[\w.-]+$/.test(formData.upiId.trim())) return false;
 
     const hasFileErrors = Object.values(fileErrors).some(err => err !== '');
     if (hasFileErrors) return false;
+
+    // Document file selections are required based on vehicleType rules
+    if (!profilePhoto) return false;
+    if (formData.vehicleType !== 'Bicycle') {
+      if (!drivingLicense) return false;
+      if (!vehicleRc) return false;
+      if (!vehicleInsurance) return false;
+    }
 
     return true;
   };

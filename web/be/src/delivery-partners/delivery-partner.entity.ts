@@ -10,9 +10,25 @@ import {
 } from 'typeorm';
 import { User } from '../users/user.entity';
 
+export enum DeliveryPartnerAccountStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  ACTION_REQUIRED = 'ACTION_REQUIRED',
+  SUSPENDED = 'SUSPENDED',
+}
+
 @Entity('delivery_partners')
 @Index(['userId'])
 export class DeliveryPartner {
+  @Column({
+    type: 'varchar',
+    length: 50,
+    default: DeliveryPartnerAccountStatus.PENDING,
+  })
+  accountStatus: DeliveryPartnerAccountStatus;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  statusReason?: string;
   @PrimaryGeneratedColumn()
   id: number;
 

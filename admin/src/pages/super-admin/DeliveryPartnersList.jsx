@@ -98,12 +98,17 @@ export default function DeliveryPartnersList({ onNavigate }) {
       phone.includes(query) || 
       vehicleNum.includes(query);
 
-    // 2. Verification Filter
+    // 2. Verification Filter (Account Status)
     let matchesVerification = true;
-    if (filterVerification === 'Verified') {
-      matchesVerification = partner.isVerified === true;
-    } else if (filterVerification === 'Pending') {
-      matchesVerification = partner.isVerified === false;
+    const status = partner.accountStatus || (partner.isVerified ? 'APPROVED' : 'PENDING');
+    if (filterVerification === 'APPROVED' || filterVerification === 'Verified') {
+      matchesVerification = status === 'APPROVED';
+    } else if (filterVerification === 'PENDING' || filterVerification === 'Pending') {
+      matchesVerification = status === 'PENDING';
+    } else if (filterVerification === 'ACTION_REQUIRED') {
+      matchesVerification = status === 'ACTION_REQUIRED';
+    } else if (filterVerification === 'SUSPENDED') {
+      matchesVerification = status === 'SUSPENDED';
     }
 
     // 3. Status Filter
@@ -143,11 +148,34 @@ export default function DeliveryPartnersList({ onNavigate }) {
   }, [searchQuery, filterVerification, filterStatus, filterAvailability]);
 
   // --- RENDER BADGES ---
-  const renderVerificationBadge = (isVerified) => {
+  const renderVerificationBadge = (partner) => {
+    const status = partner.accountStatus || (partner.isVerified ? 'APPROVED' : 'PENDING');
+    let bg = 'var(--bg-subtle)';
+    let color = 'var(--text-muted)';
+    let text = 'Unverified / Pending';
+    let dotColor = null;
+
+    if (status === 'APPROVED') {
+      bg = 'var(--bg-success-subtle)';
+      color = 'var(--text-success)';
+      text = 'Approved / Verified';
+      dotColor = 'var(--text-success)';
+    } else if (status === 'ACTION_REQUIRED') {
+      bg = 'var(--bg-warning-subtle)';
+      color = 'var(--text-warning)';
+      text = 'Action Required';
+      dotColor = 'var(--text-warning)';
+    } else if (status === 'SUSPENDED') {
+      bg = 'var(--bg-danger-subtle)';
+      color = 'var(--text-danger)';
+      text = 'Suspended';
+      dotColor = 'var(--text-danger)';
+    }
+
     return (
       <span style={{
-        background: isVerified ? 'var(--bg-success-subtle)' : 'var(--bg-subtle)',
-        color: isVerified ? 'var(--text-success)' : 'var(--text-muted)',
+        background: bg,
+        color: color,
         padding: '0.2rem 0.5rem',
         borderRadius: 'var(--radius-sm)',
         fontSize: '0.72rem',
@@ -156,14 +184,10 @@ export default function DeliveryPartnersList({ onNavigate }) {
         alignItems: 'center',
         gap: '0.25rem'
       }}>
-        {isVerified ? (
-          <>
-            <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--text-success)' }}></span>
-            <span>Verified</span>
-          </>
-        ) : (
-          <span>Pending</span>
+        {dotColor && (
+          <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: dotColor }}></span>
         )}
+        <span>{text}</span>
       </span>
     );
   };
@@ -361,7 +385,7 @@ export default function DeliveryPartnersList({ onNavigate }) {
 
           {/* Verification Dropdown */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-muted)' }}>Verification</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-muted)' }}>Status</span>
             <select
               value={filterVerification}
               onChange={(e) => setFilterVerification(e.target.value)}
@@ -375,9 +399,11 @@ export default function DeliveryPartnersList({ onNavigate }) {
                 outline: 'none'
               }}
             >
-              <option value="All">All Verification</option>
-              <option value="Verified">Verified</option>
-              <option value="Pending">Pending</option>
+              <option value="All">All Statuses</option>
+              <option value="PENDING">Unverified / Pending</option>
+              <option value="APPROVED">Approved / Verified</option>
+              <option value="ACTION_REQUIRED">Action Required</option>
+              <option value="SUSPENDED">Suspended</option>
             </select>
           </div>
 
@@ -564,7 +590,7 @@ export default function DeliveryPartnersList({ onNavigate }) {
                     {/* Badges Column */}
                     <td style={{ padding: '1rem 1.25rem' }}>
                       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        {renderVerificationBadge(partner.isVerified)}
+                        {renderVerificationBadge(partner)}
                         {renderOnlineBadge(partner.isOnline)}
                         {renderAvailabilityBadge(partner)}
                       </div>

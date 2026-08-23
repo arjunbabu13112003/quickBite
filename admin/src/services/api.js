@@ -511,11 +511,13 @@ export const api = {
     return handleResponse(res);
   },
 
-  createDeliveryPartnerAccount: async (payload) => {
+  createDeliveryPartnerAccount: async (formData) => {
+    const headers = { ...getAuthHeaders() };
+    delete headers['Content-Type'];
     const res = await fetch(`${API_BASE_URL}/delivery-partners/admin-create`, {
       method: 'POST',
-      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers,
+      body: formData,
     });
     return handleResponse(res);
   },
@@ -536,6 +538,45 @@ export const api = {
       body: JSON.stringify({ isVerified }),
     });
     return handleResponse(res);
+  },
+
+  verifyDeliveryPartnerDocument: async (partnerId, documentId, status, reason) => {
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/${partnerId}/documents/${documentId}/verification`, {
+      method: 'PATCH',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, reason }),
+    });
+    return handleResponse(res);
+  },
+
+  updateDeliveryPartnerAccountStatus: async (partnerId, status, reason) => {
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/${partnerId}/status`, {
+      method: 'PATCH',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, reason }),
+    });
+    return handleResponse(res);
+  },
+
+  getDeliveryPartnerDocument: async (partnerId, documentId) => {
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/${partnerId}/documents/${documentId}`, {
+      headers: { ...getAuthHeaders() },
+    });
+    if (res.status === 401) {
+      clearSession();
+      window.location.href = '/login?expired=true';
+      throw new Error('Session Expired');
+    }
+    if (!res.ok) {
+      if (res.status === 403) {
+        throw new Error('You do not have permission to view this document.');
+      }
+      if (res.status === 404) {
+        throw new Error('Document not found.');
+      }
+      throw new Error(`Failed to fetch document: ${res.status}`);
+    }
+    return res.blob();
   },
 
   getAvailableDeliveryPartners: async () => {

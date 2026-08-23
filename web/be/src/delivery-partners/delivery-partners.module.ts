@@ -1,25 +1,33 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DeliveryPartner } from './delivery-partner.entity';
+import { DeliveryPartnerDocument } from './delivery-partner-document.entity';
+import { DeliveryPartnerBankDetails } from './delivery-partner-bank-details.entity';
 import { DeliveryAssignment } from './delivery-assignment.entity';
 import { User } from '../users/user.entity';
 import { Order } from '../orders/order.entity';
 import { DeliveryPartnersService } from './delivery-partners.service';
-import { DeliveryPartnersController } from './delivery-partners.controller';
+import { DeliveryPartnersController, DeliveryPartnersLoginController } from './delivery-partners.controller';
 import { PaymentsModule } from '../payments/payments.module';
+import { BankEncryptionService } from './bank-encryption.service';
+
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       DeliveryPartner,
+      DeliveryPartnerDocument,
+      DeliveryPartnerBankDetails,
       DeliveryAssignment,
       User,
       Order,
     ]),
     PaymentsModule,
+    UsersModule,
   ],
-  controllers: [DeliveryPartnersController],
-  providers: [DeliveryPartnersService],
-  exports: [DeliveryPartnersService],
+  controllers: [DeliveryPartnersController, DeliveryPartnersLoginController],
+  providers: [DeliveryPartnersService, BankEncryptionService],
+  exports: [DeliveryPartnersService, BankEncryptionService],
 })
 export class DeliveryPartnersModule {}

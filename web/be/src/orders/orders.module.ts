@@ -11,6 +11,7 @@ import { HotelAdminsModule } from '../hotel-admins/hotel-admins.module';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { OffersModule } from '../offers/offers.module';
+import { DeliveryPartnersModule } from '../delivery-partners/delivery-partners.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { OffersModule } from '../offers/offers.module';
       Hotel,
     ]),
     HotelAdminsModule,
+    DeliveryPartnersModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

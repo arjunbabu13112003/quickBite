@@ -10,11 +10,15 @@ import {
   Dimensions, 
   Platform,
   KeyboardAvoidingView,
-  TextInput
+  TextInput,
+  ActivityIndicator,
+  AppState,
+  AppStateStatus
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
+import { api, getAuthToken, setAuthToken } from '../services/api';
 
 // Import Reusable Components
 import Header from '../components/header';
@@ -130,7 +134,9 @@ export default function AppIndex() {
   // - 'delivery-completed': Order completed success screen.
   const [deliveryState, setDeliveryState] = useState<'none' | 'incoming-request' | 'active-restaurant' | 'active-pickup' | 'active-start-delivery' | 'active-delivery' | 'delivery-completed'>('none');
   
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(false);
+  const [isAvailable, setIsAvailable] = useState(false);
+  const [isMutatingOnline, setIsMutatingOnline] = useState(false);
   const [isCashCollected, setIsCashCollected] = useState(false);
   const [countdown, setCountdown] = useState(23);
   const [ordersSubTab, setOrdersSubTab] = useState<'current' | 'completed'>('current');
@@ -138,10 +144,45 @@ export default function AppIndex() {
   const [completedFilter, setCompletedFilter] = useState<'today' | 'week' | 'month'>('today');
   const [showFilterPicker, setShowFilterPicker] = useState(false);
 
-  // Authentication local mock states
+  // Phase 5 assignment states
+  const [incomingAssignment, setIncomingAssignment] = useState<any>(null);
+  const [activeAssignment, setActiveAssignment] = useState<any>(null);
+  const [isAcceptingDeclining, setIsAcceptingDeclining] = useState(false);
+
+  // Authentication local mock states -> now real states
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [accountStatus, setAccountStatus] = useState<'APPROVED' | 'PENDING' | 'ACTION_REQUIRED' | 'SUSPENDED'>('APPROVED');
   const [authScreen, setAuthScreen] = useState<'login' | 'forgot-password' | 'verify-otp' | 'create-password' | 'password-updated'>('login');
+
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentPartner, setCurrentPartner] = useState<any>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  const [appState, setAppState] = useState(AppState.currentState);
+  const isRequestingRef = useRef(false);
+  const isFirstActiveRef = useRef(true);
+
+  const handleLogout = async (forceLocalOnly = false) => {
+    if (!forceLocalOnly) {
+      try {
+        await api.updateOnlineStatus(false);
+      } catch (err) {
+        console.warn('Logout offline request failed (non-blocking):', err);
+      }
+    }
+    await setAuthToken(null);
+    setCurrentUser(null);
+    setCurrentPartner(null);
+    setIsOnline(false);
+    setIsAvailable(false);
+    setIsAuthenticated(false);
+    setDeliveryState('none');
+    setIncomingAssignment(null);
+    setActiveAssignment(null);
+    setOrdersSubTab('current');
+    setActiveTab('home');
+    changeAuthScreen('login');
+  };
 
   // Login Form states
   const [loginEmailMobile, setLoginEmailMobile] = useState('');
@@ -170,29 +211,36 @@ export default function AppIndex() {
   // Rahul Profile Image Mock (using a high-quality free headshot)
   const profileImageUri = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop';
 
-  // Manage Countdown Timer for Incoming Requests
-  const startIncomingRequestTimer = () => {
+  // Manage Countdown Timer for Incoming Requests derived from expiresAt
+  const startIncomingRequestTimer = (expiresAt: string) => {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
     }
-    setCountdown(23);
-    countdownIntervalRef.current = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(countdownIntervalRef.current!);
+
+    const updateCountdown = () => {
+      const expiresAtTime = new Date(expiresAt).getTime();
+      const nowTime = Date.now();
+      const remainingSec = Math.max(0, Math.floor((expiresAtTime - nowTime) / 1000));
+      setCountdown(remainingSec);
+
+      if (remainingSec <= 0) {
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
           countdownIntervalRef.current = null;
-          setDeliveryState('none');
-          return 0;
         }
-        return prev - 1;
-      });
-    }, 1000);
+        setDeliveryState('none');
+        setIncomingAssignment(null);
+      }
+    };
+
+    updateCountdown();
+    countdownIntervalRef.current = setInterval(updateCountdown, 1000);
   };
 
-  const changeDeliveryState = (newState: typeof deliveryState) => {
+  const changeDeliveryState = (newState: typeof deliveryState, expiresAt?: string) => {
     setDeliveryState(newState);
-    if (newState === 'incoming-request') {
-      startIncomingRequestTimer();
+    if (newState === 'incoming-request' && expiresAt) {
+      startIncomingRequestTimer(expiresAt);
     } else {
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
@@ -202,22 +250,160 @@ export default function AppIndex() {
   };
 
   const completeActiveOrder = () => {
-    // Append the active order details dynamically to completedOrders state
+    const order = activeAssignment?.order || {};
     const newCompletedOrder = {
-      orderId: 'Order #QB1024',
-      date: '21 Aug · 2:45 PM', // current mock completion date/time
+      orderId: `Order ${order.orderNumber || ''}`,
+      date: new Date().toLocaleString(),
       filterGroup: ['today', 'week', 'month'],
       status: 'Delivered',
-      restaurantName: 'Khao Gully',
-      dropArea: 'Panampilly Nagar',
-      distance: '4.6 km',
-      paymentMode: 'COD',
-      codAmount: 320,
+      restaurantName: order.restaurantName || 'QuickBite Kitchen',
+      dropArea: order.deliveryAddress || 'Drop Location',
+      distance: '2.5 km',
+      paymentMode: order.paymentMethod || 'Prepaid',
+      codAmount: order.paymentMethod === 'COD' ? order.amount : undefined,
       earnings: 65
     };
     setCompletedOrders(prev => [newCompletedOrder, ...prev]);
     changeDeliveryState('delivery-completed');
   };
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const token = await getAuthToken();
+        if (token) {
+          const data = await api.getMe();
+          setCurrentUser(data.partner.user);
+          setCurrentPartner(data.partner);
+          setAccountStatus(data.partner.accountStatus);
+          setIsOnline(data.partner.isOnline);
+          setIsAvailable(data.partner.isAvailable);
+          setIsAuthenticated(true);
+
+          if (data.partner.accountStatus === 'APPROVED') {
+            try {
+              const deliveryData = await api.getActiveDelivery();
+              if (deliveryData && deliveryData.assignment) {
+                setActiveAssignment(deliveryData.assignment);
+                setDeliveryState('active-restaurant');
+                setIsAvailable(false);
+              }
+            } catch (activeErr) {
+              console.error('Failed to restore active delivery:', activeErr);
+            }
+          }
+        }
+      } catch (err) {
+        const error = err as any;
+        console.error('Session restoration failed:', error);
+        await setAuthToken(null);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+    restoreSession();
+  }, []);
+
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      setAppState(nextAppState);
+    };
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    let intervalId: any = null;
+
+    const fetchStatus = async () => {
+      if (isRequestingRef.current) return;
+
+      const token = await getAuthToken();
+      if (!token) return;
+
+      isRequestingRef.current = true;
+      try {
+        const data = await api.getMe();
+        setCurrentUser(data.partner.user);
+        setCurrentPartner(data.partner);
+        setAccountStatus(data.partner.accountStatus);
+        setIsOnline(data.partner.isOnline);
+        setIsAvailable(data.partner.isAvailable);
+      } catch (err) {
+        const error = err as any;
+        console.error('[Polling] Status refresh failed:', error.message);
+        if (error.message === 'Unauthorized' || error.message === 'Forbidden resource') {
+          await handleLogout(true);
+        }
+      } finally {
+        isRequestingRef.current = false;
+      }
+    };
+
+    if (isAuthenticated && appState === 'active') {
+      if (isFirstActiveRef.current) {
+        isFirstActiveRef.current = false;
+      } else {
+        fetchStatus();
+      }
+      intervalId = setInterval(fetchStatus, 10000);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isAuthenticated, appState]);
+
+  // Polling incoming assignments
+  useEffect(() => {
+    let intervalId: any = null;
+    let isPolling = false;
+
+    const checkIncoming = async () => {
+      if (isPolling) return;
+      isPolling = true;
+
+      try {
+        const data = await api.getIncomingAssignment();
+        if (data && data.assignment) {
+          setIncomingAssignment(data.assignment);
+          changeDeliveryState('incoming-request', data.assignment.expiresAt);
+        } else {
+          if (deliveryState === 'incoming-request') {
+            changeDeliveryState('none');
+            setIncomingAssignment(null);
+          }
+        }
+      } catch (err) {
+        console.error('[Polling] Fetch incoming assignment failed:', err);
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    const shouldPoll = 
+      isAuthenticated && 
+      accountStatus === 'APPROVED' && 
+      isOnline && 
+      isAvailable && 
+      deliveryState === 'none' && 
+      appState === 'active';
+
+    if (shouldPoll) {
+      checkIncoming();
+      intervalId = setInterval(checkIncoming, 4000);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isAuthenticated, accountStatus, isOnline, isAvailable, deliveryState, appState]);
 
   useEffect(() => {
     return () => {
@@ -230,9 +416,72 @@ export default function AppIndex() {
     };
   }, []);
 
+  const handleAcceptAssignment = async () => {
+    if (!incomingAssignment || isAcceptingDeclining) return;
+    setIsAcceptingDeclining(true);
+    try {
+      await api.acceptAssignment(incomingAssignment.id);
+      setActiveAssignment(incomingAssignment);
+      setIncomingAssignment(null);
+      setIsAvailable(false);
+      changeDeliveryState('active-restaurant');
+    } catch (err) {
+      const error = err as any;
+      alert(error.message || 'Failed to accept assignment.');
+      changeDeliveryState('none');
+      setIncomingAssignment(null);
+    } finally {
+      setIsAcceptingDeclining(false);
+    }
+  };
+
+  const handleDeclineAssignment = async () => {
+    if (!incomingAssignment || isAcceptingDeclining) return;
+    setIsAcceptingDeclining(true);
+    try {
+      await api.declineAssignment(incomingAssignment.id);
+      changeDeliveryState('none');
+      setIncomingAssignment(null);
+      setIsAvailable(true);
+    } catch (err) {
+      const error = err as any;
+      alert(error.message || 'Failed to decline assignment.');
+      changeDeliveryState('none');
+      setIncomingAssignment(null);
+    } finally {
+      setIsAcceptingDeclining(false);
+    }
+  };
+
   // Toggle Online Status
-  const handleOnlineToggle = () => {
-    setIsOnline(!isOnline);
+  const handleOnlineToggle = async () => {
+    if (isMutatingOnline) return;
+
+    const targetOnline = !isOnline;
+    setIsMutatingOnline(true);
+    try {
+      const data = await api.updateOnlineStatus(targetOnline);
+      setIsOnline(data.isOnline);
+      setIsAvailable(data.isAvailable);
+    } catch (err) {
+      const error = err as any;
+      console.error('Failed to toggle online status:', error.message);
+      if (error.message === 'Unauthorized' || error.message === 'Forbidden resource') {
+        await handleLogout(true);
+      } else {
+        alert(error.message || 'Unable to change status. Please try again.');
+        try {
+          const profile = await api.getMe();
+          setAccountStatus(profile.partner.accountStatus);
+          setIsOnline(profile.partner.isOnline);
+          setIsAvailable(profile.partner.isAvailable);
+        } catch (meErr) {
+          // ignore
+        }
+      }
+    } finally {
+      setIsMutatingOnline(false);
+    }
   };
 
   // Helper to render the appropriate screen inside the active tab
@@ -278,6 +527,7 @@ export default function AppIndex() {
         <Header 
           title="QuickBite Partner" 
           isOnline={isOnline} 
+          isAvailable={isAvailable}
           profileImage={profileImageUri}
         />
         
@@ -290,7 +540,7 @@ export default function AppIndex() {
           <View style={styles.welcomeRow}>
             <View>
               <Text style={styles.greetingText}>Good Morning,</Text>
-              <Text style={styles.riderNameText}>Rahul</Text>
+              <Text style={styles.riderNameText}>{currentUser?.name?.split(' ')[0] || 'Partner'}</Text>
             </View>
             <View style={styles.rightActionsRow}>
               <TouchableOpacity style={styles.bellButton} activeOpacity={0.7}>
@@ -340,10 +590,13 @@ export default function AppIndex() {
               
               <TouchableOpacity 
                 activeOpacity={0.8}
-                onPress={() => setIsOnline(true)}
+                onPress={handleOnlineToggle}
+                disabled={isMutatingOnline}
                 style={styles.offlineGoOnlineBtn}
               >
-                <Text style={styles.offlineGoOnlineBtnText}>Go Online</Text>
+                <Text style={styles.offlineGoOnlineBtnText}>
+                  {isMutatingOnline ? 'Connecting...' : 'Go Online'}
+                </Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -412,6 +665,7 @@ export default function AppIndex() {
 
   // SCREEN 1.5: INCOMING DELIVERY REQUEST SCREEN (Floating Bottom Sheet Overlay)
   const renderIncomingRequestScreen = () => {
+    const order = incomingAssignment?.order || {};
     return (
       <View style={styles.incomingRequestContainer}>
         {/* Muted Map Background */}
@@ -439,7 +693,7 @@ export default function AppIndex() {
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={styles.incomingNewRequestTitle}>New Request</Text>
-              <Text style={styles.incomingOrderIdText}>Order #QB1024</Text>
+              <Text style={styles.incomingOrderIdText}>{order.orderNumber || 'Order'}</Text>
             </View>
             <View style={styles.incomingEarningsCol}>
               <Text style={styles.incomingEarningsLabel}>EST. EARNING</Text>
@@ -457,14 +711,14 @@ export default function AppIndex() {
             <View style={styles.incomingQuickInfoDivider} />
             <View style={styles.incomingQuickInfoCol}>
               <Ionicons name="git-commit" size={16} color="#8A7A6E" />
-              <Text style={styles.incomingQuickInfoValue}>4.6</Text>
+              <Text style={styles.incomingQuickInfoValue}>2.5</Text>
               <Text style={styles.incomingQuickInfoLabel}>KM TOTAL</Text>
             </View>
             <View style={styles.incomingQuickInfoDivider} />
             <View style={styles.incomingQuickInfoCol}>
               <Ionicons name="cash" size={16} color="#8A7A6E" />
-              <Text style={styles.incomingQuickInfoValue}>COD</Text>
-              <Text style={styles.incomingQuickInfoLabel}>₹320</Text>
+              <Text style={styles.incomingQuickInfoValue}>{order.paymentMethod || 'Prepaid'}</Text>
+              <Text style={styles.incomingQuickInfoLabel}>₹{order.amount || 0}</Text>
             </View>
           </View>
 
@@ -474,12 +728,12 @@ export default function AppIndex() {
               <View style={[styles.routeDot, styles.pickupDotColor]} />
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <View style={styles.incomingRouteTextRow}>
-                  <Text style={styles.incomingRouteTitle}>Khao Gully</Text>
+                  <Text style={styles.incomingRouteTitle}>{order.restaurantName || 'QuickBite Kitchen'}</Text>
                   <View style={styles.routeDistanceBadge}>
                     <Text style={styles.routeDistanceText}>1.2 KM</Text>
                   </View>
                 </View>
-                <Text style={styles.incomingRouteSubtitle}>Restaurant Pickup</Text>
+                <Text style={styles.incomingRouteSubtitle}>{order.pickupAddress || 'Restaurant Pickup'}</Text>
               </View>
             </View>
 
@@ -489,46 +743,53 @@ export default function AppIndex() {
               <View style={[styles.routeDot, styles.dropDotColor]} />
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <View style={styles.incomingRouteTextRow}>
-                  <Text style={styles.incomingRouteTitle}>Customer Drop</Text>
+                  <Text style={styles.incomingRouteTitle}>{order.customerName || 'Customer'}</Text>
                   <View style={styles.routeDistanceBadge}>
                     <Text style={styles.routeDistanceText}>3.4 KM</Text>
                   </View>
                 </View>
-                <Text style={styles.incomingRouteSubtitle}>Residential Area</Text>
+                <Text style={styles.incomingRouteSubtitle}>{order.deliveryAddress || 'Drop Location'}</Text>
               </View>
             </View>
           </View>
 
           {/* COD Warning Card */}
-          <View style={styles.incomingCodBox}>
-            <Ionicons name="warning" size={16} color="#B91C1C" style={{ marginRight: 8, marginTop: 1 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.incomingCodTitle}>Cash on Delivery</Text>
-              <Text style={styles.incomingCodText}>Collect ₹320 from customer</Text>
+          {order.paymentMethod === 'COD' && (
+            <View style={styles.incomingCodBox}>
+              <Ionicons name="warning" size={16} color="#B91C1C" style={{ marginRight: 8, marginTop: 1 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.incomingCodTitle}>Cash on Delivery</Text>
+                <Text style={styles.incomingCodText}>Collect ₹{order.amount || 0} from customer</Text>
+              </View>
             </View>
-          </View>
+          )}
 
           {/* Bottom Action buttons */}
           <View style={styles.incomingActionsRow}>
             <TouchableOpacity 
               activeOpacity={0.7}
-              onPress={() => changeDeliveryState('none')}
-              style={styles.incomingDeclineBtn}
+              disabled={isAcceptingDeclining}
+              onPress={handleDeclineAssignment}
+              style={[styles.incomingDeclineBtn, isAcceptingDeclining && { opacity: 0.5 }]}
             >
               <Text style={styles.incomingDeclineBtnText}>Decline</Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
               activeOpacity={0.8}
-              onPress={() => {
-                changeDeliveryState('active-restaurant');
-                setIsCashCollected(false);
-              }}
-              style={styles.incomingAcceptBtn}
+              disabled={isAcceptingDeclining}
+              onPress={handleAcceptAssignment}
+              style={[styles.incomingAcceptBtn, isAcceptingDeclining && { opacity: 0.5 }]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={styles.incomingAcceptBtnText}>Accept Delivery</Text>
-                <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                {isAcceptingDeclining ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Text style={styles.incomingAcceptBtnText}>Accept Delivery</Text>
+                    <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                  </>
+                )}
               </View>
             </TouchableOpacity>
           </View>
@@ -539,6 +800,7 @@ export default function AppIndex() {
 
   // SCREEN 2: ACTIVE DELIVERY DETAILS (Reach Restaurant -> Pickup -> Out for Delivery)
   const renderActiveDeliveryScreen = (currentStep: 'reach-restaurant' | 'pickup' | 'start-delivery') => {
+    const order = activeAssignment?.order || {};
     let currentCtaText = 'Reached Restaurant →';
     if (currentStep === 'pickup') {
       currentCtaText = 'Confirm Pickup →';
@@ -561,8 +823,8 @@ export default function AppIndex() {
         <Header 
           title="QuickBite Partner" 
           isOnline={isOnline} 
-          showBack={true}
-          onBackPress={() => changeDeliveryState('none')}
+          isAvailable={isAvailable}
+          showBack={false}
         />
 
         <ScrollView 
@@ -572,10 +834,10 @@ export default function AppIndex() {
         >
           {/* Order Details Header */}
           <View style={styles.activeOrderHeader}>
-            <Text style={styles.activeOrderTitle}>Order #QB1024</Text>
+            <Text style={styles.activeOrderTitle}>{order.orderNumber || 'Order'}</Text>
             <View style={styles.codIndicatorBadge}>
               <Ionicons name="cash-outline" size={12} color="#B91C1C" style={{ marginRight: 4 }} />
-              <Text style={styles.codIndicatorText}>COD ₹320</Text>
+              <Text style={styles.codIndicatorText}>{order.paymentMethod || 'Prepaid'} ₹{order.amount || 0}</Text>
             </View>
           </View>
 
@@ -590,8 +852,8 @@ export default function AppIndex() {
             <View style={styles.pickupCardHeader}>
               <View>
                 <Text style={styles.pickupCardSub}>PICKUP FROM</Text>
-                <Text style={styles.pickupCardTitle}>Khao Gully</Text>
-                <Text style={styles.pickupCardDesc}>MG Road, Kochi</Text>
+                <Text style={styles.pickupCardTitle}>{order.restaurantName || 'QuickBite Kitchen'}</Text>
+                <Text style={styles.pickupCardDesc}>{order.pickupAddress || 'Restaurant Pickup'}</Text>
               </View>
               <View style={styles.distanceBadge}>
                 <Ionicons name="walk" size={12} color="#8A7A6E" style={{ marginRight: 3 }} />
@@ -617,7 +879,7 @@ export default function AppIndex() {
           <View style={styles.itemsCardRow}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Ionicons name="bag-handle" size={16} color="#F97316" style={{ marginRight: 8 }} />
-              <Text style={styles.itemsCardText}>2 Items</Text>
+              <Text style={styles.itemsCardText}>{order.itemCount || 0} Items</Text>
             </View>
             <TouchableOpacity activeOpacity={0.7}>
               <Text style={styles.viewItemsText}>View Items &gt;</Text>
@@ -641,13 +903,14 @@ export default function AppIndex() {
 
   // SCREEN 3: CUSTOMER DELIVERY (Customer details, cash collection, delivered cta)
   const renderCustomerDeliveryScreen = () => {
+    const order = activeAssignment?.order || {};
     return (
       <View style={styles.tabContentContainer}>
         <Header 
           title="QuickBite Partner" 
           isOnline={isOnline} 
-          showBack={true}
-          onBackPress={() => changeDeliveryState('active-start-delivery')}
+          isAvailable={isAvailable}
+          showBack={false}
         />
 
         <ScrollView 
@@ -660,8 +923,8 @@ export default function AppIndex() {
             <View style={styles.customerCardContent}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.customerCardLabel}>Deliver To</Text>
-                <Text style={styles.customerCardTitle}>Panampilly Nagar, Kochi</Text>
-                <Text style={styles.customerCardSub}>Arjun K. • Apt 4B, Green View Residency</Text>
+                <Text style={styles.customerCardTitle}>{order.customerName || 'Customer'}</Text>
+                <Text style={styles.customerCardSub}>{order.deliveryAddress || 'Drop Area'}</Text>
               </View>
               <TouchableOpacity style={styles.customerCallBtn} activeOpacity={0.7}>
                 <Ionicons name="call" size={18} color="#7C2D12" />
@@ -686,39 +949,44 @@ export default function AppIndex() {
           {/* CASH ON DELIVERY COLLECTED STATUS */}
           <View style={[
             styles.codBox,
-            isCashCollected && styles.codBoxSuccess
+            (isCashCollected || order.paymentMethod !== 'COD') && styles.codBoxSuccess
           ]}>
             <View style={styles.codBoxHeader}>
               <Ionicons 
                 name="cash" 
                 size={18} 
-                color={isCashCollected ? '#137333' : '#B91C1C'} 
+                color={(isCashCollected || order.paymentMethod !== 'COD') ? '#137333' : '#B91C1C'} 
                 style={{ marginRight: 8 }} 
               />
               <Text style={[
                 styles.codBoxTitle,
-                isCashCollected && styles.codBoxTitleSuccess
+                (isCashCollected || order.paymentMethod !== 'COD') && styles.codBoxTitleSuccess
               ]}>
-                CASH ON DELIVERY
+                {order.paymentMethod === 'COD' ? 'CASH ON DELIVERY' : 'ONLINE PREPAID'}
               </Text>
             </View>
             
             <View style={styles.codDetailsRow}>
               <View>
-                {!isCashCollected ? (
+                {order.paymentMethod !== 'COD' ? (
+                  <View style={styles.confirmedCashBadge}>
+                    <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 4 }} />
+                    <Text style={styles.confirmedCashText}>Prepaid Order ✓</Text>
+                  </View>
+                ) : !isCashCollected ? (
                   <Text style={styles.codBoxSub}>Collect exact amount from customer.</Text>
                 ) : (
                   <View style={styles.confirmedCashBadge}>
                     <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 4 }} />
-                    <Text style={styles.confirmedCashText}>₹320 Cash Collected ✓</Text>
+                    <Text style={styles.confirmedCashText}>₹{order.amount || 0} Cash Collected ✓</Text>
                   </View>
                 )}
               </View>
               <Text style={[
                 styles.codAmountText,
-                isCashCollected && styles.codAmountTextSuccess
+                (isCashCollected || order.paymentMethod !== 'COD') && styles.codAmountTextSuccess
               ]}>
-                ₹320
+                ₹{order.amount || 0}
               </Text>
             </View>
           </View>
@@ -726,13 +994,13 @@ export default function AppIndex() {
 
         {/* Sticky Action Button Container */}
         <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
-          {!isCashCollected ? (
+          {order.paymentMethod === 'COD' && !isCashCollected ? (
             <TouchableOpacity 
               activeOpacity={0.8}
               onPress={() => setIsCashCollected(true)}
               style={styles.stickyFooterButton}
             >
-              <Text style={styles.stickyFooterButtonText}>Confirm ₹320 Cash Collected</Text>
+              <Text style={styles.stickyFooterButtonText}>Confirm ₹{order.amount || 0} Cash Collected</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity 
@@ -753,6 +1021,7 @@ export default function AppIndex() {
 
   // SCREEN 3.5: DELIVERY COMPLETED SUCCESS SCREEN
   const renderDeliveryCompletedScreen = () => {
+    const order = activeAssignment?.order || {};
     return (
       <View style={styles.completedScreenContainer}>
         <View style={styles.completedContentContainer}>
@@ -762,7 +1031,7 @@ export default function AppIndex() {
           </View>
 
           <Text style={styles.completedTitle}>Delivery Completed!</Text>
-          <Text style={styles.completedOrderText}>Order #QB1024</Text>
+          <Text style={styles.completedOrderText}>{order.orderNumber || 'Order'}</Text>
 
           {/* Earning Card */}
           <View style={styles.completedEarningCard}>
@@ -780,16 +1049,18 @@ export default function AppIndex() {
               <View style={styles.completedStatCol}>
                 <Ionicons name="git-commit-outline" size={16} color="#8A7A6E" />
                 <Text style={styles.completedStatTitle}>Distance</Text>
-                <Text style={styles.completedStatValue}>4.6 km</Text>
+                <Text style={styles.completedStatValue}>2.5 km</Text>
               </View>
             </View>
           </View>
 
           {/* Cash Collected Confirmation Badge */}
-          <View style={styles.completedCashCollectedCard}>
-            <Ionicons name="cash-outline" size={16} color="#78350F" style={{ marginRight: 8 }} />
-            <Text style={styles.completedCashCollectedText}>₹320 collected ✓</Text>
-          </View>
+          {order.paymentMethod === 'COD' && (
+            <View style={styles.completedCashCollectedCard}>
+              <Ionicons name="cash-outline" size={16} color="#78350F" style={{ marginRight: 8 }} />
+              <Text style={styles.completedCashCollectedText}>₹{order.amount || 0} collected ✓</Text>
+            </View>
+          )}
         </View>
 
         {/* Bottom CTA buttons */}
@@ -798,7 +1069,9 @@ export default function AppIndex() {
             activeOpacity={0.8}
             onPress={() => {
               changeDeliveryState('none');
+              setActiveAssignment(null);
               setIsOnline(true);
+              setIsAvailable(true);
             }}
             style={styles.completedPrimaryBtn}
           >
@@ -807,7 +1080,12 @@ export default function AppIndex() {
 
           <TouchableOpacity 
             activeOpacity={0.7}
-            onPress={() => changeDeliveryState('none')}
+            onPress={() => {
+              changeDeliveryState('none');
+              setActiveAssignment(null);
+              setIsOnline(true);
+              setIsAvailable(true);
+            }}
             style={styles.completedSecondaryBtn}
           >
             <Text style={styles.completedSecondaryBtnText}>Go to Home</Text>
@@ -845,6 +1123,7 @@ export default function AppIndex() {
         <Header 
           title="Orders" 
           isOnline={isOnline} 
+          isAvailable={isAvailable}
         />
         
         {/* Custom Tab selector row with filter icon */}
@@ -1150,7 +1429,7 @@ export default function AppIndex() {
 
     return (
       <View style={styles.tabContentContainer}>
-        <Header title="Earnings" isOnline={isOnline} />
+        <Header title="Earnings" isOnline={isOnline} isAvailable={isAvailable} />
         
         <ScrollView 
           showsVerticalScrollIndicator={false}
@@ -1253,7 +1532,7 @@ export default function AppIndex() {
   const renderProfileTab = () => {
     return (
       <View style={styles.tabContentContainer}>
-        <Header title="QuickBite Partner" isOnline={isOnline} />
+        <Header title="QuickBite Partner" isOnline={isOnline} isAvailable={isAvailable} />
 
         <ScrollView 
           showsVerticalScrollIndicator={false}
@@ -1269,11 +1548,11 @@ export default function AppIndex() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.profileNameText}>Rahul Sharma</Text>
+            <Text style={styles.profileNameText}>{currentUser?.name || 'Partner'}</Text>
             
             <View style={styles.profileMetaRow}>
               <View style={styles.profileMetaBadge}>
-                <Text style={styles.profileMetaLabel}>ID: P1024</Text>
+                <Text style={styles.profileMetaLabel}>ID: P{currentPartner?.id || '—'}</Text>
               </View>
               <View style={[styles.profileMetaBadge, styles.starRatingBadge]}>
                 <Ionicons name="star" size={11} color="#D97706" style={{ marginRight: 2 }} />
@@ -1285,13 +1564,13 @@ export default function AppIndex() {
           {/* Profile Menu rows */}
           <MenuRow 
             title="Personal Details" 
-            subtitle="Contact info, Emergency" 
+            subtitle={currentUser ? `${currentUser.mobileNumber} • ${currentUser.email}` : "Contact info, Emergency"} 
             icon="person" 
           />
 
           <MenuRow 
             title="Vehicle Details" 
-            subtitle="Bike • KL-07-2024" 
+            subtitle={currentPartner ? `${currentPartner.vehicleType} • ${currentPartner.vehicleNumber || 'No Plate'}` : "Bike • KL-07-2024"} 
             icon="bicycle" 
           />
 
@@ -1319,13 +1598,9 @@ export default function AppIndex() {
           {/* Logout Button */}
           <View style={styles.logoutContainer}>
             <TouchableOpacity 
-              style={styles.logoutButton} 
+              style={styles.logoutButton}
               activeOpacity={0.7}
-              onPress={() => {
-                setIsAuthenticated(false);
-                setDeliveryState('none');
-                setOrdersSubTab('current');
-              }}
+              onPress={() => handleLogout()}
             >
               <Ionicons name="log-out-outline" size={18} color="#B91C1C" style={{ marginRight: 8 }} />
               <Text style={styles.logoutText}>Logout</Text>
@@ -1398,26 +1673,29 @@ export default function AppIndex() {
     if (hasError) return;
 
     setIsLoggingIn(true);
-    setTimeout(() => {
+    api.login({
+      identifier: loginEmailMobile.trim(),
+      password: loginPassword
+    })
+    .then(data => {
       setIsLoggingIn(false);
-      const emailLower = loginEmailMobile.trim().toLowerCase();
-      
-      if (emailLower === 'approved' || emailLower === 'approved@quickbite.com' || emailLower === '9876543210') {
-        setAccountStatus('APPROVED');
-        setIsAuthenticated(true);
-      } else if (emailLower === 'pending' || emailLower === 'pending@quickbite.com') {
-        setAccountStatus('PENDING');
-        setIsAuthenticated(true);
-      } else if (emailLower === 'action' || emailLower === 'action@quickbite.com') {
-        setAccountStatus('ACTION_REQUIRED');
-        setIsAuthenticated(true);
-      } else if (emailLower === 'suspended' || emailLower === 'suspended@quickbite.com') {
-        setAccountStatus('SUSPENDED');
-        setIsAuthenticated(true);
-      } else {
-        setLoginFormError('Invalid mobile number/email or password');
+      setCurrentUser(data.user);
+      setCurrentPartner(data.partner);
+      setAccountStatus(data.partner.accountStatus);
+      setIsOnline(data.partner.isOnline);
+      setIsAvailable(data.partner.isAvailable);
+      if (data.partner.accountStatus === 'APPROVED') {
+        setActiveTab('home');
       }
-    }, 1000);
+      setIsAuthenticated(true);
+      
+      setLoginEmailMobile('');
+      setLoginPassword('');
+    })
+    .catch((err: any) => {
+      setIsLoggingIn(false);
+      setLoginFormError(err.message || 'Invalid email/mobile or password.');
+    });
   };
 
   const handleSendOtpPress = () => {
@@ -1758,10 +2036,7 @@ export default function AppIndex() {
               <Text style={styles.helpText}>Need help? Contact Support</Text>
               <TouchableOpacity 
                 activeOpacity={0.7}
-                onPress={() => {
-                  setIsAuthenticated(false);
-                  changeAuthScreen('login');
-                }}
+                onPress={() => handleLogout()}
                 style={{ marginLeft: 12 }}
               >
                 <Text style={styles.devLogoutLink}>Logout 🔄</Text>
@@ -1783,10 +2058,7 @@ export default function AppIndex() {
           <TouchableOpacity 
             style={styles.closeStatusBtn}
             activeOpacity={0.7}
-            onPress={() => {
-              setIsAuthenticated(false);
-              changeAuthScreen('login');
-            }}
+            onPress={() => handleLogout()}
           >
             <Ionicons name="close" size={24} color="#38220F" />
           </TouchableOpacity>
@@ -1805,9 +2077,9 @@ export default function AppIndex() {
               <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
                 <Ionicons name="warning" size={18} color="#D97706" style={{ marginRight: 8, marginTop: 1 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.reasonCardTitle}>Driving License needs verification</Text>
+                  <Text style={styles.reasonCardTitle}>Action Required Reason</Text>
                   <Text style={styles.reasonCardText}>
-                    The uploaded image of your driving license was unclear or expired. Please upload a clear, valid document.
+                    {currentPartner?.statusReason || 'Some information needs to be updated before your account can be approved.'}
                   </Text>
                 </View>
               </View>
@@ -1851,7 +2123,7 @@ export default function AppIndex() {
             </View>
             <Text style={styles.statusTitle}>Account Temporarily Unavailable</Text>
             <Text style={styles.statusSubtitle}>
-              Your delivery partner account is currently restricted. Please contact QuickBite Support for more information.
+              {currentPartner?.statusReason || 'Your delivery partner account is currently restricted. Please contact QuickBite Support for more information.'}
             </Text>
           </View>
 
@@ -1866,10 +2138,7 @@ export default function AppIndex() {
 
             <TouchableOpacity 
               activeOpacity={0.7}
-              onPress={() => {
-                setIsAuthenticated(false);
-                changeAuthScreen('login');
-              }}
+              onPress={() => handleLogout()}
               style={styles.statusSecondaryBtn}
             >
               <Text style={styles.statusSecondaryBtnText}>Logout</Text>
@@ -1896,6 +2165,16 @@ export default function AppIndex() {
   };
 
   // Gated Auth rendering check on top-level launch
+  if (isInitializing) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FCFAF7', justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar style="dark" />
+        <ActivityIndicator size="large" color="#F97316" />
+        <Text style={{ marginTop: 12, fontSize: 14, color: '#8A7A6E', fontWeight: '600' }}>Loading session...</Text>
+      </View>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <KeyboardAvoidingView 

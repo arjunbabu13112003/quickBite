@@ -2,10 +2,12 @@ import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import OnlineStatus from './online-status';
+import AvailabilityStatus from './availability-status';
 
 interface HeaderProps {
   title: string;
   isOnline: boolean;
+  isAvailable?: boolean;
   showBack?: boolean;
   onBackPress?: () => void;
   profileImage?: string;
@@ -14,6 +16,7 @@ interface HeaderProps {
 export default function Header({
   title,
   isOnline,
+  isAvailable,
   showBack = false,
   onBackPress,
   profileImage
@@ -38,7 +41,14 @@ export default function Header({
         )}
         <Text style={styles.title}>{title}</Text>
       </View>
-      <OnlineStatus isOnline={isOnline} />
+      <View style={styles.rightContainer}>
+        <OnlineStatus isOnline={isOnline} />
+        {isAvailable !== undefined && (
+          <View style={{ marginLeft: 6 }}>
+            <AvailabilityStatus isAvailable={isAvailable} />
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -55,6 +65,10 @@ const styles = StyleSheet.create({
     borderBottomColor: '#FAF8F5',
   },
   leftContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rightContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },

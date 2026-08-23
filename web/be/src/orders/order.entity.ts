@@ -16,6 +16,7 @@ import { OrderItem } from './order-item.entity';
 import { PaymentMethod } from './enums/payment-method.enum';
 import { PaymentStatus } from './enums/payment-status.enum';
 import { OrderStatus } from './enums/order-status.enum';
+import { DeliveryPartner } from '../delivery-partners/delivery-partner.entity';
 
 @Entity('orders')
 @Index(['userId'])
@@ -142,6 +143,13 @@ export class Order {
 
   @Column({ nullable: true })
   cashCollectedByDeliveryPartnerId?: number;
+
+  @Column({ nullable: true })
+  deliveryPartnerId?: number;
+
+  @ManyToOne(() => DeliveryPartner, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'deliveryPartnerId' })
+  deliveryPartner?: DeliveryPartner;
 
   @ManyToOne(() => User, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'userId' })

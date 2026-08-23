@@ -45,4 +45,25 @@ export class AdminCreateDeliveryPartnerDto {
   @IsNotEmpty({ message: 'deliveryType is required' })
   @IsEnum(DeliveryType, { message: 'deliveryType must be FULL_TIME or PART_TIME' })
   deliveryType: DeliveryType;
+
+  @IsNotEmpty({ message: 'accountHolderName is required' })
+  @IsString()
+  @MaxLength(100)
+  accountHolderName: string;
+
+  @IsNotEmpty({ message: 'bankAccountNumber is required' })
+  @IsString()
+  bankAccountNumber: string;
+
+  @IsNotEmpty({ message: 'confirmBankAccountNumber is required' })
+  @IsString()
+  confirmBankAccountNumber: string;
+
+  @IsNotEmpty({ message: 'ifscCode is required' })
+  @IsString()
+  ifscCode: string;
+
+  @IsOptional()
+  @IsString()
+  upiId?: string;
 }
