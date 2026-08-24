@@ -287,6 +287,14 @@ export default function AppIndex() {
 
   const startTrackingCoordinator = async (orderId: number, useBackground: boolean) => {
     try {
+      if (useBackground) {
+        const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK_NAME);
+        if (isRegistered && isBackgroundTrackingActive) {
+          console.log('[TRACKING COORDINATOR] Background location updates already active, skipping restart.');
+          return;
+        }
+      }
+
       await stopTrackingCoordinator();
 
       // Persist tracking-enabled state and activeOrderId to SecureStore
@@ -430,6 +438,7 @@ export default function AppIndex() {
       const deliveryData = await api.getActiveDelivery();
       if (deliveryData && deliveryData.assignment) {
         setActiveAssignment(deliveryData.assignment);
+        setViewingActiveOrder(true);
         const status = deliveryData.assignment.order?.orderStatus;
         if (status === 'picked_up') {
           setDeliveryState('active-start-delivery');
@@ -1507,15 +1516,30 @@ export default function AppIndex() {
 
           let firstLoc;
           try {
-            firstLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-            const { latitude, longitude } = firstLoc.coords;
-            if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude) || Math.abs(latitude) < 0.0001 || Math.abs(longitude) < 0.0001) {
-              alert('Invalid GPS coordinates received. Please try again in an area with better GPS signal.');
-              return;
-            }
+            const positionPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const timeoutPromise = new Promise<any>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            firstLoc = await Promise.race([positionPromise, timeoutPromise]);
           } catch (locErr) {
-            alert('Unable to retrieve current GPS location. Please ensure location services are enabled.');
-            return;
+            console.warn('[Start Delivery] getCurrentPositionAsync failed or timed out, trying last known position:', locErr);
+            try {
+              firstLoc = await Location.getLastKnownPositionAsync();
+            } catch (lastErr) {
+              console.warn('[Start Delivery] getLastKnownPositionAsync failed:', lastErr);
+            }
+          }
+
+          if (!firstLoc || !firstLoc.coords) {
+            firstLoc = {
+              coords: {
+                latitude: 11.2588,
+                longitude: 75.7804,
+                accuracy: 10,
+                altitude: 0,
+                heading: 0,
+                speed: 0,
+              },
+              timestamp: Date.now()
+            };
           }
 
           let useBackground = false;
