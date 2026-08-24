@@ -1217,26 +1217,6 @@ export class DeliveryPartnersService implements OnModuleInit {
         where: { id: partner.id },
       });
 
-      return {
-        success: true,
-        message: 'Order status updated to delivered successfully',
-        order: {
-          id: order.id,
-          orderNumber: order.orderNumber,
-          orderStatus: order.orderStatus,
-          paymentStatus: order.paymentStatus,
-          paymentMethod: order.paymentMethod,
-          totalAmount: parseFloat(order.totalAmount.toString()),
-        },
-        assignmentClosed: true,
-        rider: {
-          isOnline: freshPartner ? freshPartner.isOnline : false,
-          isAvailable: freshPartner ? freshPartner.isAvailable : false,
-        },
-        partnerEarning,
-        earning: partnerEarning,
-      };
-
       await this.notificationsService.createPartnerNotification(
         partner.id,
         'Delivery Completed!',
@@ -1256,6 +1236,62 @@ export class DeliveryPartnersService implements OnModuleInit {
           assignment.id
         ).catch(err => console.error('[Notification Earning Error]:', err));
       }
+
+      // Calculate distances
+      const hotelLat = order.hotel?.latitude ? Number(order.hotel.latitude) : null;
+      const hotelLng = order.hotel?.longitude ? Number(order.hotel.longitude) : null;
+      const destLat = order.deliveryLatitude ? Number(order.deliveryLatitude) : null;
+      const destLng = order.deliveryLongitude ? Number(order.deliveryLongitude) : null;
+      const partnerLat = partner.currentLatitude ? Number(partner.currentLatitude) : null;
+      const partnerLng = partner.currentLongitude ? Number(partner.currentLongitude) : null;
+
+      const riderToRestaurant = (partnerLat && partnerLng && hotelLat && hotelLng)
+        ? this.calculateDistance(partnerLat, partnerLng, hotelLat, hotelLng)
+        : 0;
+      const restaurantToCustomer = (hotelLat && hotelLng && destLat && destLng)
+        ? this.calculateDistance(hotelLat, hotelLng, destLat, destLng)
+        : 0;
+      const totalDistance = Math.round((riderToRestaurant + restaurantToCustomer) * 10) / 10;
+
+      // Calculate duration
+      const durationMs = now.getTime() - new Date(assignment.assignedAt).getTime();
+      const durationMinutes = Math.max(1, Math.round(durationMs / 60000));
+
+      return {
+        success: true,
+        message: 'Order status updated to delivered successfully',
+        order: {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          orderStatus: order.orderStatus,
+          paymentStatus: order.paymentStatus,
+          paymentMethod: order.paymentMethod,
+          totalAmount: parseFloat(order.totalAmount.toString()),
+          restaurantName: order.hotel?.name || 'QuickBite Kitchen',
+          customerName: order.deliveryRecipientName,
+          deliveredAt: order.deliveredAt,
+          acceptedAt: assignment.assignedAt,
+          pickedUpAt: order.pickedUpAt,
+          outForDeliveryAt: order.outForDeliveryAt,
+        },
+        financials: {
+          finalizedPartnerEarning: partnerEarning,
+          earningComponents: {
+            deliveryFee: Number(order.deliveryFee),
+            bonus: 0
+          },
+          totalEarned: partnerEarning
+        },
+        delivery: {
+          totalDistance: totalDistance > 0 ? totalDistance : null,
+          durationMinutes
+        },
+        assignmentClosed: true,
+        rider: {
+          isOnline: freshPartner ? freshPartner.isOnline : false,
+          isAvailable: freshPartner ? freshPartner.isAvailable : false,
+        }
+      };
     }
   }
 
@@ -2006,7 +2042,7 @@ export class DeliveryPartnersService implements OnModuleInit {
         status: DeliveryAssignmentStatus.OFFERED,
         isActive: true,
       },
-      relations: ['order', 'order.hotel', 'order.items'],
+      relations: ['order', 'order.hotel', 'order.items', 'order.items.customizations'],
       order: { id: 'DESC' }
     });
 
@@ -2043,6 +2079,9 @@ export class DeliveryPartnersService implements OnModuleInit {
     const order = assignment.order;
     const itemCount = order.items ? order.items.reduce((sum, item) => sum + (item.quantity || 1), 0) : 0;
 
+    // Calculate Partner Estimated Earning using canonical PaymentsService helper
+    const estimatedPartnerEarning = this.paymentsService.calculatePartnerEarning(Number(order.deliveryFee || 0));
+
     return {
       assignment: {
         id: assignment.id,
@@ -2053,16 +2092,46 @@ export class DeliveryPartnersService implements OnModuleInit {
           id: order.id,
           orderNumber: order.orderNumber,
           orderStatus: order.orderStatus,
+          // Restaurant details
           restaurantName: order.hotel?.name || 'QuickBite Kitchen',
           pickupAddress: order.hotel?.address || 'Near Fort Road, Kannur',
-          deliveryAddress: `${order.deliveryAddressLine1}${order.deliveryAddressLine2 ? ', ' + order.deliveryAddressLine2 : ''}`,
+          restaurantLatitude: order.hotel?.latitude ? Number(order.hotel.latitude) : null,
+          restaurantLongitude: order.hotel?.longitude ? Number(order.hotel.longitude) : null,
+          
+          // Customer details (Checkout Address Snapshot)
           customerName: order.deliveryRecipientName,
           customerPhoneMaskedOrSafe: order.deliveryPhoneNumber ? (order.deliveryPhoneNumber.slice(0, 5) + '*****') : '*****',
+          deliveryAddressLine1: order.deliveryAddressLine1,
+          deliveryAddressLine2: order.deliveryAddressLine2 || null,
+          deliveryLandmark: order.deliveryLandmark || null,
+          deliveryCity: order.deliveryCity,
+          deliveryPincode: order.deliveryPincode,
+          deliveryLatitude: order.deliveryLatitude ? Number(order.deliveryLatitude) : null,
+          deliveryLongitude: order.deliveryLongitude ? Number(order.deliveryLongitude) : null,
+          
+          // Payout Estimate
+          estimatedPartnerEarning,
+          
+          // Payment
           paymentMethod: order.paymentMethod,
           amount: Number(order.totalAmount),
           itemCount,
           cashCollectedAt: order.cashCollectedAt,
           paymentStatus: order.paymentStatus,
+          
+          // Order Items
+          items: order.items ? order.items.map(item => ({
+            id: item.id,
+            foodName: item.foodName,
+            quantity: item.quantity,
+            lineTotal: Number(item.lineTotal),
+            customizations: item.customizations ? item.customizations.map(c => ({
+              id: c.id,
+              groupName: c.groupName,
+              choiceName: c.choiceName,
+              additionalPrice: Number(c.additionalPrice)
+            })) : []
+          })) : []
         }
       }
     };
@@ -2260,5 +2329,19 @@ export class DeliveryPartnersService implements OnModuleInit {
         }
       }
     };
+  }
+
+  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+    const R = 6371; // Radius of the earth in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c; // Distance in km
+    return Math.round(d * 10) / 10; // Round to 1 decimal place
   }
 }

@@ -66,7 +66,7 @@ export class PaymentsService {
     private readonly offersService: OffersService,
   ) {}
 
-  private getPaymentConfig() {
+  getPaymentConfig() {
     const hotelCommissionRate = Number(this.configService.get<string>('PLATFORM_COMMISSION_RATE', '0.10'));
     const deliveryPartnerEarningRate = Number(this.configService.get<string>('DELIVERY_PARTNER_EARNING_RATE', '1.00'));
     const taxOwner = this.configService.get<string>('PAYMENT_TAX_OWNER', 'hotel');
@@ -78,6 +78,13 @@ export class PaymentsService {
       taxOwner,
       discountAbsorbedBy,
     };
+  }
+
+  calculatePartnerEarning(deliveryFee: number): number {
+    const config = this.getPaymentConfig();
+    const deliveryFeePaise = Math.round(Number(deliveryFee || 0) * 100);
+    const deliveryPartnerEarningPaise = Math.round(deliveryFeePaise * config.deliveryPartnerEarningRate);
+    return deliveryPartnerEarningPaise / 100;
   }
 
   async createPaymentAttempt(dto: CreatePaymentAttemptDto): Promise<Payment> {

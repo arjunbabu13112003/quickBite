@@ -16,7 +16,9 @@ import {
   AppStateStatus,
   BackHandler,
   Modal,
-  Alert
+  Alert,
+  Animated,
+  PanResponder
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -175,6 +177,28 @@ const initialMockCompletedOrders = [
   }
 ];
 
+function calculateDistance(
+  lat1: number | null | undefined, 
+  lon1: number | null | undefined, 
+  lat2: number | null | undefined, 
+  lon2: number | null | undefined
+): number {
+  if (lat1 === null || lat1 === undefined || lon1 === null || lon1 === undefined ||
+      lat2 === null || lat2 === undefined || lon2 === null || lon2 === undefined) {
+    return 0;
+  }
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distance in km
+  return Math.round(d * 10) / 10; // Round to 1 decimal place
+}
+
 export default function AppIndex() {
   console.log('[DIAGNOSTIC] Header:', typeof Header);
   console.log('[DIAGNOSTIC] BottomNavigation:', typeof BottomNavigation);
@@ -284,6 +308,125 @@ export default function AppIndex() {
   const [appState, setAppState] = useState(AppState.currentState);
   const isRequestingRef = useRef(false);
   const isFirstActiveRef = useRef(true);
+
+  // Draggable Bottom Sheet States & Coordinate calculation for Incoming Request UI
+  const [sheetState, setSheetState] = useState<'expanded' | 'collapsed'>('expanded');
+  const [sheetHeight, setSheetHeight] = useState(600); // Measured height default
+  const [riderCoords, setRiderCoords] = useState<{ latitude: number, longitude: number } | null>(null);
+  const [itemsExpanded, setItemsExpanded] = useState(false);
+
+  const COLLAPSED_HEIGHT = 140; // Preview height
+  const panY = useRef(new Animated.Value(0)).current;
+  const scrollY = useRef(0);
+  const handleScroll = (event: any) => {
+    scrollY.current = event.nativeEvent.contentOffset.y;
+  };
+
+  const animateToState = (state: 'expanded' | 'collapsed') => {
+    const targetY = state === 'collapsed' ? (sheetHeight - COLLAPSED_HEIGHT) : 0;
+    Animated.spring(panY, {
+      toValue: targetY,
+      tension: 50,
+      friction: 8,
+      useNativeDriver: true,
+    }).start(() => {
+      setSheetState(state);
+    });
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        const isCollapsed = sheetState === 'collapsed';
+        if (isCollapsed) {
+          return gestureState.dy < -5;
+        }
+
+        const touchYOnSheet = evt.nativeEvent.locationY;
+        const isHeaderTouch = touchYOnSheet < 140;
+        if (isHeaderTouch) {
+          return Math.abs(gestureState.dy) > 5;
+        }
+
+        const isDraggingDown = gestureState.dy > 5;
+        if (isDraggingDown && scrollY.current <= 0) {
+          return true;
+        }
+
+        return false;
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        let newPanY = gestureState.dy;
+        if (sheetState === 'collapsed') {
+          newPanY = (sheetHeight - COLLAPSED_HEIGHT) + gestureState.dy;
+        }
+
+        const maxTranslate = sheetHeight - COLLAPSED_HEIGHT;
+        if (newPanY < 0) {
+          newPanY = 0;
+        } else if (newPanY > maxTranslate) {
+          newPanY = maxTranslate;
+        }
+
+        panY.setValue(newPanY);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const maxTranslate = sheetHeight - COLLAPSED_HEIGHT;
+        const currentPanY = sheetState === 'collapsed'
+          ? maxTranslate + gestureState.dy
+          : gestureState.dy;
+
+        const threshold = maxTranslate / 2;
+        const shouldCollapse = gestureState.vy > 0.5 || currentPanY > threshold;
+
+        if (shouldCollapse) {
+          animateToState('collapsed');
+        } else {
+          animateToState('expanded');
+        }
+      },
+    })
+  ).current;
+
+  useEffect(() => {
+    if (deliveryState !== 'incoming-request') {
+      panY.setValue(0);
+      setSheetState('expanded');
+    }
+  }, [deliveryState]);
+
+  useEffect(() => {
+    if (deliveryState === 'incoming-request' && incomingAssignment) {
+      const getRiderLocation = async () => {
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (status === 'granted') {
+            let loc = await Location.getLastKnownPositionAsync();
+            const isFresh = loc && (Date.now() - loc.timestamp < 60000); // 60s freshness check
+            
+            if (!loc || !isFresh) {
+              const positionPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+              const timeoutPromise = new Promise<any>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+              loc = await Promise.race([positionPromise, timeoutPromise]);
+            }
+            
+            if (loc && loc.coords) {
+              setRiderCoords({
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude
+              });
+            }
+          }
+        } catch (err) {
+          console.warn('[Location] Failed to get rider location for incoming request:', err);
+        }
+      };
+      getRiderLocation();
+    } else {
+      setRiderCoords(null);
+    }
+  }, [deliveryState, incomingAssignment]);
 
   const startTrackingCoordinator = async (orderId: number, useBackground: boolean) => {
     try {
@@ -494,16 +637,10 @@ export default function AppIndex() {
       await stopTrackingCoordinator();
       
       const order = activeAssignment.order;
-      const earningsAmount = result.partnerEarning !== undefined ? result.partnerEarning : 65;
+      const earningsAmount = result.financials?.totalEarned !== undefined ? result.financials.totalEarned : 65;
       
       // Store justCompletedOrder details for rendering on success screen
-      setJustCompletedOrder({
-        orderNumber: order.orderNumber,
-        paymentMethod: order.paymentMethod,
-        amount: order.amount,
-        restaurantName: order.restaurantName,
-        partnerEarning: earningsAmount,
-      });
+      setJustCompletedOrder(result);
 
       // Post-completion mobile cleanup in deterministic order:
       // 1. stop active-delivery polling/timers (none running)
@@ -539,7 +676,7 @@ export default function AppIndex() {
         status: 'Delivered',
         restaurantName: order.restaurantName || 'QuickBite Kitchen',
         dropArea: order.deliveryAddress || 'Drop Location',
-        distance: '—',
+        distance: result.delivery?.totalDistance ? `${result.delivery.totalDistance} km` : '—',
         paymentMode: order.paymentMethod?.toUpperCase() === 'COD' ? 'COD' : 'Prepaid',
         codAmount: order.paymentMethod?.toUpperCase() === 'COD' ? order.amount : undefined,
         earnings: earningsAmount
@@ -958,9 +1095,17 @@ export default function AppIndex() {
     }
   }, [isAuthenticated, activeTab, fetchCompletedOrders, fetchNotifications]);
 
-  // Handle Android back button when viewing active order
+  // Handle Android back button when viewing active order or success screen
   useEffect(() => {
     const handleBackButton = () => {
+      if (deliveryState === 'delivery-completed') {
+        setJustCompletedOrder(null);
+        setViewingActiveOrder(false);
+        changeDeliveryState('none');
+        setIsOnline(true);
+        setIsAvailable(true);
+        return true; // Intercept press
+      }
       if (viewingActiveOrder) {
         setViewingActiveOrder(false);
         return true; // Intercept press
@@ -972,7 +1117,7 @@ export default function AppIndex() {
     return () => {
       subscription.remove();
     };
-  }, [viewingActiveOrder]);
+  }, [viewingActiveOrder, deliveryState]);
 
   // Poll Available Orders
   useEffect(() => {
@@ -1110,6 +1255,10 @@ export default function AppIndex() {
 
   // 1. HOME TAB ROUTER
   const renderHomeTab = () => {
+    if (deliveryState === 'incoming-request') {
+      return renderIncomingRequestScreen();
+    }
+
     if (viewingActiveOrder) {
       switch (deliveryState) {
         case 'active-restaurant':
@@ -1126,8 +1275,6 @@ export default function AppIndex() {
     }
 
     switch (deliveryState) {
-      case 'incoming-request':
-        return renderIncomingRequestScreen();
       case 'delivery-completed':
         return renderDeliveryCompletedScreen();
       default:
@@ -1321,17 +1468,44 @@ export default function AppIndex() {
   };
 
   // SCREEN 1.5: INCOMING DELIVERY REQUEST SCREEN (Floating Bottom Sheet Overlay)
+  // SCREEN 1.5: INCOMING DELIVERY REQUEST SCREEN (Floating Bottom Sheet Overlay)
   const renderIncomingRequestScreen = () => {
     const order = incomingAssignment?.order || {};
+    const items = order.items || [];
+    
+    // Distance Calculations using Haversine
+    const riderToRestaurantDistance = (riderCoords && order.restaurantLatitude && order.restaurantLongitude)
+      ? calculateDistance(riderCoords.latitude, riderCoords.longitude, order.restaurantLatitude, order.restaurantLongitude)
+      : 0;
+
+    const restaurantToCustomerDistance = (order.restaurantLatitude && order.restaurantLongitude && order.deliveryLatitude && order.deliveryLongitude)
+      ? calculateDistance(order.restaurantLatitude, order.restaurantLongitude, order.deliveryLatitude, order.deliveryLongitude)
+      : 0;
+
+    const totalDistance = Math.round((riderToRestaurantDistance + restaurantToCustomerDistance) * 10) / 10;
+
+    // Estimated Partner Earning
+    const estEarning = order.estimatedPartnerEarning ? Number(order.estimatedPartnerEarning).toFixed(0) : '0';
+
+    // Total quantity of items
+    const totalItemQty = items.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0);
+
+    // Filter items to show first 2 if collapsed/not expanded, or all
+    const itemsToShow = itemsExpanded ? items : items.slice(0, 2);
+    const hasMoreItems = items.length > 2;
+    const hiddenItemsCount = items.length - 2;
+
+    const screenHeight = Dimensions.get('window').height;
+
     return (
       <View style={styles.incomingRequestContainer}>
-        {/* Muted Map Background */}
+        {/* Map Background */}
         <View style={styles.incomingMapWrapper}>
-          <MapPlaceholder eta="N/A" etaPosition="top-left" destinationName={order.restaurantName} />
+          <MapPlaceholder eta="—" etaPosition="top-left" destinationName={order.restaurantName} />
           <View style={styles.incomingMapOverlay} />
         </View>
 
-        {/* Full-screen Semi-transparent Dark overlay */}
+        {/* Semi-transparent Dark overlay */}
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.45)' }} />
 
         {/* Floating Headers */}
@@ -1342,118 +1516,237 @@ export default function AppIndex() {
           <OnlineStatus isOnline={isOnline} />
         </View>
 
-        {/* Bottom Request Bottom Sheet/Card */}
-        <View style={[styles.incomingRequestSheet, { paddingBottom: Math.max(16, insets.bottom + 12) }]}>
+        {/* Draggable Bottom Sheet */}
+        <Animated.View 
+          {...panResponder.panHandlers}
+          style={[
+            styles.incomingRequestSheet,
+            {
+              transform: [{ translateY: panY }],
+              paddingBottom: Math.max(16, insets.bottom + 12),
+              maxHeight: screenHeight - 100
+            }
+          ]}
+          onLayout={(e) => setSheetHeight(e.nativeEvent.layout.height)}
+        >
+          {/* Drag Handle */}
           <View style={styles.incomingSheetHandle} />
-          
+
+          {/* Header row */}
           <View style={styles.incomingHeaderRow}>
-            {/* Circular Timer countdown */}
-            <View style={styles.circularTimer}>
+            {/* Circular Timer Ring */}
+            <View style={styles.circularTimerRing}>
               <Text style={styles.circularTimerText}>{countdown}s</Text>
             </View>
+            
             <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.incomingNewRequestTitle}>New Request</Text>
-              <Text style={styles.incomingOrderIdText}>{order.orderNumber || 'Order'}</Text>
+              <Text style={styles.incomingNewRequestTitle}>NEW REQUEST</Text>
+              <Text style={styles.incomingOrderIdText} numberOfLines={1}>
+                Order #{order.orderNumber || 'QB-000000'}
+              </Text>
             </View>
+            
             <View style={styles.incomingEarningsCol}>
               <Text style={styles.incomingEarningsLabel}>EST. EARNING</Text>
-              <Text style={styles.incomingEarningsAmount}>₹65</Text>
+              <Text style={styles.incomingEarningsAmount}>₹{estEarning}</Text>
             </View>
           </View>
 
-          {/* Quick info row card */}
-          <View style={styles.incomingQuickInfoRow}>
-            <View style={styles.incomingQuickInfoCol}>
-              <Ionicons name="time" size={16} color="#8A7A6E" />
-              <Text style={styles.incomingQuickInfoValue}>—</Text>
-              <Text style={styles.incomingQuickInfoLabel}>ETA</Text>
-            </View>
-            <View style={styles.incomingQuickInfoDivider} />
-            <View style={styles.incomingQuickInfoCol}>
-              <Ionicons name="git-commit" size={16} color="#8A7A6E" />
-              <Text style={styles.incomingQuickInfoValue}>—</Text>
-              <Text style={styles.incomingQuickInfoLabel}>KM TOTAL</Text>
-            </View>
-            <View style={styles.incomingQuickInfoDivider} />
-            <View style={styles.incomingQuickInfoCol}>
-              <Ionicons name="cash" size={16} color="#8A7A6E" />
-              <Text style={styles.incomingQuickInfoValue}>{order.paymentMethod || 'Prepaid'}</Text>
-              <Text style={styles.incomingQuickInfoLabel}>₹{order.amount || 0}</Text>
-            </View>
-          </View>
+          {/* Expanded Content ScrollView */}
+          {sheetState === 'expanded' ? (
+            <>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: 16 }}
+                showsVerticalScrollIndicator={false}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+              >
+                {/* Three Information Cards */}
+                <View style={styles.incomingQuickInfoRow}>
+                  {/* Card 1: To Pickup */}
+                  <View style={styles.incomingInfoCard}>
+                    <View style={styles.cardIconCircle}>
+                      <Ionicons name="bicycle" size={20} color="#F97316" />
+                    </View>
+                    <Text style={styles.cardValue}>
+                      {riderToRestaurantDistance > 0 ? `${riderToRestaurantDistance} km` : '—'}
+                    </Text>
+                    <Text style={styles.cardLabel}>To Pickup</Text>
+                  </View>
 
-          {/* Route Section */}
-          <View style={styles.incomingRouteContainer}>
-            <View style={styles.incomingRouteRow}>
-              <View style={[styles.routeDot, styles.pickupDotColor]} />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <View style={styles.incomingRouteTextRow}>
-                  <Text style={styles.incomingRouteTitle}>{order.restaurantName || 'QuickBite Kitchen'}</Text>
-                  <View style={styles.routeDistanceBadge}>
-                    <Text style={styles.routeDistanceText}>N/A</Text>
+                  {/* Card 2: To Drop */}
+                  <View style={styles.incomingInfoCard}>
+                    <View style={[styles.cardIconCircle, { backgroundColor: '#EFF6FF' }]}>
+                      <Ionicons name="git-commit-outline" size={20} color="#3B82F6" />
+                    </View>
+                    <Text style={styles.cardValue}>
+                      {restaurantToCustomerDistance > 0 ? `${restaurantToCustomerDistance} km` : '—'}
+                    </Text>
+                    <Text style={styles.cardLabel}>To Drop</Text>
+                  </View>
+
+                  {/* Card 3: Payment */}
+                  <View style={styles.incomingInfoCard}>
+                    <View style={[styles.cardIconCircle, { backgroundColor: '#ECFDF5' }]}>
+                      <Ionicons name="card" size={20} color="#10B981" />
+                    </View>
+                    <Text style={[styles.cardValue, { color: '#10B981', fontWeight: '900' }]}>
+                      {order.paymentMethod === 'COD' ? 'COD' : 'ONLINE'}
+                    </Text>
+                    <Text style={styles.cardSubValue}>
+                      {order.paymentMethod === 'COD' ? `₹${order.amount || 0}` : 'Paid'}
+                    </Text>
                   </View>
                 </View>
-                <Text style={styles.incomingRouteSubtitle}>{order.pickupAddress || 'Restaurant Pickup'}</Text>
-              </View>
-            </View>
 
-            <View style={styles.incomingRouteLine} />
+                {/* Total Distance & ETA Row */}
+                <View style={styles.distanceEtaRow}>
+                  <Text style={styles.distanceEtaText}>
+                    TOTAL DIST: {totalDistance > 0 ? `${totalDistance} KM` : '—'}
+                  </Text>
+                  <Text style={styles.distanceEtaText}>ETA: —</Text>
+                </View>
 
-            <View style={styles.incomingRouteRow}>
-              <View style={[styles.routeDot, styles.dropDotColor]} />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <View style={styles.incomingRouteTextRow}>
-                  <Text style={styles.incomingRouteTitle}>{order.customerName || 'Customer'}</Text>
-                  <View style={styles.routeDistanceBadge}>
-                    <Text style={styles.routeDistanceText}>N/A</Text>
+                {/* Route Timeline Section */}
+                <View style={styles.routeTimelineContainer}>
+                  {/* Pickup restaurant */}
+                  <View style={styles.timelineRow}>
+                    <View style={styles.timelineIconWrapper}>
+                      <View style={[styles.timelineDot, { backgroundColor: '#F97316' }]} />
+                      <View style={styles.timelineConnector} />
+                    </View>
+                    <View style={styles.timelineContent}>
+                      <View style={styles.timelineHeaderRow}>
+                        <Text style={styles.timelineStepLabel}>PICKUP</Text>
+                        {riderToRestaurantDistance > 0 && (
+                          <View style={styles.pickupDistanceBadge}>
+                            <Text style={styles.pickupDistanceBadgeText}>
+                              {riderToRestaurantDistance} km away
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.timelineTitle}>{order.restaurantName}</Text>
+                      <Text style={styles.timelineSubtitle}>{order.pickupAddress}</Text>
+                    </View>
+                  </View>
+
+                  {/* Dropoff customer */}
+                  <View style={[styles.timelineRow, { marginTop: 12 }]}>
+                    <View style={styles.timelineIconWrapper}>
+                      <View style={[styles.timelineDot, { backgroundColor: '#10B981' }]} />
+                    </View>
+                    <View style={styles.timelineContent}>
+                      <View style={styles.timelineHeaderRow}>
+                        <Text style={[styles.timelineStepLabel, { color: '#10B981' }]}>DROP-OFF</Text>
+                        {restaurantToCustomerDistance > 0 && (
+                          <View style={styles.dropDistanceBadge}>
+                            <Text style={styles.dropDistanceBadgeText}>
+                              {restaurantToCustomerDistance} km from restaurant
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.timelineTitle}>{order.customerName}</Text>
+                      <Text style={styles.timelineSubtitle}>
+                        {order.deliveryAddressLine1}
+                        {order.deliveryAddressLine2 ? `, ${order.deliveryAddressLine2}` : ''}
+                        {`, ${order.deliveryCity}`}
+                        {order.deliveryPincode ? ` - ${order.deliveryPincode}` : ''}
+                      </Text>
+                      
+                      {/* Landmark info pill */}
+                      {order.deliveryLandmark && (
+                        <View style={styles.landmarkPill}>
+                          <Ionicons name="information-circle-outline" size={14} color="#64748B" style={{ marginRight: 6 }} />
+                          <Text style={styles.landmarkPillText}>{order.deliveryLandmark}</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </View>
-                <Text style={styles.incomingRouteSubtitle}>{order.deliveryAddress || 'Drop Location'}</Text>
-              </View>
-            </View>
-          </View>
 
-          {/* COD Warning Card */}
-          {order.paymentMethod === 'COD' && (
-            <View style={styles.incomingCodBox}>
-              <Ionicons name="warning" size={16} color="#B91C1C" style={{ marginRight: 8, marginTop: 1 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.incomingCodTitle}>Cash on Delivery</Text>
-                <Text style={styles.incomingCodText}>Collect ₹{order.amount || 0} from customer</Text>
+                {/* Order Items section */}
+                <View style={styles.itemsSectionContainer}>
+                  <Text style={styles.itemsSectionHeading}>ORDER ITEMS ({totalItemQty})</Text>
+                  
+                  {itemsToShow.map((item: any, idx: number) => {
+                    const custText = item.customizations && item.customizations.length > 0
+                      ? item.customizations.map((c: any) => `• ${c.choiceName}`).join(' ')
+                      : null;
+                    
+                    return (
+                      <View key={item.id || idx} style={styles.itemRow}>
+                        <View style={styles.itemQuantityBox}>
+                          <Text style={styles.itemQuantityText}>{item.quantity}x</Text>
+                        </View>
+                        
+                        <View style={{ flex: 1, marginLeft: 12 }}>
+                          <Text style={styles.itemNameText}>{item.foodName}</Text>
+                          {custText && <Text style={styles.itemCustomizationsText}>{custText}</Text>}
+                        </View>
+
+                        <Text style={styles.itemPriceText}>₹{item.lineTotal || 0}</Text>
+                      </View>
+                    );
+                  })}
+
+                  {/* View more items button */}
+                  {hasMoreItems && (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => setItemsExpanded(!itemsExpanded)}
+                      style={styles.viewMoreItemsBtn}
+                    >
+                      <Text style={styles.viewMoreItemsBtnText}>
+                        {itemsExpanded ? 'Show less items' : `View ${hiddenItemsCount} more items`}
+                      </Text>
+                      <Ionicons 
+                        name={itemsExpanded ? 'chevron-up' : 'chevron-down'} 
+                        size={14} 
+                        color="#F97316" 
+                        style={{ marginLeft: 4 }} 
+                      />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </ScrollView>
+
+              {/* Sticky Bottom Actions inside the expanded sheet */}
+              <View style={[styles.incomingActionsRow, { marginTop: 12 }]}>
+                <TouchableOpacity 
+                  activeOpacity={0.7}
+                  disabled={isAcceptingDeclining}
+                  onPress={handleDeclineAssignment}
+                  style={[styles.incomingDeclineBtn, isAcceptingDeclining && { opacity: 0.5 }]}
+                >
+                  <Text style={styles.incomingDeclineBtnText}>Decline</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  activeOpacity={0.8}
+                  disabled={isAcceptingDeclining}
+                  onPress={handleAcceptAssignment}
+                  style={[styles.incomingAcceptBtn, isAcceptingDeclining && { opacity: 0.5 }]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {isAcceptingDeclining ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Text style={styles.incomingAcceptBtnText}>Accept Delivery</Text>
+                        <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                      </>
+                    )}
+                  </View>
+                </TouchableOpacity>
               </View>
-            </View>
+            </>
+          ) : (
+            <View style={{ height: 10 }} />
           )}
-
-          {/* Bottom Action buttons */}
-          <View style={styles.incomingActionsRow}>
-            <TouchableOpacity 
-              activeOpacity={0.7}
-              disabled={isAcceptingDeclining}
-              onPress={handleDeclineAssignment}
-              style={[styles.incomingDeclineBtn, isAcceptingDeclining && { opacity: 0.5 }]}
-            >
-              <Text style={styles.incomingDeclineBtnText}>Decline</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              activeOpacity={0.8}
-              disabled={isAcceptingDeclining}
-              onPress={handleAcceptAssignment}
-              style={[styles.incomingAcceptBtn, isAcceptingDeclining && { opacity: 0.5 }]}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {isAcceptingDeclining ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Text style={styles.incomingAcceptBtnText}>Accept Delivery</Text>
-                    <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-                  </>
-                )}
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
+        </Animated.View>
       </View>
     );
   };
@@ -1818,11 +2111,18 @@ export default function AppIndex() {
             <TouchableOpacity 
               activeOpacity={0.8}
               onPress={completeActiveOrder}
-              style={[styles.stickyFooterButton, styles.successButton]}
+              disabled={isAcceptingDeclining}
+              style={[styles.stickyFooterButton, styles.successButton, isAcceptingDeclining && { opacity: 0.7 }]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={styles.stickyFooterButtonText}>Mark as Delivered</Text>
-                <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                {isAcceptingDeclining ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Text style={styles.stickyFooterButtonText}>Mark as Delivered</Text>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                  </>
+                )}
               </View>
             </TouchableOpacity>
           )}
@@ -1833,77 +2133,219 @@ export default function AppIndex() {
 
   // SCREEN 3.5: DELIVERY COMPLETED SUCCESS SCREEN
   const renderDeliveryCompletedScreen = () => {
-    const order = justCompletedOrder || {};
-    const earningsAmount = order.partnerEarning !== undefined ? order.partnerEarning : 65;
+    const res = justCompletedOrder || {};
+    const orderData = res.order || {};
+    const financials = res.financials || {};
+    const delivery = res.delivery || {};
+
+    const orderNumber = orderData.orderNumber || 'QB-XXXXXXXX-XXXXXX';
+    const totalEarned = financials.totalEarned !== undefined ? financials.totalEarned : 65;
+    const deliveryFee = financials.earningComponents?.deliveryFee !== undefined 
+      ? financials.earningComponents.deliveryFee 
+      : totalEarned;
+    const bonus = financials.earningComponents?.bonus !== undefined 
+      ? financials.earningComponents.bonus 
+      : 0;
+
+    // Formatting timestamps
+    const formatTime = (ts: string | null) => {
+      if (!ts) return '—';
+      try {
+        return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch {
+        return '—';
+      }
+    };
+
     return (
       <View style={styles.completedScreenContainer}>
-        <View style={styles.completedContentContainer}>
+        <ScrollView 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.completedScrollContent}
+        >
           {/* Centered green check icon */}
           <View style={styles.completedSuccessCircle}>
-            <Ionicons name="checkmark" size={36} color="#FFFFFF" />
+            <Ionicons name="checkmark" size={32} color="#10B981" />
           </View>
 
-          <Text style={styles.completedTitle}>Delivery Completed!</Text>
-          <Text style={styles.completedOrderText}>ORDER #{order.orderNumber || ''}</Text>
+          <Text style={styles.completedTitle}>DELIVERY{"\n"}COMPLETED</Text>
+          <Text style={styles.completedSubtitle}>Great job! The order was delivered successfully.</Text>
+          <Text style={styles.completedOrderText}>#{orderNumber}</Text>
 
           {/* Earning Card */}
           <View style={styles.completedEarningCard}>
-            <Text style={styles.completedEarningSub}>You earned</Text>
-            <Text style={styles.completedEarningValue}>₹{earningsAmount}</Text>
+            <Text style={styles.completedEarningLabel}>YOU EARNED</Text>
+            <Text style={styles.completedEarningValue}>₹{totalEarned}</Text>
             
-            {/* Split statistics */}
-            <View style={styles.completedStatsRow}>
-              <View style={styles.completedStatCol}>
-                <Ionicons name="time-outline" size={16} color="#8A7A6E" />
-                <Text style={styles.completedStatTitle}>Delivery Time</Text>
-                <Text style={styles.completedStatValue}>21 mins</Text>
-              </View>
-              <View style={styles.completedStatDivider} />
-              <View style={styles.completedStatCol}>
-                <Ionicons name="git-commit-outline" size={16} color="#8A7A6E" />
-                <Text style={styles.completedStatTitle}>Distance</Text>
-                <Text style={styles.completedStatValue}>—</Text>
-              </View>
+            <View style={styles.addedToEarningsPill}>
+              <Ionicons name="wallet-outline" size={14} color="#EA580C" style={{ marginRight: 6 }} />
+              <Text style={styles.addedToEarningsText}>Added to your QuickBite earnings</Text>
             </View>
           </View>
 
-          {/* Cash Collected Confirmation Badge */}
-          {order.paymentMethod?.toUpperCase() === 'COD' && (
-            <View style={styles.completedCashCollectedCard}>
-              <Ionicons name="cash-outline" size={16} color="#78350F" style={{ marginRight: 8 }} />
-              <Text style={styles.completedCashCollectedText}>₹{order.amount || 0} collected ✓</Text>
+          {/* Delivery Summary Card */}
+          <View style={styles.completedCard}>
+            <Text style={styles.completedCardTitle}>Delivery Summary</Text>
+            
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryLabelContainer}>
+                <Ionicons name="business-outline" size={16} color="#6B7280" style={{ marginRight: 8 }} />
+                <Text style={styles.summaryLabel}>Restaurant</Text>
+              </View>
+              <Text style={styles.summaryValue} numberOfLines={1}>{orderData.restaurantName || 'QuickBite Kitchen'}</Text>
             </View>
-          )}
-        </View>
 
-        {/* Bottom CTA buttons */}
-        <View style={styles.completedActionsContainer}>
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryLabelContainer}>
+                <Ionicons name="person-outline" size={16} color="#6B7280" style={{ marginRight: 8 }} />
+                <Text style={styles.summaryLabel}>Customer</Text>
+              </View>
+              <Text style={styles.summaryValue} numberOfLines={1}>{orderData.customerName || 'Customer'}</Text>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryLabelContainer}>
+                <Ionicons name="map-outline" size={16} color="#6B7280" style={{ marginRight: 8 }} />
+                <Text style={styles.summaryLabel}>Total Distance</Text>
+              </View>
+              <Text style={styles.summaryValue}>{delivery.totalDistance ? `${delivery.totalDistance} km` : '—'}</Text>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryLabelContainer}>
+                <Ionicons name="time-outline" size={16} color="#6B7280" style={{ marginRight: 8 }} />
+                <Text style={styles.summaryLabel}>Delivery Time</Text>
+              </View>
+              <Text style={styles.summaryValue}>{delivery.durationMinutes ? `${delivery.durationMinutes} mins` : '—'}</Text>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryLabelContainer}>
+                <Ionicons name="card-outline" size={16} color="#6B7280" style={{ marginRight: 8 }} />
+                <Text style={styles.summaryLabel}>Payment</Text>
+              </View>
+              {orderData.paymentMethod?.toUpperCase() === 'COD' ? (
+                <View style={styles.paymentBadgeCod}>
+                  <Text style={styles.paymentBadgeCodText}>COD Collected: ₹{orderData.totalAmount || 0} ✓</Text>
+                </View>
+              ) : (
+                <View style={styles.paymentBadgePaid}>
+                  <Text style={styles.paymentBadgePaidText}>Online Paid ✓</Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Earnings Breakdown Card */}
+          <View style={styles.completedCard}>
+            <Text style={styles.completedCardTitle}>Earnings Breakdown</Text>
+            
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Delivery Earning</Text>
+              <Text style={styles.breakdownValue}>₹{deliveryFee}</Text>
+            </View>
+
+            {bonus > 0 && (
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Bonus</Text>
+                <Text style={[styles.breakdownValue, { color: '#10B981' }]}>+₹{bonus}</Text>
+              </View>
+            )}
+
+            <View style={styles.breakdownDivider} />
+
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownTotalLabel}>Total Earned</Text>
+              <Text style={styles.breakdownTotalValue}>₹{totalEarned}</Text>
+            </View>
+          </View>
+
+          {/* Status Timeline */}
+          <View style={[styles.completedCard, { marginBottom: 32 }]}>
+            <Text style={styles.completedCardTitle}>Status Timeline</Text>
+            
+            <View style={styles.timelineContainer}>
+              <View style={styles.completedTimelineRow}>
+                <View style={styles.timelineIndicatorContainer}>
+                  <View style={styles.timelineDotActive}>
+                    <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.timelineLine} />
+                </View>
+                <View style={styles.completedTimelineContent}>
+                  <Text style={styles.completedTimelineTitle}>Order Accepted</Text>
+                  <Text style={styles.completedTimelineTime}>{formatTime(orderData.acceptedAt)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.completedTimelineRow}>
+                <View style={styles.timelineIndicatorContainer}>
+                  <View style={styles.timelineDotActive}>
+                    <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.timelineLine} />
+                </View>
+                <View style={styles.completedTimelineContent}>
+                  <Text style={styles.completedTimelineTitle}>Picked Up</Text>
+                  <Text style={styles.completedTimelineTime}>{formatTime(orderData.pickedUpAt)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.completedTimelineRow}>
+                <View style={styles.timelineIndicatorContainer}>
+                  <View style={styles.timelineDotActive}>
+                    <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.timelineLine} />
+                </View>
+                <View style={styles.completedTimelineContent}>
+                  <Text style={styles.completedTimelineTitle}>Out for Delivery</Text>
+                  <Text style={styles.completedTimelineTime}>{formatTime(orderData.outForDeliveryAt)}</Text>
+                </View>
+              </View>
+
+              <View style={[styles.completedTimelineRow, { marginBottom: 0 }]}>
+                <View style={styles.timelineIndicatorContainer}>
+                  <View style={styles.timelineDotActive}>
+                    <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+                  </View>
+                </View>
+                <View style={styles.completedTimelineContent}>
+                  <Text style={styles.completedTimelineTitle}>Delivered</Text>
+                  <Text style={styles.completedTimelineTime}>{formatTime(orderData.deliveredAt)}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+
+        {/* Sticky Action Footer */}
+        <View style={styles.completedStickyFooter}>
           <TouchableOpacity 
             activeOpacity={0.8}
             onPress={() => {
-              changeDeliveryState('none');
-              setActiveAssignment(null);
               setJustCompletedOrder(null);
+              setViewingActiveOrder(false);
+              changeDeliveryState('none');
               setIsOnline(true);
               setIsAvailable(true);
             }}
-            style={styles.completedPrimaryBtn}
+            style={styles.completedBackHomeBtn}
           >
-            <Text style={styles.completedPrimaryBtnText}>Find Next Delivery</Text>
+            <Text style={styles.completedBackHomeBtnText}>Back to Home</Text>
           </TouchableOpacity>
 
           <TouchableOpacity 
             activeOpacity={0.7}
             onPress={() => {
-              changeDeliveryState('none');
-              setActiveAssignment(null);
               setJustCompletedOrder(null);
-              setIsOnline(true);
-              setIsAvailable(true);
+              setViewingActiveOrder(false);
+              changeDeliveryState('none');
+              setActiveTab('earnings');
             }}
-            style={styles.completedSecondaryBtn}
+            style={styles.completedViewEarningsBtn}
           >
-            <Text style={styles.completedSecondaryBtnText}>Go to Home</Text>
+            <Text style={styles.completedViewEarningsText}>View Earnings</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -3633,24 +4075,19 @@ const styles = StyleSheet.create({
   // 1.5 INCOMING REQUEST SCREEN STYLES
   incomingRequestContainer: {
     flex: 1,
-    backgroundColor: '#FCFAF7',
+    backgroundColor: '#000000',
   },
   incomingMapWrapper: {
-    height: 200,
-    position: 'relative',
-    opacity: 0.8,
+    ...StyleSheet.absoluteFill,
+    opacity: 0.6,
   },
   incomingMapOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(252, 250, 247, 0.45)', // Mutes map details slightly
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
   },
   incomingFloatingHeader: {
     position: 'absolute',
-    top: 16,
+    top: 50,
     left: 16,
     right: 16,
     flexDirection: 'row',
@@ -3659,194 +4096,300 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   incomingMenuBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
   },
   incomingRequestSheet: {
-    flex: 1,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    marginTop: -28,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    elevation: 10,
-    shadowColor: '#38220F',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    elevation: 20,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
   },
   incomingSheetHandle: {
-    width: 44,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#E2E8F0',
+    width: 40,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#CBD5E1',
     alignSelf: 'center',
-    marginBottom: 14,
+    marginTop: 6,
+    marginBottom: 16,
   },
   incomingHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 18,
   },
-  circularTimer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#EF4444',
+  circularTimerRing: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 3,
+    borderColor: '#F97316',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FEF2F2',
+    backgroundColor: '#FFF7ED',
   },
   circularTimerText: {
     fontSize: 12,
     fontWeight: '900',
-    color: '#EF4444',
+    color: '#F97316',
   },
   incomingNewRequestTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '900',
-    color: '#38220F',
+    color: '#0F172A',
+    letterSpacing: 0.5,
   },
   incomingOrderIdText: {
-    fontSize: 12,
-    color: '#8A7A6E',
-    fontWeight: '600',
-    marginTop: 1,
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '700',
+    marginTop: 2,
   },
   incomingEarningsCol: {
     alignItems: 'flex-end',
   },
   incomingEarningsLabel: {
-    fontSize: 8,
+    fontSize: 9,
     fontWeight: '800',
-    color: '#8A7A6E',
-    letterSpacing: 0.3,
+    color: '#64748B',
+    letterSpacing: 0.5,
   },
   incomingEarningsAmount: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '900',
-    color: '#38220F',
-    marginTop: 2,
+    color: '#10B981',
+    marginTop: 1,
   },
   incomingQuickInfoRow: {
     flexDirection: 'row',
-    backgroundColor: '#FCFAF7',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#FAF6F0',
-    paddingVertical: 12,
+    gap: 10,
     marginBottom: 16,
   },
-  incomingQuickInfoCol: {
+  incomingInfoCard: {
     flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  incomingQuickInfoValue: {
-    fontSize: 15,
+  cardIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFF7ED',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  cardValue: {
+    fontSize: 14,
     fontWeight: '900',
-    color: '#38220F',
-    marginTop: 2,
+    color: '#0F172A',
   },
-  incomingQuickInfoLabel: {
-    fontSize: 8,
+  cardSubValue: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#8A7A6E',
-    letterSpacing: 0.3,
+    color: '#64748B',
     marginTop: 1,
   },
-  incomingQuickInfoDivider: {
-    width: 1,
-    backgroundColor: '#FAF6F0',
+  cardLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+    marginTop: 2,
+    letterSpacing: 0.2,
   },
-  incomingRouteContainer: {
-    marginBottom: 14,
-    position: 'relative',
+  distanceEtaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
     paddingHorizontal: 4,
   },
-  incomingRouteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
+  distanceEtaText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 0.3,
   },
-  routeDot: {
+  routeTimelineContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 14,
+    marginBottom: 16,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+  },
+  timelineIconWrapper: {
+    alignItems: 'center',
+    width: 20,
+    marginRight: 10,
+    paddingTop: 4,
+  },
+  timelineDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     zIndex: 2,
   },
-  routeDotMini: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    zIndex: 2,
-  },
-  incomingRouteLine: {
-    position: 'absolute',
-    left: 8,
-    top: 14,
-    bottom: 14,
+  timelineConnector: {
     width: 2,
-    backgroundColor: '#F0ECE6',
-    zIndex: 1,
+    flex: 1,
+    backgroundColor: '#E2E8F0',
+    marginTop: 4,
+    marginBottom: -16,
   },
-  incomingRouteTextRow: {
+  timelineContent: {
+    flex: 1,
+  },
+  timelineHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 3,
   },
-  incomingRouteTitle: {
-    fontSize: 14,
+  timelineStepLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#F97316',
+    letterSpacing: 0.5,
+  },
+  pickupDistanceBadge: {
+    backgroundColor: '#FFEDD5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  pickupDistanceBadgeText: {
+    fontSize: 10,
     fontWeight: '800',
-    color: '#38220F',
+    color: '#C2410C',
   },
-  incomingRouteSubtitle: {
-    fontSize: 11,
-    color: '#8A7A6E',
+  dropDistanceBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  dropDistanceBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  timelineTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  timelineSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
     fontWeight: '600',
-    marginTop: 1,
+    marginTop: 2,
+    lineHeight: 16,
   },
-  routeDistanceBadge: {
-    backgroundColor: '#FAF6F0',
+  landmarkPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 6,
+  },
+  landmarkPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  itemsSectionContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 14,
+    marginBottom: 4,
+  },
+  itemsSectionHeading: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#64748B',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  itemQuantityBox: {
+    backgroundColor: '#F1F5F9',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+    minWidth: 26,
+    alignItems: 'center',
   },
-  routeDistanceText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#8A7A6E',
-  },
-  incomingCodBox: {
-    flexDirection: 'row',
-    backgroundColor: '#FEE2E2',
-    borderColor: '#FCA5A5',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 18,
-  },
-  incomingCodTitle: {
+  itemQuantityText: {
     fontSize: 12,
     fontWeight: '800',
-    color: '#991B1B',
+    color: '#475569',
   },
-  incomingCodText: {
+  itemNameText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  itemCustomizationsText: {
     fontSize: 11,
-    color: '#B91C1C',
-    fontWeight: '700',
+    color: '#64748B',
+    fontWeight: '600',
     marginTop: 2,
+  },
+  itemPriceText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  viewMoreItemsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 10,
+  },
+  viewMoreItemsBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#F97316',
   },
   incomingActionsRow: {
     flexDirection: 'row',
@@ -4163,150 +4706,273 @@ const styles = StyleSheet.create({
   // 3.5 DELIVERY COMPLETED SCREEN STYLES
   completedScreenContainer: {
     flex: 1,
-    backgroundColor: '#FCFAF7',
-    justifyContent: 'space-between',
-    paddingBottom: 24,
+    backgroundColor: '#FAF9F6', // Warm cream background
   },
-  completedContentContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    marginTop: 32,
+  completedScrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 180, // Generous padding to prevent overlapping with sticky footer
   },
   completedSuccessCircle: {
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#10B981',
+    backgroundColor: '#D1FAE5', // Light green circular check background
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-  },
-  completedTitle: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#38220F',
-    textAlign: 'center',
-  },
-  completedOrderText: {
-    fontSize: 13,
-    color: '#8A7A6E',
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  completedEarningCard: {
-    width: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#FAF6F0',
-    padding: 20,
-    marginTop: 20,
-    elevation: 3,
-    shadowColor: '#38220F',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-  },
-  completedEarningSub: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#8A7A6E',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    textAlign: 'center',
-  },
-  completedEarningValue: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#F97316',
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 16,
-  },
-  completedStatsRow: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: '#FAF6F0',
-    paddingTop: 14,
-  },
-  completedStatCol: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  completedStatTitle: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#8A7A6E',
-    marginTop: 4,
-  },
-  completedStatValue: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#38220F',
-    marginTop: 2,
-  },
-  completedStatDivider: {
-    width: 1,
-    backgroundColor: '#FAF6F0',
-  },
-  completedCashCollectedCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF8F0',
-    borderColor: '#FFEAD0',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    alignSelf: 'center',
     marginTop: 16,
-  },
-  completedCashCollectedText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#78350F',
-  },
-  completedActionsContainer: {
-    paddingHorizontal: 20,
-    gap: 10,
-    marginTop: 12,
-  },
-  completedPrimaryBtn: {
-    height: 48,
-    backgroundColor: '#F97316',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 3,
-    shadowColor: '#000',
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#10B981',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  completedPrimaryBtnText: {
-    fontSize: 14,
+  completedTitle: {
+    fontSize: 26,
     fontWeight: '900',
+    color: '#1F2937',
+    textAlign: 'center',
+    lineHeight: 32,
+  },
+  completedSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 24,
+  },
+  completedOrderText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#374151',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  completedEarningCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    borderTopWidth: 4,
+    borderTopColor: '#F97316', // Orange top border accent
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    marginBottom: 16,
+  },
+  completedEarningLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#9CA3AF',
+    letterSpacing: 0.5,
+  },
+  completedEarningValue: {
+    fontSize: 38,
+    fontWeight: '900',
+    color: '#10B981', // Premium green
+    marginVertical: 4,
+  },
+  addedToEarningsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7ED', // Warm peach pill
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  addedToEarningsText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#EA580C',
+  },
+  completedCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  completedCardTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1F2937',
+    marginBottom: 16,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  summaryLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1F2937',
+    maxWidth: '50%',
+  },
+  paymentBadgeCod: {
+    backgroundColor: '#E6F4EA',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  paymentBadgeCodText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#137333',
+  },
+  paymentBadgePaid: {
+    backgroundColor: '#E8F0FE',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  paymentBadgePaidText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1A73E8',
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  breakdownLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  breakdownValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  breakdownDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 8,
+  },
+  breakdownTotalLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1F2937',
+  },
+  breakdownTotalValue: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#10B981',
+  },
+  timelineContainer: {
+    paddingLeft: 8,
+    marginTop: 4,
+  },
+  completedTimelineRow: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  timelineIndicatorContainer: {
+    alignItems: 'center',
+    marginRight: 12,
+    width: 20,
+  },
+  timelineDotActive: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  timelineLine: {
+    position: 'absolute',
+    top: 18,
+    bottom: -22,
+    width: 2,
+    backgroundColor: '#A7F3D0',
+    zIndex: 1,
+  },
+  completedTimelineContent: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  completedTimelineTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  completedTimelineTime: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    fontWeight: '600',
+  },
+  completedStickyFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  completedBackHomeBtn: {
+    height: 48,
+    backgroundColor: '#F97316', // Primary Orange action
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  completedBackHomeBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
     color: '#FFFFFF',
   },
-  completedSecondaryBtn: {
-    height: 48,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FAF6F0',
+  completedViewEarningsBtn: {
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  completedSecondaryBtnText: {
+  completedViewEarningsText: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#8A7A6E',
+    color: '#6B7280',
   },
 
   // OFFLINE HOME STATE ADDITIONAL STYLES
