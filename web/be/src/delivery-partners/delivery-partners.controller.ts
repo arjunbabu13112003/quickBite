@@ -32,9 +32,11 @@ import { VerifyDocumentDto } from './dto/verify-document.dto';
 import { UpdatePartnerStatusDto } from './dto/update-partner-status.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateActiveDeliveryLocationDto } from './dto/update-active-delivery-location.dto';
+import { VerifyActiveDeliveryPinDto } from './dto/verify-active-delivery-pin.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { DeliveryPartnerLoginDto } from './dto/delivery-partner-login.dto';
 import { UpdateOnlineStatusDto } from './dto/update-online-status.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../users/jwt-auth.guard';
 import { RolesGuard } from '../users/roles.guard';
 import { Roles } from '../users/roles.decorator';
@@ -97,6 +99,40 @@ export class DeliveryPartnersController {
       throw new ForbiddenException('Forbidden resource');
     }
     return this.partnersService.getProfile(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Patch('delivery-partners/me')
+  updateProfile(@Body() dto: UpdateProfileDto, @Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.updateProfile(req.user.userId, dto);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('delivery-partners/me/documents/:documentId')
+  async getMyDocument(
+    @Param('documentId', ParseIntPipe) documentId: number,
+    @Request() req,
+    @Res() res,
+  ) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const document = await this.partnersService.getDocumentForPartner(req.user.userId, documentId);
+    const absolutePath = resolve(SECURE_UPLOAD_DIR, document.storageKey);
+    const rel = relative(SECURE_UPLOAD_DIR, absolutePath);
+    
+    if (rel.startsWith('..') || isAbsolute(rel) || absolutePath.slice(0, SECURE_UPLOAD_DIR.length) !== SECURE_UPLOAD_DIR) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    if (!existsSync(absolutePath)) {
+      throw new NotFoundException('Document file not found');
+    }
+
+    res.sendFile(absolutePath);
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)
@@ -185,6 +221,15 @@ export class DeliveryPartnersController {
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/active-delivery/verify-pin')
+  verifyActiveDeliveryPin(@Body() dto: VerifyActiveDeliveryPinDto, @Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.verifyActiveDeliveryPin(req.user.userId, dto.pin);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
   @Get('delivery-partners/me/orders')
   getAssignedOrders(@Request() req) {
     if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
@@ -252,6 +297,7 @@ export class DeliveryPartnersController {
       req.user.userId,
       orderId,
       dto.status,
+      dto.deliveryPin,
     );
   }
 

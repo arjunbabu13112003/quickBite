@@ -144,6 +144,18 @@ export class Order {
   @Column({ nullable: true })
   cashCollectedByDeliveryPartnerId?: number;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  deliveryPinHash?: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deliveryPinVerifiedAt?: Date;
+
+  @Column({ type: 'int', default: 0 })
+  deliveryPinAttemptCount: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deliveryPinLockedUntil?: Date;
+
   @Column({ nullable: true })
   deliveryPartnerId?: number;
 

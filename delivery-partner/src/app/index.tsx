@@ -18,7 +18,8 @@ import {
   Modal,
   Alert,
   Animated,
-  PanResponder
+  PanResponder,
+  useColorScheme
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -200,17 +201,8 @@ function calculateDistance(
 }
 
 export default function AppIndex() {
-  console.log('[DIAGNOSTIC] Header:', typeof Header);
-  console.log('[DIAGNOSTIC] BottomNavigation:', typeof BottomNavigation);
-  console.log('[DIAGNOSTIC] HomeStatsCard:', typeof HomeStatsCard);
-  console.log('[DIAGNOSTIC] LargeEarningsCard:', typeof LargeEarningsCard);
-  console.log('[DIAGNOSTIC] PeriodStatsCard:', typeof PeriodStatsCard);
-  console.log('[DIAGNOSTIC] EarningsBreakdown:', typeof EarningsBreakdown);
-  console.log('[DIAGNOSTIC] DeliveryCard:', typeof DeliveryCard);
-  console.log('[DIAGNOSTIC] ProgressTimeline:', typeof ProgressTimeline);
-  console.log('[DIAGNOSTIC] MapPlaceholder:', typeof MapPlaceholder);
-  console.log('[DIAGNOSTIC] MenuRow:', typeof MenuRow);
-  console.log('[DIAGNOSTIC] OnlineStatus:', typeof OnlineStatus);
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -230,6 +222,39 @@ export default function AppIndex() {
 
   // Navigation & UI States
   const [activeTab, setActiveTab] = useState<'home' | 'orders' | 'earnings' | 'profile'>('home');
+
+  // Delivery PIN Verification States (Phase 7)
+  const [partnerPinInput, setPartnerPinInput] = useState('');
+  const [partnerPinError, setPartnerPinError] = useState('');
+  const [isVerifyingPartnerPin, setIsVerifyingPartnerPin] = useState(false);
+  const partnerPinInputRef = useRef<TextInput>(null);
+  const [lockoutCountdown, setLockoutCountdown] = useState(0);
+  const activeDeliveryScrollRef = useRef<ScrollView>(null);
+  const [liveOnlineSeconds, setLiveOnlineSeconds] = useState(0);
+  const [currentIstDateKey, setCurrentIstDateKey] = useState('');
+  const [activeProfileSubScreen, setActiveProfileSubScreen] = useState<'main' | 'personal' | 'vehicle' | 'bank' | 'documents' | 'preferences'>('main');
+  const [isEditingPersonal, setIsEditingPersonal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [personalUpdateError, setPersonalUpdateError] = useState('');
+  const [isUpdatingPersonal, setIsUpdatingPersonal] = useState(false);
+  const [authToken, setAuthTokenState] = useState<string | null>(null);
+  const [selectedPreviewDoc, setSelectedPreviewDoc] = useState<any>(null);
+  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+
+  const fetchDashboardStats = useCallback(async () => {
+    try {
+      const stats = await api.getDashboardStats();
+      setDashboardStats(stats);
+      setLiveOnlineSeconds(stats.onlineSeconds || 0);
+      const dateKey = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
+      setCurrentIstDateKey(dateKey);
+    } catch (err) {
+      console.error('[Dashboard] Fetch stats failed:', err);
+    }
+  }, []);
   
   // Unified Delivery State Machine:
   // - 'none': No active delivery, standard Available Deliveries Home screen.
@@ -265,6 +290,7 @@ export default function AppIndex() {
       selected?: boolean;
     }>;
     onlineMinutes: number;
+    onlineSeconds?: number;
   }>({
     todayEarnings: 0,
     todayDeliveries: 0,
@@ -282,6 +308,7 @@ export default function AppIndex() {
       { day: 'S', value: 0, height: 5 }
     ],
     onlineMinutes: 0,
+    onlineSeconds: 0,
   });
   const [completedFilter, setCompletedFilter] = useState<'today' | 'week' | 'month' | 'all' | 'delivered' | 'cancelled_rejected'>('today');
   const [showFilterPicker, setShowFilterPicker] = useState(false);
@@ -497,6 +524,8 @@ export default function AppIndex() {
       }
     }
     await setAuthToken(null);
+    setAuthTokenState(null);
+    setActiveProfileSubScreen('main');
     setCurrentUser(null);
     setCurrentPartner(null);
     setIsOnline(false);
@@ -692,9 +721,79 @@ export default function AppIndex() {
   };
 
   useEffect(() => {
+    if (lockoutCountdown <= 0) return;
+    const interval = setInterval(() => {
+      setLockoutCountdown(prev => {
+        if (prev <= 1) {
+          setPartnerPinError('');
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutCountdown]);
+
+  const handlePinChange = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 4);
+    setPartnerPinInput(digits);
+    if (partnerPinError) setPartnerPinError('');
+  };
+
+  const handleInputFocus = () => {
+    setTimeout(() => {
+      activeDeliveryScrollRef.current?.scrollToEnd({ animated: true });
+    }, 150);
+  };
+
+  const handlePartnerVerifyPin = async () => {
+    if (!partnerPinInput || partnerPinInput.length !== 4) {
+      setPartnerPinError('Please enter a 4-digit PIN.');
+      return;
+    }
+    setPartnerPinError('');
+    setIsVerifyingPartnerPin(true);
+    try {
+      const res = await api.verifyActiveDeliveryPin(partnerPinInput);
+      if (res.verified) {
+        // Update local activeAssignment state to mark it verified
+        setActiveAssignment((prev: any) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            order: {
+              ...prev.order,
+              deliveryPinVerified: true,
+            }
+          };
+        });
+        setPartnerPinInput('');
+        // Dismiss keyboard
+        partnerPinInputRef.current?.blur();
+      }
+    } catch (err: any) {
+      const errMsg = err.message || 'Incorrect delivery PIN. Please check with the customer.';
+      setPartnerPinError(errMsg);
+      setPartnerPinInput('');
+      
+      if (errMsg.includes('Too many attempts') || errMsg.includes('wait a moment')) {
+        setLockoutCountdown(60);
+      } else {
+        // Re-focus TextInput for retry
+        setTimeout(() => {
+          partnerPinInputRef.current?.focus();
+        }, 100);
+      }
+    } finally {
+      setIsVerifyingPartnerPin(false);
+    }
+  };
+
+  useEffect(() => {
     const restoreSession = async () => {
       try {
         const token = await getAuthToken();
+        setAuthTokenState(token);
         if (token) {
           const data = await api.getMe();
           setCurrentUser(data.partner.user);
@@ -720,14 +819,116 @@ export default function AppIndex() {
   }, []);
 
   useEffect(() => {
+    if (!selectedPreviewDoc || !authToken) {
+      setPreviewImageUri(null);
+      setPreviewError('');
+      return;
+    }
+
+    const loadDocImage = async () => {
+      setPreviewLoading(true);
+      setPreviewError('');
+      setPreviewImageUri(null);
+      try {
+        const url = `${API_BASE_URL}${selectedPreviewDoc.previewUrl}`;
+        console.log('[Preview] Fetching:', url);
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+
+        if (!res.ok) {
+          throw new Error(`Failed to load document (Status: ${res.status})`);
+        }
+
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPreviewImageUri(reader.result as string);
+          setPreviewLoading(false);
+        };
+        reader.onerror = () => {
+          throw new Error('Failed to read document image data');
+        };
+        reader.readAsDataURL(blob);
+      } catch (err: any) {
+        console.error('[Preview] Load error:', err);
+        setPreviewError(err.message || 'Could not load document preview.');
+        setPreviewLoading(false);
+      }
+    };
+
+    loadDocImage();
+  }, [selectedPreviewDoc, authToken]);
+
+  const formatOnlineDuration = (totalSeconds: number) => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds || 0));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const seconds = safeSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}hr ${minutes}m ${String(seconds).padStart(2, '0')}s`;
+    }
+    return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+  };
+
+  const getISTDayStart = (date: Date) => {
+    const year = date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric' });
+    const month = date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', month: 'numeric' });
+    const day = date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric' });
+    const pad = (n: string) => String(n).padStart(2, '0');
+    return new Date(`${year}-${pad(month)}-${pad(day)}T00:00:00+05:30`);
+  };
+
+  useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       setAppState(nextAppState);
+      if (nextAppState === 'active' && isAuthenticated) {
+        // App returned to foreground, check if date has changed
+        const now = new Date();
+        const dateKey = now.toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
+        setCurrentIstDateKey(prev => {
+          if (prev && dateKey !== prev) {
+            fetchDashboardStats();
+            return dateKey;
+          }
+          return prev || dateKey;
+        });
+      }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [isAuthenticated, fetchDashboardStats]);
+
+  // Live Online Time Ticker (Phase 7)
+  useEffect(() => {
+    let interval: any = null;
+    if (isOnline && isAuthenticated) {
+      interval = setInterval(() => {
+        // Midnight detection check
+        const now = new Date();
+        const dateKey = now.toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
+        
+        setCurrentIstDateKey(prev => {
+          if (prev && dateKey !== prev) {
+            // Midnight reached! Fetch fresh stats and reset
+            fetchDashboardStats();
+            return dateKey;
+          }
+          return prev || dateKey;
+        });
+
+        setLiveOnlineSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      setLiveOnlineSeconds(dashboardStats.onlineSeconds || 0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isOnline, isAuthenticated, dashboardStats.onlineSeconds, fetchDashboardStats]);
 
   // Automatically sync active delivery state from backend when app state resumes, tab changes, or active order screen opens
   useEffect(() => {
@@ -1012,14 +1213,7 @@ export default function AppIndex() {
     }
   };
 
-  const fetchDashboardStats = useCallback(async () => {
-    try {
-      const stats = await api.getDashboardStats();
-      setDashboardStats(stats);
-    } catch (err) {
-      console.error('[Dashboard] Fetch stats failed:', err);
-    }
-  }, []);
+
 
   const handleManualRefresh = useCallback(async () => {
     await checkIncomingAssignment();
@@ -1377,7 +1571,7 @@ export default function AppIndex() {
             <HomeStatsCard 
               earnings={dashboardStats.todayEarnings} 
               deliveries={dashboardStats.todayDeliveries} 
-              onlineTime={dashboardStats.onlineMinutes > 0 ? `${dashboardStats.onlineMinutes}m` : '—'} 
+              onlineTime={formatOnlineDuration(liveOnlineSeconds)} 
             />
           )}
 
@@ -2003,131 +2197,265 @@ export default function AppIndex() {
   // SCREEN 3: CUSTOMER DELIVERY (Customer details, cash collection, delivered cta)
   const renderCustomerDeliveryScreen = () => {
     const order = activeAssignment?.order || {};
+    const themedBoxBg = isDark ? '#1E293B' : '#FFFFFF';
+    const themedBoxBorder = isDark ? '#334155' : '#FAF6F0';
+    const themedTextSub = isDark ? '#94A3B8' : '#8A7A6E';
+    const themedPinBoxBg = isDark ? '#0F172A' : '#F8FAFC';
+    const themedPinBoxBorder = isDark ? '#334155' : '#E2E8F0';
+    const themedPinBoxFocusBg = isDark ? '#2E1A05' : '#FFF8F2';
+    const themedPinBoxFocusBorder = '#FF6F00';
+    const themedPinBoxText = isDark ? '#F8FAFC' : '#0F172A';
+
     return (
-      <View style={styles.tabContentContainer}>
-        <Header 
-          title="QuickBite Partner" 
-          isOnline={isOnline} 
-          isAvailable={isAvailable}
-          showBack={true}
-          onBackPress={() => setViewingActiveOrder(false)}
-        />
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <View style={styles.tabContentContainer}>
+          <Header 
+            title="QuickBite Partner" 
+            isOnline={isOnline} 
+            isAvailable={isAvailable}
+            showBack={true}
+            onBackPress={() => setViewingActiveOrder(false)}
+          />
 
-        <ScrollView 
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollPaddingActive}
-          style={styles.screenBg}
-        >
-          {/* Deliver To Card */}
-          <View style={styles.customerCard}>
-            <View style={styles.customerCardContent}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.customerCardLabel}>Deliver To</Text>
-                <Text style={styles.customerCardTitle}>{order.customerName || 'Customer'}</Text>
-                <Text style={styles.customerCardSub}>{order.deliveryAddress || 'Drop Area'}</Text>
+          <ScrollView 
+            ref={activeDeliveryScrollRef}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.scrollPaddingActive}
+            style={styles.screenBg}
+          >
+            {/* Deliver To Card */}
+            <View style={styles.customerCard}>
+              <View style={styles.customerCardContent}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.customerCardLabel}>Deliver To</Text>
+                  <Text style={styles.customerCardTitle}>{order.customerName || 'Customer'}</Text>
+                  <Text style={styles.customerCardSub}>{order.deliveryAddress || 'Drop Area'}</Text>
+                </View>
+                <TouchableOpacity style={styles.customerCallBtn} activeOpacity={0.7}>
+                  <Ionicons name="call" size={18} color="#7C2D12" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity style={styles.customerCallBtn} activeOpacity={0.7}>
-                <Ionicons name="call" size={18} color="#7C2D12" />
-              </TouchableOpacity>
             </View>
-          </View>
 
-          {/* Map Preview */}
-          <MapPlaceholder eta="N/A" etaPosition="bottom-right" destinationName={order.customerName} />
+            {/* Map Preview */}
+            <MapPlaceholder eta="N/A" etaPosition="bottom-right" destinationName={order.customerName} />
 
-          {/* Customer Instructions */}
-          <View style={styles.instructionCard}>
-            <View style={styles.instructionHeader}>
-              <Ionicons name="information-circle" size={18} color="#F97316" style={{ marginRight: 8 }} />
-              <Text style={styles.instructionTitle}>Customer Instructions</Text>
-            </View>
-            <Text style={styles.instructionText}>
-              “Call when you reach the gate. Do not ring the bell.”
-            </Text>
-          </View>
-
-          {/* CASH ON DELIVERY COLLECTED STATUS */}
-          <View style={[
-            styles.codBox,
-            (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codBoxSuccess
-          ]}>
-            <View style={styles.codBoxHeader}>
-              <Ionicons 
-                name="cash" 
-                size={18} 
-                color={(isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') ? '#137333' : '#B91C1C'} 
-                style={{ marginRight: 8 }} 
-              />
-              <Text style={[
-                styles.codBoxTitle,
-                (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codBoxTitleSuccess
-              ]}>
-                {order.paymentMethod?.toUpperCase() === 'COD' ? 'CASH ON DELIVERY' : 'ONLINE PREPAID'}
+            {/* Customer Instructions */}
+            <View style={styles.instructionCard}>
+              <View style={styles.instructionHeader}>
+                <Ionicons name="information-circle" size={18} color="#F97316" style={{ marginRight: 8 }} />
+                <Text style={styles.instructionTitle}>Customer Instructions</Text>
+              </View>
+              <Text style={styles.instructionText}>
+                “Call when you reach the gate. Do not ring the bell.”
               </Text>
             </View>
-            
-            <View style={styles.codDetailsRow}>
-              <View>
-                {order.paymentMethod?.toUpperCase() !== 'COD' ? (
-                  <View style={styles.confirmedCashBadge}>
+
+            {/* CASH ON DELIVERY COLLECTED STATUS */}
+            <View style={[
+              styles.codBox,
+              (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codBoxSuccess
+            ]}>
+              <View style={styles.codBoxHeader}>
+                <Ionicons 
+                  name="cash" 
+                  size={18} 
+                  color={(isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') ? '#137333' : '#B91C1C'} 
+                  style={{ marginRight: 8 }} 
+                />
+                <Text style={[
+                  styles.codBoxTitle,
+                  (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codBoxTitleSuccess
+                ]}>
+                  {order.paymentMethod?.toUpperCase() === 'COD' ? 'CASH ON DELIVERY' : 'ONLINE PREPAID'}
+                </Text>
+              </View>
+              
+              <View style={styles.codDetailsRow}>
+                <View>
+                  {order.paymentMethod?.toUpperCase() !== 'COD' ? (
+                    <View style={styles.confirmedCashBadge}>
+                      <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 4 }} />
+                      <Text style={styles.confirmedCashText}>Prepaid Order ✓</Text>
+                    </View>
+                  ) : !isCashCollected ? (
+                    <Text style={styles.codBoxSub}>Collect exact amount from customer.</Text>
+                  ) : (
+                    <View style={styles.confirmedCashBadge}>
+                      <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 4 }} />
+                      <Text style={styles.confirmedCashText}>₹{order.amount || 0} Cash Collected ✓</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={[
+                  styles.codAmountText,
+                  (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codAmountTextSuccess
+                ]}>
+                  ₹{order.amount || 0}
+                </Text>
+              </View>
+            </View>
+
+            {/* CUSTOMER PIN VERIFICATION BOX */}
+            {order.deliveryPinRequired && (
+              <View style={[
+                styles.pinVerificationBox,
+                { backgroundColor: themedBoxBg, borderColor: themedBoxBorder },
+                order.deliveryPinVerified && styles.pinVerificationBoxSuccess
+              ]}>
+                <View style={styles.pinVerificationBoxHeader}>
+                  <Ionicons 
+                    name={order.deliveryPinVerified ? "checkmark-circle" : "shield-outline"} 
+                    size={18} 
+                    color={order.deliveryPinVerified ? '#137333' : '#FF7A00'} 
+                    style={{ marginRight: 8 }} 
+                  />
+                  <Text style={[
+                    styles.pinVerificationBoxTitle,
+                    { color: order.deliveryPinVerified ? '#137333' : '#FF7A00' }
+                  ]}>
+                    {order.deliveryPinVerified ? 'CUSTOMER VERIFIED ✓' : 'VERIFY CUSTOMER'}
+                  </Text>
+                </View>
+
+                {order.deliveryPinVerified ? (
+                  <View style={styles.confirmedPinBadge}>
                     <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 4 }} />
-                    <Text style={styles.confirmedCashText}>Prepaid Order ✓</Text>
+                    <Text style={styles.confirmedPinText}>Delivery PIN Verified ✓</Text>
                   </View>
-                ) : !isCashCollected ? (
-                  <Text style={styles.codBoxSub}>Collect exact amount from customer.</Text>
                 ) : (
-                  <View style={styles.confirmedCashBadge}>
-                    <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 4 }} />
-                    <Text style={styles.confirmedCashText}>₹{order.amount || 0} Cash Collected ✓</Text>
+                  <View style={{ marginTop: 12 }}>
+                    <Text style={[styles.pinVerificationBoxSub, { color: themedTextSub }]}>
+                      Ask the customer for the 4-digit Delivery PIN shown on their screen.
+                    </Text>
+                    
+                    {/* PIN Input Container */}
+                    <View style={styles.pinInputContainer}>
+                      <TextInput
+                        ref={partnerPinInputRef}
+                        value={partnerPinInput}
+                        onChangeText={handlePinChange}
+                        keyboardType="number-pad"
+                        inputMode="numeric"
+                        maxLength={4}
+                        caretHidden
+                        contextMenuHidden
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                        style={styles.pinRealInput}
+                        editable={!isVerifyingPartnerPin && lockoutCountdown === 0}
+                        returnKeyType="done"
+                        onSubmitEditing={() => {
+                          if (partnerPinInput.length === 4) {
+                            handlePartnerVerifyPin();
+                          }
+                        }}
+                        onFocus={handleInputFocus}
+                      />
+
+                      <View pointerEvents="none" style={styles.partnerPinBoxesRow}>
+                        {[0, 1, 2, 3].map((idx) => {
+                          const char = partnerPinInput[idx] || '';
+                          const isFocused = partnerPinInput.length === idx && lockoutCountdown === 0;
+                          return (
+                            <View 
+                              key={idx} 
+                              style={[
+                                styles.partnerPinBox,
+                                { 
+                                  backgroundColor: isFocused ? themedPinBoxFocusBg : themedPinBoxBg,
+                                  borderColor: isFocused ? themedPinBoxFocusBorder : themedPinBoxBorder
+                                },
+                                lockoutCountdown > 0 && { opacity: 0.5, backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }
+                              ]}
+                            >
+                              <Text style={[styles.partnerPinBoxText, { color: themedPinBoxText }]}>{char}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    {partnerPinError ? (
+                      <Text style={styles.partnerPinErrorText}>
+                        {partnerPinError} {lockoutCountdown > 0 ? `(${lockoutCountdown}s)` : ''}
+                      </Text>
+                    ) : null}
+
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      disabled={isVerifyingPartnerPin || partnerPinInput.length !== 4 || lockoutCountdown > 0}
+                      onPress={handlePartnerVerifyPin}
+                      style={[
+                        styles.partnerVerifyPinBtn,
+                        (isVerifyingPartnerPin || partnerPinInput.length !== 4 || lockoutCountdown > 0) && { opacity: 0.6 }
+                      ]}
+                    >
+                      {isVerifyingPartnerPin ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.partnerVerifyPinBtnText}>Verify PIN</Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
                 )}
               </View>
-              <Text style={[
-                styles.codAmountText,
-                (isCashCollected || order.paymentMethod?.toUpperCase() !== 'COD') && styles.codAmountTextSuccess
-              ]}>
-                ₹{order.amount || 0}
-              </Text>
-            </View>
-          </View>
-        </ScrollView>
+            )}
+          </ScrollView>
 
-        {/* Sticky Action Button Container */}
-        <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
-          {order.paymentMethod?.toUpperCase() === 'COD' && !isCashCollected ? (
-            <TouchableOpacity 
-              activeOpacity={0.8}
-              onPress={handleCollectCod}
-              disabled={isAcceptingDeclining}
-              style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
-            >
-              {isAcceptingDeclining ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.stickyFooterButtonText}>Confirm ₹{order.amount || 0} Cash Collected</Text>
-              )}
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity 
-              activeOpacity={0.8}
-              onPress={completeActiveOrder}
-              disabled={isAcceptingDeclining}
-              style={[styles.stickyFooterButton, styles.successButton, isAcceptingDeclining && { opacity: 0.7 }]}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {/* Sticky Action Button Container */}
+          <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
+            {order.paymentMethod?.toUpperCase() === 'COD' && !isCashCollected ? (
+              <TouchableOpacity 
+                activeOpacity={0.8}
+                onPress={handleCollectCod}
+                disabled={isAcceptingDeclining}
+                style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
+              >
                 {isAcceptingDeclining ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <>
-                    <Text style={styles.stickyFooterButtonText}>Mark as Delivered</Text>
-                    <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
-                  </>
+                  <Text style={styles.stickyFooterButtonText}>Confirm ₹{order.amount || 0} Cash Collected</Text>
                 )}
-              </View>
-            </TouchableOpacity>
-          )}
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity 
+                activeOpacity={0.8}
+                onPress={() => {
+                  if (order.deliveryPinRequired && !order.deliveryPinVerified) {
+                    alert("Please verify the customer's PIN first.");
+                  } else {
+                    completeActiveOrder();
+                  }
+                }}
+                disabled={isAcceptingDeclining || (order.deliveryPinRequired && !order.deliveryPinVerified)}
+                style={[
+                  styles.stickyFooterButton, 
+                  styles.successButton, 
+                  (isAcceptingDeclining || (order.deliveryPinRequired && !order.deliveryPinVerified)) && { opacity: 0.5 }
+                ]}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {isAcceptingDeclining ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Text style={styles.stickyFooterButtonText}>
+                        {order.deliveryPinRequired && !order.deliveryPinVerified ? 'Verify PIN to Deliver' : 'Mark as Delivered'}
+                      </Text>
+                      <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                    </>
+                  )}
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     );
   };
 
@@ -2320,7 +2648,7 @@ export default function AppIndex() {
         </ScrollView>
 
         {/* Sticky Action Footer */}
-        <View style={styles.completedStickyFooter}>
+        <View style={[styles.completedStickyFooter, { paddingBottom: Math.max(16, insets.bottom + 12) }]}>
           <TouchableOpacity 
             activeOpacity={0.8}
             onPress={() => {
@@ -2950,7 +3278,683 @@ export default function AppIndex() {
   };
 
   // 4. PROFILE TAB (Profile info, documents list with action flags)
+  // 4. PROFILE TAB (Profile info, documents list with action flags)
+  const getDocumentName = (type: string) => {
+    switch (type) {
+      case 'PROFILE_PHOTO': return 'Profile Photo';
+      case 'DRIVERS_LICENSE': return 'Driving Licence';
+      case 'VEHICLE_RC': return 'Vehicle RC';
+      case 'VEHICLE_INSURANCE': return 'Vehicle Insurance';
+      default: return type.replace(/_/g, ' ');
+    }
+  };
+
+  const renderDocumentPreviewModal = () => {
+    if (!selectedPreviewDoc) return null;
+    const docName = getDocumentName(selectedPreviewDoc.type);
+
+    return (
+      <Modal
+        visible={!!selectedPreviewDoc}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setSelectedPreviewDoc(null)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#27272A' }}>
+            <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 16 }}>{docName}</Text>
+            <TouchableOpacity onPress={() => setSelectedPreviewDoc(null)}>
+              <Ionicons name="close" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+            {previewLoading ? (
+              <ActivityIndicator size="large" color="#F97316" />
+            ) : previewError ? (
+              <View style={{ alignItems: 'center', padding: 20 }}>
+                <Ionicons name="warning" size={48} color="#EF4444" style={{ marginBottom: 12 }} />
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>{previewError}</Text>
+                <TouchableOpacity 
+                  style={{ backgroundColor: '#F97316', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 }}
+                  onPress={() => {
+                    // Force refresh by copying state
+                    setSelectedPreviewDoc({ ...selectedPreviewDoc });
+                  }}
+                >
+                  <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 12 }}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : previewImageUri ? (
+              <Image 
+                source={{ uri: previewImageUri }} 
+                style={{ width: '100%', height: '100%', resizeMode: 'contain' }}
+              />
+            ) : (
+              <ActivityIndicator size="large" color="#F97316" />
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
+    );
+  };
+
+  const formatJoinedDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '—';
+    try {
+      const date = new Date(dateStr);
+      const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
+      return date.toLocaleDateString('en-US', options);
+    } catch {
+      return '—';
+    }
+  };
+
+  const renderPersonalDetailsScreen = () => {
+    const bgCol = '#FAF9F6';
+    const cardBg = '#FFFFFF';
+    const cardBorder = '#FAF6F0';
+    const textTitle = '#38220F';
+    const textSub = '#8A7A6E';
+    const inputBg = '#F8FAFC';
+    const inputBorder = '#E2E8F0';
+    const inputText = '#0F172A';
+
+    const handleSave = async () => {
+      if (!editName.trim()) {
+        setPersonalUpdateError('Name cannot be empty');
+        return;
+      }
+      setIsUpdatingPersonal(true);
+      setPersonalUpdateError('');
+      try {
+        const profile = await api.updateProfile(editName.trim(), editEmail.trim());
+        setCurrentUser(profile.partner.user);
+        setCurrentPartner(profile.partner);
+        setIsEditingPersonal(false);
+      } catch (err: any) {
+        setPersonalUpdateError(err.message || 'Failed to update profile');
+      } finally {
+        setIsUpdatingPersonal(false);
+      }
+    };
+
+    const toggleEdit = () => {
+      if (!isEditingPersonal) {
+        setEditName(currentUser?.name || '');
+        setEditEmail(currentUser?.email || '');
+        setPersonalUpdateError('');
+      }
+      setIsEditingPersonal(!isEditingPersonal);
+    };
+
+    return (
+      <View style={{ flex: 1, backgroundColor: bgCol }}>
+        {/* Header */}
+        <View style={styles.subHeader}>
+          <TouchableOpacity 
+            onPress={() => {
+              setIsEditingPersonal(false);
+              setActiveProfileSubScreen('main');
+            }}
+            style={styles.subHeaderBackBtn}
+          >
+            <Ionicons name="arrow-back" size={20} color={textTitle} />
+            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Personal Details</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={toggleEdit}
+            style={styles.subHeaderEditBtn}
+          >
+            <Text style={styles.subHeaderEditBtnText}>
+              {isEditingPersonal ? 'Cancel' : 'Edit'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          {personalUpdateError ? (
+            <View style={{ backgroundColor: '#FEE2E2', padding: 12, borderRadius: 8, marginHorizontal: 16, marginBottom: 16 }}>
+              <Text style={{ color: '#B91C1C', fontSize: 13, fontWeight: '600' }}>{personalUpdateError}</Text>
+            </View>
+          ) : null}
+
+          {/* Profile Identity Card */}
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder, flexDirection: 'row', alignItems: 'center' }]}>
+            <View style={styles.profileAvatarWrapper}>
+              <Image source={{ uri: profileImageUri }} style={styles.profileAvatar} />
+            </View>
+            <View style={styles.profileDetailsWrapper}>
+              <Text style={[styles.profileNameText, { color: textTitle, fontSize: 16 }]}>{currentUser?.name || 'Partner'}</Text>
+              
+              {currentPartner?.isVerified && (
+                <View style={styles.profileVerifiedBadge}>
+                  <Ionicons name="checkmark-circle" size={11} color="#059669" style={{ marginRight: 4 }} />
+                  <Text style={styles.profileVerifiedText}>Verified Partner</Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Personal Information Section */}
+          <Text style={[styles.profileSectionTitle, { color: textSub }]}>PERSONAL INFORMATION</Text>
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            {/* Full Name */}
+            <View style={styles.detailRow}>
+              <Text style={[styles.detailLabel, { color: textSub }]}>Full Name</Text>
+              {isEditingPersonal ? (
+                <TextInput
+                  style={[styles.detailInput, { backgroundColor: inputBg, borderColor: inputBorder, color: inputText }]}
+                  value={editName}
+                  onChangeText={setEditName}
+                  placeholder="Enter full name"
+                  placeholderTextColor="#94A3B8"
+                />
+              ) : (
+                <Text style={[styles.detailValue, { color: textTitle }]}>{currentUser?.name || 'Not provided'}</Text>
+              )}
+            </View>
+
+            {/* Email Address */}
+            <View style={styles.detailRow}>
+              <Text style={[styles.detailLabel, { color: textSub }]}>Email Address</Text>
+              {isEditingPersonal ? (
+                <TextInput
+                  style={[styles.detailInput, { backgroundColor: inputBg, borderColor: inputBorder, color: inputText }]}
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  placeholder="Enter email address"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  placeholderTextColor="#94A3B8"
+                />
+              ) : (
+                <Text style={[styles.detailValue, { color: textTitle }]}>{currentUser?.email || 'Not provided'}</Text>
+              )}
+            </View>
+
+            {/* Mobile Number */}
+            <View style={[styles.detailRow, { marginBottom: 0 }]}>
+              <Text style={[styles.detailLabel, { color: textSub }]}>Mobile Number</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={[styles.detailValue, { color: textTitle }]}>{currentUser?.mobileNumber || 'Not provided'}</Text>
+                {currentUser?.mobileNumber && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 }}>
+                    <Ionicons name="checkmark-circle" size={10} color="#059669" style={{ marginRight: 3 }} />
+                    <Text style={{ fontSize: 8, fontWeight: '900', color: '#059669' }}>Verified</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+
+          {/* Account Details Section */}
+          <Text style={[styles.profileSectionTitle, { color: textSub }]}>ACCOUNT DETAILS</Text>
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            {/* Account Status */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.detailLabel, { color: textSub, marginBottom: 0 }]}>Account Status</Text>
+              <View style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#059669' }}>{currentPartner?.accountStatus || 'Active'}</Text>
+              </View>
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+
+            {/* Verification Status */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.detailLabel, { color: textSub, marginBottom: 0 }]}>Verification Status</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                <Ionicons name="checkmark-circle" size={12} color="#059669" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#059669' }}>Verified</Text>
+              </View>
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+
+            {/* Joined Date */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.detailLabel, { color: textSub, marginBottom: 0 }]}>Joined Date</Text>
+              <Text style={[styles.detailValue, { color: textTitle }]}>{formatJoinedDate(currentPartner?.createdAt)}</Text>
+            </View>
+          </View>
+
+          {isEditingPersonal && (
+            <View style={{ marginTop: 12, gap: 12 }}>
+              <TouchableOpacity 
+                style={styles.saveBtn}
+                onPress={handleSave}
+                disabled={isUpdatingPersonal}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.saveBtnText}>
+                  {isUpdatingPersonal ? 'Saving...' : 'Save Changes'}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.saveBtn, { backgroundColor: '#E2E8F0' }]}
+                onPress={toggleEdit}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.saveBtnText, { color: '#38220F' }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  const renderVehicleDetailsScreen = () => {
+    const bgCol = '#FAF9F6';
+    const cardBg = '#FFFFFF';
+    const cardBorder = '#FAF6F0';
+    const textTitle = '#38220F';
+    const textSub = '#8A7A6E';
+
+    return (
+      <View style={{ flex: 1, backgroundColor: bgCol }}>
+        {/* Header */}
+        <View style={styles.subHeader}>
+          <TouchableOpacity 
+            onPress={() => setActiveProfileSubScreen('main')}
+            style={styles.subHeaderBackBtn}
+          >
+            <Ionicons name="arrow-back" size={20} color={textTitle} />
+            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Vehicle Details</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          {/* Top Vehicle Identity Card */}
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder, flexDirection: 'row', alignItems: 'center' }]}>
+            <View style={styles.zoneIconContainer}>
+              <Ionicons name="bicycle" size={24} color="#F97316" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: '900', color: textTitle }}>Delivery Vehicle</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6, alignSelf: 'flex-start', marginTop: 4 }}>
+                <Ionicons name="checkmark-circle" size={10} color="#059669" style={{ marginRight: 3 }} />
+                <Text style={{ fontSize: 8, fontWeight: '900', color: '#059669' }}>Verified</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Vehicle Fields Card */}
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={[styles.detailLabel, { color: textSub }]}>Vehicle Type</Text>
+                <Text style={[styles.detailValue, { color: textTitle }]}>{currentPartner?.vehicleType || 'Motorcycle'}</Text>
+              </View>
+              <Ionicons name="bicycle" size={20} color="#8A7A6E" />
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={[styles.detailLabel, { color: textSub }]}>Vehicle Number</Text>
+                <Text style={[styles.detailValue, { color: textTitle }]}>{currentPartner?.vehicleNumber || 'Not provided'}</Text>
+              </View>
+              <Ionicons name="card" size={20} color="#8A7A6E" />
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={[styles.detailLabel, { color: textSub }]}>Driving Licence</Text>
+                <Text style={[styles.detailValue, { color: textTitle }]}>{currentPartner?.licenseNumber || 'Not provided'}</Text>
+              </View>
+              <Ionicons name="document-text" size={20} color="#8A7A6E" />
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.detailLabel, { color: textSub, marginBottom: 0 }]}>Vehicle Verification</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                <Ionicons name="checkmark-circle" size={12} color="#059669" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#059669' }}>Verified</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Info notice box */}
+          <View style={[styles.infoNoticeBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+            <Ionicons name="information-circle-outline" size={20} color="#F97316" style={{ marginRight: 10, marginTop: 2 }} />
+            <Text style={[styles.infoNoticeText, { color: '#78350F', flex: 1 }]}>
+              Vehicle details are verified by QuickBite. Contact support if you need to change your registered vehicle.
+            </Text>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  };
+
+  const renderBankDetailsScreen = () => {
+    const bgCol = '#FAF9F6';
+    const cardBg = '#FFFFFF';
+    const cardBorder = '#FAF6F0';
+    const textTitle = '#38220F';
+    const textSub = '#8A7A6E';
+
+    const bank = currentPartner?.bank;
+
+    return (
+      <View style={{ flex: 1, backgroundColor: bgCol }}>
+        {/* Header */}
+        <View style={styles.subHeader}>
+          <TouchableOpacity 
+            onPress={() => setActiveProfileSubScreen('main')}
+            style={styles.subHeaderBackBtn}
+          >
+            <Ionicons name="arrow-back" size={20} color={textTitle} />
+            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Bank Details</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          {/* Top Bank Identity Card */}
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder, flexDirection: 'row', alignItems: 'center' }]}>
+            <View style={styles.zoneIconContainer}>
+              <Ionicons name="business" size={24} color="#F97316" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: '900', color: textTitle }}>Bank Account</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6, alignSelf: 'flex-start', marginTop: 4 }}>
+                <Ionicons name="checkmark-circle" size={10} color="#059669" style={{ marginRight: 3 }} />
+                <Text style={{ fontSize: 8, fontWeight: '900', color: '#059669' }}>Verified</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Bank Fields Card */}
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={[styles.detailLabel, { color: textSub }]}>Account Holder</Text>
+                <Text style={[styles.detailValue, { color: textTitle }]}>{bank?.accountHolderName || 'Not provided'}</Text>
+              </View>
+              <Ionicons name="person" size={20} color="#8A7A6E" />
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={[styles.detailLabel, { color: textSub }]}>Account Number</Text>
+                <Text style={[styles.detailValue, { color: textTitle }]}>{bank?.maskedAccountNumber || 'Not provided'}</Text>
+              </View>
+              <Ionicons name="card" size={20} color="#8A7A6E" />
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={[styles.detailLabel, { color: textSub }]}>IFSC Code</Text>
+                <Text style={[styles.detailValue, { color: textTitle }]}>{bank?.ifscCode || 'Not provided'}</Text>
+              </View>
+              <Ionicons name="code-working" size={20} color="#8A7A6E" />
+            </View>
+
+            {bank?.upiId ? (
+              <>
+                <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={[styles.detailLabel, { color: textSub }]}>UPI ID</Text>
+                    <Text style={[styles.detailValue, { color: textTitle }]}>{bank.upiId}</Text>
+                  </View>
+                  <Ionicons name="send" size={20} color="#8A7A6E" />
+                </View>
+              </>
+            ) : null}
+          </View>
+
+          {/* Info notice box */}
+          <View style={[styles.infoNoticeBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+            <Ionicons name="lock-closed" size={20} color="#F97316" style={{ marginRight: 10, marginTop: 2 }} />
+            <Text style={[styles.infoNoticeText, { color: '#78350F', flex: 1 }]}>
+              Your bank details are securely stored and used for partner payouts. To update these details, please contact partner support.
+            </Text>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  };
+
+  const renderDocumentsScreen = () => {
+    const bgCol = '#FAF9F6';
+    const cardBg = '#FFFFFF';
+    const cardBorder = '#FAF6F0';
+    const textTitle = '#38220F';
+    const textSub = '#8A7A6E';
+
+    const getStatusColor = (status: string) => {
+      switch (status) {
+        case 'VERIFIED': return '#059669';
+        case 'REJECTED': return '#EF4444';
+        default: return '#D97706';
+      }
+    };
+
+    const getStatusBg = (status: string) => {
+      switch (status) {
+        case 'VERIFIED': return '#ECFDF5';
+        case 'REJECTED': return '#FEF2F2';
+        default: return '#FFFBEB';
+      }
+    };
+
+    const getStatusBorder = (status: string) => {
+      switch (status) {
+        case 'VERIFIED': return '#A7F3D0';
+        case 'REJECTED': return '#FCA5A5';
+        default: return '#FDE68A';
+      }
+    };
+
+    const documents = currentPartner?.documents || [];
+
+    const verifiedCount = documents.filter((d: any) => d.status === 'VERIFIED').length;
+    const pendingCount = documents.filter((d: any) => d.status === 'PENDING').length;
+    const rejectedCount = documents.filter((d: any) => d.status === 'REJECTED').length;
+    const actionCount = pendingCount + rejectedCount;
+
+    return (
+      <View style={{ flex: 1, backgroundColor: bgCol }}>
+        {/* Header */}
+        <View style={styles.subHeader}>
+          <TouchableOpacity 
+            onPress={() => setActiveProfileSubScreen('main')}
+            style={styles.subHeaderBackBtn}
+          >
+            <Ionicons name="arrow-back" size={20} color={textTitle} />
+            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Account</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          {/* Main Title Section */}
+          <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+            <Text style={{ fontSize: 24, fontWeight: '900', color: textTitle, marginBottom: 6 }}>Documents</Text>
+            <Text style={{ fontSize: 13, color: textSub, fontWeight: '600', lineHeight: 18 }}>
+              Manage your Verification Documents to maintain active partner status.
+            </Text>
+          </View>
+
+          {/* Counts Row */}
+          <View style={styles.docSummaryRow}>
+            <View style={[styles.docSummaryCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+              <View style={styles.docSummaryBadgeSuccess}>
+                <Text style={styles.docSummaryBadgeTextSuccess}>VERIFIED</Text>
+              </View>
+              <Text style={[styles.docSummaryNumber, { color: textTitle }]}>{verifiedCount}</Text>
+              <Text style={[styles.docSummaryLabel, { color: textSub }]}>Verified Documents</Text>
+            </View>
+
+            <View style={[styles.docSummaryCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+              <View style={styles.docSummaryBadgeWarning}>
+                <Text style={styles.docSummaryBadgeTextWarning}>ACTION</Text>
+              </View>
+              <Text style={[styles.docSummaryNumber, { color: textTitle }]}>{actionCount}</Text>
+              <Text style={[styles.docSummaryLabel, { color: textSub }]}>Pending Review</Text>
+            </View>
+          </View>
+
+          {/* Documents Cards List */}
+          {documents.length > 0 ? (
+            documents.map((doc: any, idx: number) => (
+              <View 
+                key={idx} 
+                style={[styles.documentCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
+              >
+                <View style={styles.documentCardHeader}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={[styles.documentName, { color: textTitle }]}>{getDocumentName(doc.type)}</Text>
+                      <View style={[styles.statusPill, { backgroundColor: getStatusBg(doc.status), borderColor: getStatusBorder(doc.status), borderWidth: 1, marginLeft: 8 }]}>
+                        <Text style={[styles.statusPillText, { color: getStatusColor(doc.status) }]}>{doc.status}</Text>
+                      </View>
+                    </View>
+                    
+                    {doc.type === 'DRIVERS_LICENSE' && currentPartner?.licenseNumber ? (
+                      <Text style={[styles.documentSubtext, { color: textSub }]}>License: {currentPartner.licenseNumber}</Text>
+                    ) : null}
+                    {doc.type === 'VEHICLE_RC' && currentPartner?.vehicleNumber ? (
+                      <Text style={[styles.documentSubtext, { color: textSub }]}>Plate: {currentPartner.vehicleNumber}</Text>
+                    ) : null}
+                  </View>
+                </View>
+
+                {doc.status === 'REJECTED' && doc.rejectionReason ? (
+                  <View style={styles.rejectionReasonBox}>
+                    <Text style={styles.rejectionReasonLabel}>Reason:</Text>
+                    <Text style={styles.rejectionReasonValue}>{doc.rejectionReason}</Text>
+                  </View>
+                ) : null}
+
+                <View style={{ marginTop: 12 }}>
+                  {doc.status === 'REJECTED' ? (
+                    <TouchableOpacity 
+                      style={styles.contactSupportBtn}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.contactSupportBtnText}>Contact Support</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity 
+                      style={styles.viewDocBtnOutline}
+                      onPress={() => setSelectedPreviewDoc(doc)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.viewDocBtnOutlineText}>
+                        {doc.status === 'PENDING' ? 'View Details' : 'View Document'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ))
+          ) : (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <Text style={{ color: textSub, fontSize: 14 }}>No documents uploaded</Text>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Preview Modal */}
+        {selectedPreviewDoc && renderDocumentPreviewModal()}
+      </View>
+    );
+  };
+
+  const renderDeliveryPreferencesScreen = () => {
+    const bgCol = '#FAF9F6';
+    const cardBg = '#FFFFFF';
+    const cardBorder = '#FAF6F0';
+    const textTitle = '#38220F';
+    const textSub = '#8A7A6E';
+
+    return (
+      <View style={{ flex: 1, backgroundColor: bgCol }}>
+        {/* Header */}
+        <View style={styles.subHeader}>
+          <TouchableOpacity 
+            onPress={() => setActiveProfileSubScreen('main')}
+            style={styles.subHeaderBackBtn}
+          >
+            <Ionicons name="arrow-back" size={20} color={textTitle} />
+            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Delivery Preferences</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+          <Text style={[styles.profileSectionTitle, { color: textSub }]}>YOUR DELIVERY AREA</Text>
+          
+          {/* Primary Operating Zone */}
+          <View style={[styles.zoneCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <View style={styles.zoneIconContainer}>
+              <Ionicons name="location" size={24} color="#F97316" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={[styles.zoneTitle, { color: textTitle }]}>{currentPartner?.preferences?.deliveryZone || currentPartner?.preferredZone || 'Not provided'}</Text>
+                <View style={styles.activeZoneBadge}>
+                  <Text style={styles.activeZoneBadgeText}>Active Zone</Text>
+                </View>
+              </View>
+              <Text style={[styles.zoneSubtitle, { color: textSub }]}>Primary Operating Zone</Text>
+            </View>
+          </View>
+
+          {/* Secondary Operating Zone */}
+          <View style={[styles.zoneCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <View style={[styles.zoneIconContainer, { backgroundColor: '#FAF6F0' }]}>
+              <Ionicons name="business" size={24} color="#8A7A6E" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={[styles.zoneTitle, { color: textTitle }]}>{currentPartner?.preferences?.secondaryZone || currentPartner?.secondaryZone || 'None'}</Text>
+              <Text style={[styles.zoneSubtitle, { color: textSub }]}>Secondary Operating Zone</Text>
+            </View>
+          </View>
+
+          {/* Info notice box */}
+          <View style={[styles.infoNoticeBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+            <Ionicons name="information-circle-outline" size={20} color="#F97316" style={{ marginRight: 10, marginTop: 2 }} />
+            <Text style={[styles.infoNoticeText, { color: '#78350F', flex: 1 }]}>
+              Zones managed by QuickBite. Edits require approval.
+            </Text>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  };
+
   const renderProfileTab = () => {
+    if (activeProfileSubScreen === 'personal') {
+      return renderPersonalDetailsScreen();
+    }
+    if (activeProfileSubScreen === 'vehicle') {
+      return renderVehicleDetailsScreen();
+    }
+    if (activeProfileSubScreen === 'bank') {
+      return renderBankDetailsScreen();
+    }
+    if (activeProfileSubScreen === 'documents') {
+      return renderDocumentsScreen();
+    }
+    if (activeProfileSubScreen === 'preferences') {
+      return renderDeliveryPreferencesScreen();
+    }
+
+    const hasPendingOrRejectedDoc = (currentPartner?.documents || []).some((d: any) => d.status !== 'VERIFIED');
+
     return (
       <View style={styles.tabContentContainer}>
         <Header title="QuickBite Partner" isOnline={isOnline} isAvailable={isAvailable} />
@@ -2987,18 +3991,21 @@ export default function AppIndex() {
             title="Personal Details" 
             subtitle={currentUser ? `${currentUser.mobileNumber} • ${currentUser.email}` : "Contact info, Emergency"} 
             icon="person" 
+            onPress={() => setActiveProfileSubScreen('personal')}
           />
 
           <MenuRow 
             title="Vehicle Details" 
             subtitle={currentPartner ? `${currentPartner.vehicleType} • ${currentPartner.vehicleNumber || 'No Plate'}` : "Bike • KL-07-2024"} 
             icon="bicycle" 
+            onPress={() => setActiveProfileSubScreen('vehicle')}
           />
 
           <MenuRow 
             title="Bank Details" 
             subtitle="Payout accounts, UPI" 
             icon="card" 
+            onPress={() => setActiveProfileSubScreen('bank')}
           />
 
           {/* Action Needed Documents Row */}
@@ -3006,14 +4013,16 @@ export default function AppIndex() {
             title="Documents" 
             subtitle="License, RC, Insurance" 
             icon="document-text"
-            actionNeeded={true}
+            actionNeeded={hasPendingOrRejectedDoc}
             actionText="ACTION NEEDED"
+            onPress={() => setActiveProfileSubScreen('documents')}
           />
 
           <MenuRow 
             title="Delivery Preferences" 
             subtitle="Zones, Auto-accept" 
             icon="options" 
+            onPress={() => setActiveProfileSubScreen('preferences')}
           />
 
           {/* Logout Button */}
@@ -3027,9 +4036,6 @@ export default function AppIndex() {
               <Text style={styles.logoutText}>Logout</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Version Text */}
-          <Text style={styles.versionText}>App Version 2.4.1 (Build 412)</Text>
         </ScrollView>
       </View>
     );
@@ -3098,8 +4104,10 @@ export default function AppIndex() {
       identifier: loginEmailMobile.trim(),
       password: loginPassword
     })
-    .then(data => {
+    .then(async data => {
       setIsLoggingIn(false);
+      const token = await getAuthToken();
+      setAuthTokenState(token);
       setCurrentUser(data.user);
       setCurrentPartner(data.partner);
       setAccountStatus(data.partner.accountStatus);
@@ -3914,6 +4922,8 @@ export default function AppIndex() {
     );
   };
 
+
+
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <StatusBar style="dark" />
@@ -3924,7 +4934,7 @@ export default function AppIndex() {
       </View>
 
       {/* Render bottom navigation bar ONLY if the incoming request screen is NOT active */}
-      {deliveryState !== 'incoming-request' && (
+      {deliveryState !== 'incoming-request' && deliveryState !== 'delivery-completed' && (
         <BottomNavigation 
           activeTab={activeTab} 
           setActiveTab={(tab) => {
@@ -4935,7 +5945,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
+    paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 24,
     borderTopWidth: 1,
@@ -6292,5 +7302,392 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#F97316',
     fontWeight: '800',
+  },
+
+  // DELIVERY PIN VERIFICATION STYLES (Phase 7)
+  pinVerificationBox: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    elevation: 3,
+    shadowColor: '#38220F',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+  },
+  pinVerificationBoxSuccess: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#6EE7B7',
+  },
+  pinVerificationBoxHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  pinVerificationBoxTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  pinVerificationBoxSub: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  confirmedPinBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  confirmedPinText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#059669',
+  },
+  pinInputContainer: {
+    position: 'relative',
+    height: 52,
+    marginVertical: 12,
+    justifyContent: 'center',
+    alignItems: 'stretch',
+  },
+  pinRealInput: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0.01,
+    zIndex: 10,
+    backgroundColor: 'transparent',
+  },
+  partnerPinBoxesRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  partnerPinBox: {
+    width: 48,
+    height: 52,
+    borderWidth: 2,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  partnerPinBoxText: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  partnerPinErrorText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#EF4444',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  partnerVerifyPinBtn: {
+    backgroundColor: '#FF6F00',
+    height: 44,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  partnerVerifyPinBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  subHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 56,
+    paddingHorizontal: 16,
+  },
+  subHeaderBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 40,
+  },
+  subHeaderBackText: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginLeft: 6,
+  },
+  subHeaderEditBtn: {
+    minWidth: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  subHeaderEditBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#F97316',
+  },
+  profileDetailsWrapper: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  profilePhoneText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  profileVerifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    alignSelf: 'flex-start',
+    marginTop: 6,
+  },
+  profileVerifiedText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#059669',
+    letterSpacing: 0.3,
+  },
+  profileSectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 20,
+    marginBottom: 8,
+    marginHorizontal: 16,
+  },
+  detailCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 16,
+    marginHorizontal: 16,
+  },
+  detailRow: {
+    marginBottom: 16,
+  },
+  detailLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  detailValue: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  detailInput: {
+    height: 44,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  saveBtn: {
+    backgroundColor: '#F97316',
+    height: 48,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 16,
+  },
+  saveBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  infoNoticeBox: {
+    flexDirection: 'row',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 8,
+    marginHorizontal: 16,
+  },
+  infoNoticeText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  docSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    gap: 12,
+    marginBottom: 16,
+  },
+  docSummaryCard: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    alignItems: 'flex-start',
+  },
+  docSummaryBadgeSuccess: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    marginBottom: 8,
+  },
+  docSummaryBadgeTextSuccess: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#059669',
+  },
+  docSummaryBadgeWarning: {
+    backgroundColor: '#FFF5EB',
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    marginBottom: 8,
+  },
+  docSummaryBadgeTextWarning: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#F97316',
+  },
+  docSummaryNumber: {
+    fontSize: 22,
+    fontWeight: '900',
+    marginBottom: 2,
+  },
+  docSummaryLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  documentCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 12,
+    marginHorizontal: 16,
+  },
+  documentCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  documentName: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  documentSubtext: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  statusPillText: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
+  viewDocBtnOutline: {
+    borderColor: '#F97316',
+    borderWidth: 1.5,
+    borderRadius: 10,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewDocBtnOutlineText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#F97316',
+  },
+  contactSupportBtn: {
+    backgroundColor: '#8A7A6E',
+    borderRadius: 10,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contactSupportBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  rejectionReasonBox: {
+    marginTop: 12,
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+  },
+  rejectionReasonLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#EF4444',
+    marginBottom: 2,
+  },
+  rejectionReasonValue: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  zoneCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 12,
+    marginHorizontal: 16,
+  },
+  zoneIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFF5EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zoneTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  zoneSubtitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  activeZoneBadge: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  activeZoneBadgeText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#059669',
   },
 }) as any;

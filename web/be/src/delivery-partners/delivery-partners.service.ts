@@ -34,6 +34,8 @@ import { UpdatePartnerStatusDto } from './dto/update-partner-status.dto';
 import { JwtService } from '@nestjs/jwt';
 import { DeliveryPartnerLoginDto } from './dto/delivery-partner-login.dto';
 import { UpdateActiveDeliveryLocationDto } from './dto/update-active-delivery-location.dto';
+import { decryptPin } from '../orders/orders.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class DeliveryPartnersService implements OnModuleInit {
@@ -432,7 +434,15 @@ export class DeliveryPartnersService implements OnModuleInit {
         'Delivery partner profile not found or is inactive',
       );
     }
+
+    const bankRepo = this.dataSource.getRepository(DeliveryPartnerBankDetails);
+    const bankDetails = await bankRepo.findOne({ where: { deliveryPartnerId: profile.id } });
+
+    const docRepo = this.dataSource.getRepository(DeliveryPartnerDocument);
+    const documents = await docRepo.find({ where: { deliveryPartnerId: profile.id } });
+
     const canonicalStatus = profile.accountStatus || (profile.isVerified ? DeliveryPartnerAccountStatus.APPROVED : DeliveryPartnerAccountStatus.PENDING);
+    
     return {
       partner: {
         id: profile.id,
@@ -450,15 +460,136 @@ export class DeliveryPartnersService implements OnModuleInit {
         isActive: profile.isActive,
         accountStatus: canonicalStatus,
         statusReason: profile.statusReason,
+        createdAt: profile.createdAt,
         user: profile.user ? {
           id: profile.user.id,
           name: profile.user.name,
           email: profile.user.email,
           mobileNumber: profile.user.mobileNumber,
           role: profile.user.role
-        } : null
+        } : null,
+        bank: bankDetails ? {
+          accountHolderName: bankDetails.accountHolderName,
+          maskedAccountNumber: `•••• •••• ${bankDetails.accountLast4}`,
+          ifscCode: bankDetails.ifscCode,
+          upiId: bankDetails.upiId || null,
+          verificationStatus: profile.isVerified ? 'VERIFIED' : 'PENDING'
+        } : null,
+        documents: documents.map(d => ({
+          id: d.id,
+          type: d.documentType,
+          status: d.verificationStatus,
+          expiryDate: null,
+          rejectionReason: d.verificationNote || null,
+          previewUrl: `/delivery-partners/me/documents/${d.id}`
+        })),
+        preferences: {
+          deliveryZone: profile.preferredZone || null,
+          secondaryZone: profile.secondaryZone || null,
+        }
       }
     };
+  }
+
+  async updateProfile(userId: number, dto: UpdateProfileDto): Promise<any> {
+    const profile = await this.partnerRepository.findOne({
+      where: { userId, isActive: true },
+      relations: ['user'],
+    });
+    if (!profile) {
+      throw new NotFoundException('Delivery partner profile not found');
+    }
+
+    const userRepo = this.dataSource.getRepository(User);
+    const user = profile.user;
+
+    if (dto.name !== undefined) {
+      user.name = dto.name;
+    }
+    if (dto.email !== undefined) {
+      user.email = dto.email;
+    }
+
+    await userRepo.save(user);
+    return this.getProfile(userId);
+  }
+
+  async getDocumentForPartner(userId: number, documentId: number): Promise<DeliveryPartnerDocument> {
+    const profile = await this.partnerRepository.findOne({
+      where: { userId, isActive: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Delivery partner profile not found');
+    }
+
+    const docRepo = this.dataSource.getRepository(DeliveryPartnerDocument);
+    const document = await docRepo.findOne({
+      where: { id: documentId },
+    });
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+
+    if (document.deliveryPartnerId !== profile.id) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return document;
+  }
+
+  private getISTDayStart(date: Date): Date {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parseInt(parts.find(p => p.type === 'year')!.value);
+    const month = parseInt(parts.find(p => p.type === 'month')!.value);
+    const day = parseInt(parts.find(p => p.type === 'day')!.value);
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return new Date(`${year}-${pad(month)}-${pad(day)}T00:00:00+05:30`);
+  }
+
+  private getISTDayRange(date: Date): { start: Date; end: Date } {
+    const start = this.getISTDayStart(date);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    return { start, end };
+  }
+
+  private getISTWeekRange(date: Date): { start: Date; end: Date } {
+    const dayStart = this.getISTDayStart(date);
+    const localTime = new Date(dayStart.getTime() + 5.5 * 3600 * 1000);
+    const dayOfWeek = localTime.getUTCDay();
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const start = new Date(dayStart.getTime() + diffToMonday * 24 * 3600 * 1000);
+    const end = new Date(start.getTime() + 7 * 24 * 3600 * 1000);
+    return { start, end };
+  }
+
+  private getISTMonthRange(date: Date): { start: Date; end: Date } {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: 'numeric',
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parseInt(parts.find(p => p.type === 'year')!.value);
+    const month = parseInt(parts.find(p => p.type === 'month')!.value);
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const start = new Date(`${year}-${pad(month)}-01T00:00:00+05:30`);
+    
+    let nextYear = year;
+    let nextMonth = month + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    const end = new Date(`${nextYear}-${pad(nextMonth)}-01T00:00:00+05:30`);
+    return { start, end };
   }
 
   async getDashboardStats(userId: number): Promise<any> {
@@ -469,27 +600,12 @@ export class DeliveryPartnersService implements OnModuleInit {
       throw new NotFoundException('Delivery partner profile not found.');
     }
 
-    // Calculate start of current day/week/month in IST (UTC+5:30) and convert to UTC for database comparison
     const now = new Date();
-    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const istNow = new Date(utcTime + (3600000 * 5.5));
     
-    // Today's Start (00:00:00 IST)
-    const istToday = new Date(istNow);
-    istToday.setHours(0, 0, 0, 0);
-    const todayStart = new Date(istToday.getTime() - (3600000 * 5.5));
-
-    // Week Start (Monday at 00:00:00 IST of the current week)
-    const dayOfWeek = istNow.getDay(); // 0 (Sun) - 6 (Sat)
-    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const istWeek = new Date(istToday);
-    istWeek.setDate(istWeek.getDate() + diffToMonday);
-    const weekStart = new Date(istWeek.getTime() - (3600000 * 5.5));
-
-    // Month Start (1st of the current month at 00:00:00 IST)
-    const istMonth = new Date(istToday);
-    istMonth.setDate(1);
-    const monthStart = new Date(istMonth.getTime() - (3600000 * 5.5));
+    // IST Ranges
+    const { start: todayStart, end: todayEnd } = this.getISTDayRange(now);
+    const { start: weekStart, end: weekEnd } = this.getISTWeekRange(now);
+    const { start: monthStart, end: monthEnd } = this.getISTMonthRange(now);
 
     // Calculate today's completed deliveries
     const todayDeliveries = await this.assignmentRepository.createQueryBuilder('assignment')
@@ -498,7 +614,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       .andWhere('assignment.isActive = :isActive', { isActive: false })
       .andWhere('assignment.status = :status', { status: DeliveryAssignmentStatus.ACCEPTED })
       .andWhere('order.orderStatus = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
-      .andWhere('assignment.unassignedAt >= :todayStart', { todayStart })
+      .andWhere('order.deliveredAt >= :todayStart AND order.deliveredAt < :todayEnd', { todayStart, todayEnd })
       .getCount();
 
     // Calculate this week's completed deliveries
@@ -508,7 +624,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       .andWhere('assignment.isActive = :isActive', { isActive: false })
       .andWhere('assignment.status = :status', { status: DeliveryAssignmentStatus.ACCEPTED })
       .andWhere('order.orderStatus = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
-      .andWhere('assignment.unassignedAt >= :weekStart', { weekStart })
+      .andWhere('order.deliveredAt >= :weekStart AND order.deliveredAt < :weekEnd', { weekStart, weekEnd })
       .getCount();
 
     // Calculate this month's completed deliveries
@@ -518,7 +634,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       .andWhere('assignment.isActive = :isActive', { isActive: false })
       .andWhere('assignment.status = :status', { status: DeliveryAssignmentStatus.ACCEPTED })
       .andWhere('order.orderStatus = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
-      .andWhere('assignment.unassignedAt >= :monthStart', { monthStart })
+      .andWhere('order.deliveredAt >= :monthStart AND order.deliveredAt < :monthEnd', { monthStart, monthEnd })
       .getCount();
 
     // Calculate today's, this week's, and this month's earnings using correct credit ledger entries
@@ -528,7 +644,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
       .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
       .andWhere('le.direction = :direction', { direction: 'credit' })
-      .andWhere('le.createdAt >= :todayStart', { todayStart })
+      .andWhere('le.createdAt >= :todayStart AND le.createdAt < :todayEnd', { todayStart, todayEnd })
       .getMany();
     const todayEarnings = todayEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
 
@@ -536,7 +652,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
       .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
       .andWhere('le.direction = :direction', { direction: 'credit' })
-      .andWhere('le.createdAt >= :weekStart', { weekStart })
+      .andWhere('le.createdAt >= :weekStart AND le.createdAt < :weekEnd', { weekStart, weekEnd })
       .getMany();
     const weeklyEarnings = weeklyEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
 
@@ -544,7 +660,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
       .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
       .andWhere('le.direction = :direction', { direction: 'credit' })
-      .andWhere('le.createdAt >= :monthStart', { monthStart })
+      .andWhere('le.createdAt >= :monthStart AND le.createdAt < :monthEnd', { monthStart, monthEnd })
       .getMany();
     const monthlyEarnings = monthlyEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
 
@@ -553,13 +669,10 @@ export class DeliveryPartnersService implements OnModuleInit {
     const daysLabel = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
     for (let i = 0; i < 7; i++) {
-      const dayStartIst = new Date(istWeek);
+      const dayStartIst = new Date(weekStart.getTime() + 5.5 * 3600 * 1000);
       dayStartIst.setDate(dayStartIst.getDate() + i);
       const dayStart = new Date(dayStartIst.getTime() - (3600000 * 5.5));
-      
-      const dayEndIst = new Date(dayStartIst);
-      dayEndIst.setDate(dayEndIst.getDate() + 1);
-      const dayEnd = new Date(dayEndIst.getTime() - (3600000 * 5.5));
+      const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
       
       const dayEntries = await ledgerRepo.createQueryBuilder('le')
         .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
@@ -570,32 +683,38 @@ export class DeliveryPartnersService implements OnModuleInit {
         
       const dayEarnings = dayEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
       
+      const currentIstDayOfWeek = new Date(now.getTime() + 5.5 * 3600 * 1000).getUTCDay();
+      const chartDayIndex = i;
+      const istDayIndex = currentIstDayOfWeek === 0 ? 6 : currentIstDayOfWeek - 1;
+
       weeklyChart.push({
         day: daysLabel[i],
         value: dayEarnings,
-        height: 5, // Visual height scaling will be calculated dynamically on the frontend
-        selected: i === (dayOfWeek === 0 ? 6 : dayOfWeek - 1),
+        height: 5,
+        selected: chartDayIndex === istDayIndex,
       });
     }
 
-    // Calculate cumulative online minutes today in IST
+    // Calculate cumulative online seconds today in IST
     const sessionRepo = this.dataSource.getRepository(DeliveryPartnerOnlineSession);
     const sessions = await sessionRepo.createQueryBuilder('session')
       .where('session.deliveryPartnerId = :partnerId', { partnerId: partner.id })
-      .andWhere('(session.endTime IS NULL OR session.endTime >= :todayStart)', { todayStart })
+      .andWhere('session.startTime < :todayEnd AND (session.endTime IS NULL OR session.endTime >= :todayStart)', { todayStart, todayEnd })
       .getMany();
 
-    let totalOnlineMs = 0;
+    let totalOnlineSeconds = 0;
     const nowTime = new Date();
     for (const session of sessions) {
       const sessionStart = session.startTime.getTime() < todayStart.getTime() ? todayStart : session.startTime;
-      const sessionEnd = session.endTime ? session.endTime : nowTime;
+      const sessionEnd = session.endTime ? (session.endTime.getTime() > todayEnd.getTime() ? todayEnd : session.endTime) : (nowTime.getTime() > todayEnd.getTime() ? todayEnd : nowTime);
       
       if (sessionEnd.getTime() > sessionStart.getTime()) {
-        totalOnlineMs += (sessionEnd.getTime() - sessionStart.getTime());
+        totalOnlineSeconds += Math.floor((sessionEnd.getTime() - sessionStart.getTime()) / 1000);
       }
     }
-    const onlineMinutes = Math.round(totalOnlineMs / 60000);
+
+    const activeSession = sessions.find(s => !s.endTime);
+    const activeOnlineSessionStartedAt = activeSession ? activeSession.startTime.toISOString() : null;
 
     const stats = {
       todayEarnings,
@@ -605,8 +724,13 @@ export class DeliveryPartnersService implements OnModuleInit {
       monthlyEarnings,
       monthlyDeliveries,
       weeklyChart,
-      onlineMinutes,
+      onlineMinutes: Math.round(totalOnlineSeconds / 60),
+      onlineSeconds: totalOnlineSeconds,
+      isOnline: partner.isOnline,
+      activeOnlineSessionStartedAt,
+      serverTime: nowTime.toISOString(),
     };
+    
     console.log('[Dashboard Stats Dev Log]:', stats);
     return stats;
   }
@@ -992,6 +1116,8 @@ export class DeliveryPartnersService implements OnModuleInit {
       customerNote: order.customerNote,
       totalAmount: parseFloat(order.totalAmount.toString()),
       placedAt: order.placedAt,
+      hasDeliveryPin: !!order.deliveryPinHash,
+      deliveryPinVerified: !!order.deliveryPinVerifiedAt,
       deliveryAddress: {
         recipientName: order.deliveryRecipientName,
         phoneNumber: order.deliveryPhoneNumber,
@@ -1075,6 +1201,7 @@ export class DeliveryPartnersService implements OnModuleInit {
     userId: number,
     orderId: number,
     nextStatus: string,
+    deliveryPin?: string,
   ): Promise<any> {
     const partner = await this.partnerRepository.findOne({
       where: { userId },
@@ -1168,6 +1295,10 @@ export class DeliveryPartnersService implements OnModuleInit {
         if (!order.cashCollectedAt) {
           throw new ConflictException('Confirm cash collection before completing this delivery.');
         }
+      }
+
+      if (order.deliveryPinHash && !order.deliveryPinVerifiedAt) {
+        throw new ConflictException('Delivery PIN verification required');
       }
 
       // Step 1: Commit the delivery state change atomically.
@@ -2326,8 +2457,82 @@ export class DeliveryPartnersService implements OnModuleInit {
           itemCount,
           cashCollectedAt: order.cashCollectedAt,
           paymentStatus: order.paymentStatus,
+          deliveryPinRequired: !!order.deliveryPinHash,
+          deliveryPinVerified: !!order.deliveryPinVerifiedAt,
         }
       }
+    };
+  }
+
+  async verifyActiveDeliveryPin(userId: number, pin: string): Promise<any> {
+    const partner = await this.partnerRepository.findOne({ where: { userId } });
+    if (!partner) {
+      throw new NotFoundException('Delivery partner not found.');
+    }
+
+    const assignment = await this.assignmentRepository.findOne({
+      where: {
+        deliveryPartnerId: partner.id,
+        status: DeliveryAssignmentStatus.ACCEPTED,
+        isActive: true,
+      },
+      relations: ['order'],
+      order: { id: 'DESC' }
+    });
+
+    if (!assignment || !assignment.order) {
+      throw new NotFoundException('No active delivery assignment found for this partner.');
+    }
+
+    const order = assignment.order;
+
+    if (order.orderStatus === 'cancelled' || order.orderStatus === 'rejected') {
+      throw new BadRequestException('This order has been cancelled or rejected.');
+    }
+
+    if (order.orderStatus === 'delivered') {
+      return { verified: true, verifiedAt: order.deliveryPinVerifiedAt };
+    }
+
+    if (order.orderStatus !== 'out_for_delivery') {
+      throw new BadRequestException('Delivery PIN verification is only allowed when out for delivery.');
+    }
+
+    if (order.deliveryPinVerifiedAt) {
+      return { verified: true, verifiedAt: order.deliveryPinVerifiedAt };
+    }
+
+    if (!order.deliveryPinHash) {
+      throw new BadRequestException('This order does not require PIN verification.');
+    }
+
+    // Lockout check
+    if (order.deliveryPinLockedUntil && new Date() < new Date(order.deliveryPinLockedUntil)) {
+      throw new BadRequestException('Too many attempts. Please wait a moment and try again.');
+    }
+
+    const decryptedPin = decryptPin(order.deliveryPinHash);
+    if (decryptedPin !== pin) {
+      order.deliveryPinAttemptCount = (order.deliveryPinAttemptCount || 0) + 1;
+      if (order.deliveryPinAttemptCount >= 5) {
+        order.deliveryPinLockedUntil = new Date(Date.now() + 60 * 1000); // 60s lockout
+        await this.orderRepository.save(order);
+        throw new BadRequestException('Too many attempts. Please wait a moment and try again.');
+      } else {
+        await this.orderRepository.save(order);
+        throw new BadRequestException('Incorrect delivery PIN. Please check with the customer.');
+      }
+    }
+
+    // Success
+    order.deliveryPinAttemptCount = 0;
+    order.deliveryPinLockedUntil = null;
+    order.deliveryPinVerifiedAt = new Date();
+    await this.orderRepository.save(order);
+
+    return {
+      verified: true,
+      verifiedAt: order.deliveryPinVerifiedAt,
     };
   }
 

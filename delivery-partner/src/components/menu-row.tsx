@@ -8,6 +8,7 @@ interface MenuRowProps {
   icon: string;
   actionNeeded?: boolean;
   actionText?: string;
+  badgeType?: 'success' | 'danger';
   onPress?: () => void;
 }
 
@@ -17,8 +18,13 @@ export default function MenuRow({
   icon,
   actionNeeded = false,
   actionText = 'ACTION NEEDED',
+  badgeType = 'danger',
   onPress
 }: MenuRowProps) {
+  const isSuccess = badgeType === 'success';
+  const badgeBg = isSuccess ? '#ECFDF5' : '#FEE2E2';
+  const badgeTextColor = isSuccess ? '#059669' : '#B91C1C';
+
   return (
     <TouchableOpacity 
       activeOpacity={0.7} 
@@ -41,8 +47,8 @@ export default function MenuRow({
       {/* Right side container: Warning Badge or Chevron */}
       <View style={styles.rightContainer}>
         {actionNeeded && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{actionText}</Text>
+          <View style={[styles.badge, { backgroundColor: badgeBg }]}>
+            <Text style={[styles.badgeText, { color: badgeTextColor }]}>{actionText}</Text>
           </View>
         )}
         <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
@@ -105,7 +111,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   badge: {
-    backgroundColor: '#FEE2E2',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
@@ -115,7 +120,6 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 8,
     fontWeight: '900',
-    color: '#B91C1C',
     letterSpacing: 0.3,
   },
 });

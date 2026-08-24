@@ -82,6 +82,34 @@ export const api = {
     return await res.json();
   },
 
+  updateProfile: async (name: string, email: string) => {
+    const token = await getAuthToken();
+    if (!token) {
+      throw new Error('No token found');
+    }
+    
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/me`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ name, email }),
+    });
+    
+    if (res.status === 401) {
+      await setAuthToken(null);
+      throw new Error('Unauthorized');
+    }
+    
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to update profile.');
+    }
+    
+    return await res.json();
+  },
+
   getIncomingAssignment: async () => {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
@@ -322,6 +350,32 @@ export const api = {
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Failed to update order status');
+    }
+
+    return await res.json();
+  },
+
+  verifyActiveDeliveryPin: async (pin: string) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error('No token found');
+
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/active-delivery/verify-pin`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ pin }),
+    });
+
+    if (res.status === 401) {
+      await setAuthToken(null);
+      throw new Error('Unauthorized');
+    }
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Incorrect delivery PIN. Please check with the customer.');
     }
 
     return await res.json();

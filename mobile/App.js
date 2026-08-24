@@ -8177,6 +8177,39 @@ export default function App() {
                       </View>
                     )}
 
+                    {/* ── DELIVERY PIN CARD ── */}
+                    {(() => {
+                      const status = (activeOrderDetail?.orderStatus || selectedOrderForDetail?.orderStatus || '').toLowerCase();
+                      const hasPin = activeOrderDetail?.deliveryPin;
+                      if ((status === 'picked_up' || status === 'out_for_delivery') && hasPin) {
+                        return (
+                          <View style={{
+                            backgroundColor: darkMode ? '#1E293B' : '#FFF7ED',
+                            borderWidth: 1,
+                            borderColor: darkMode ? '#334155' : '#FFEDD5',
+                            borderRadius: 16,
+                            padding: 16,
+                            marginTop: 12,
+                            alignItems: 'center',
+                          }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                              <ShieldCheck size={18} color="#FF7A00" />
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#FF7A00', letterSpacing: 0.5 }}>
+                                DELIVERY PIN
+                              </Text>
+                            </View>
+                            <Text style={{ fontSize: 32, fontWeight: '900', color: D.text, letterSpacing: 4, marginVertical: 4 }}>
+                              {activeOrderDetail.deliveryPin}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: D.textSub, textAlign: 'center', lineHeight: 18, marginTop: 4 }}>
+                              Share this PIN with your delivery partner only when your order arrives.
+                            </Text>
+                          </View>
+                        );
+                      }
+                      return null;
+                    })()}
+
                     {/* ── LIVE TRACKING CARD (only when out_for_delivery) ── */}
                     {activeOrderDetail?.orderStatus === 'out_for_delivery' && (
                       <View style={{

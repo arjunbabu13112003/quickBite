@@ -24,6 +24,35 @@ import { Food } from '../foods/food.entity';
 import { Offer } from '../offers/offer.entity';
 import { Store99Campaign } from '../offers/store99-campaign.entity';
 import { DeliveryPartnersService } from '../delivery-partners/delivery-partners.service';
+import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
+
+const ALGORITHM = 'aes-256-cbc';
+const ENCRYPTION_KEY = crypto.scryptSync('QuickBiteSecretKeyForPinEncryption', 'salt', 32);
+const IV_LENGTH = 16;
+
+function encryptPin(text: string): string {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+export function decryptPin(text: string): string {
+  try {
+    const textParts = text.split(':');
+    const iv = Buffer.from(textParts.shift()!, 'hex');
+    const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+    const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+    let decrypted = decipher.update(encryptedText);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    return decrypted.toString();
+  } catch (err) {
+    console.error('Failed to decrypt PIN:', err);
+    return '';
+  }
+}
 
 @Injectable()
 export class OrdersService {
@@ -393,6 +422,10 @@ export class OrdersService {
       .toUpperCase();
     const orderNumber = `QB-${todayStr}-${randomStr}`;
 
+    // Generate secure random 4-digit numeric PIN
+    const rawPin = crypto.randomInt(1000, 10000).toString();
+    const encryptedPin = encryptPin(rawPin);
+
     // 7. Write transactional updates
     return await this.dataSource.transaction(async (manager) => {
       const order = manager.create(Order, {
@@ -422,6 +455,8 @@ export class OrdersService {
         deliveryPincode: address.pincode,
         deliveryLatitude: address.latitude,
         deliveryLongitude: address.longitude,
+        deliveryPinHash: encryptedPin,
+        deliveryPinAttemptCount: 0,
       });
 
       const savedOrder = await manager.save(Order, order);
@@ -571,6 +606,11 @@ export class OrdersService {
       };
     });
 
+    const allowedStatuses = ['picked_up', 'out_for_delivery', 'delivered'];
+    const deliveryPin = (allowedStatuses.includes(order.orderStatus) && order.deliveryPinHash)
+      ? decryptPin(order.deliveryPinHash)
+      : null;
+
     return {
       id: order.id,
       orderNumber: order.orderNumber,
@@ -584,6 +624,7 @@ export class OrdersService {
       paymentStatus: order.paymentStatus,
       orderStatus: order.orderStatus,
       customerNote: order.customerNote,
+      deliveryPin,
       placedAt: order.placedAt,
       cancelledAt: order.cancelledAt,
       createdAt: order.createdAt,
@@ -1043,5 +1084,26 @@ export class OrdersService {
           }
         : null,
     };
+  }
+
+  async getOrderPin(userId: number, orderId: number): Promise<{ deliveryPin: string | null }> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId, userId },
+    });
+    if (!order) {
+      throw new NotFoundException(`Order with ID ${orderId} not found`);
+    }
+
+    const allowedStatuses = ['picked_up', 'out_for_delivery', 'delivered'];
+    if (!allowedStatuses.includes(order.orderStatus)) {
+      return { deliveryPin: null };
+    }
+
+    if (!order.deliveryPinHash) {
+      return { deliveryPin: null };
+    }
+
+    const decrypted = decryptPin(order.deliveryPinHash);
+    return { deliveryPin: decrypted || null };
   }
 }

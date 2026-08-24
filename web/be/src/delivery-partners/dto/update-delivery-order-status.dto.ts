@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsIn } from 'class-validator';
+import { IsNotEmpty, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class UpdateDeliveryOrderStatusDto {
   @IsNotEmpty()
@@ -6,4 +6,8 @@ export class UpdateDeliveryOrderStatusDto {
     message: 'status must be one of: picked_up, out_for_delivery, delivered',
   })
   status: string;
+
+  @IsOptional()
+  @IsString()
+  deliveryPin?: string;
 }

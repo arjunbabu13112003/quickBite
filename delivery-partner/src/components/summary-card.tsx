@@ -12,6 +12,8 @@ export function HomeStatsCard({
   deliveries?: number;
   onlineTime?: string;
 }) {
+  const onlineTimeFontSize = onlineTime.length > 7 ? 13 : 18;
+
   return (
     <View style={styles.homeStatsContainer}>
       <View style={styles.statColumn}>
@@ -26,7 +28,7 @@ export function HomeStatsCard({
       <View style={styles.statDivider} />
       <View style={styles.statColumn}>
         <Text style={styles.statLabel}>ONLINE TIME</Text>
-        <Text style={styles.statValue}>{onlineTime}</Text>
+        <Text style={[styles.statValue, { fontSize: onlineTimeFontSize }]}>{onlineTime}</Text>
       </View>
     </View>
   );

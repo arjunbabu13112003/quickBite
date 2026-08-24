@@ -62,6 +62,15 @@ export class OrdersController {
     return this.ordersService.getOrderDetails(req.user.userId, orderId);
   }
 
+  @Roles(UserRole.CUSTOMER)
+  @Get('orders/:orderId/delivery-pin')
+  getDeliveryPin(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Request() req,
+  ) {
+    return this.ordersService.getOrderPin(req.user.userId, orderId);
+  }
+
   // --- HOTEL MANAGEMENT ROUTES ---
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.HOTEL_ADMIN)
