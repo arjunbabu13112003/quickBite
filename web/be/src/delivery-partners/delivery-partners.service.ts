@@ -849,7 +849,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       }
 
       const offeredAt = new Date();
-      const expiresAt = new Date(offeredAt.getTime() + 23 * 1000); // 23 seconds
+      const expiresAt = new Date(offeredAt.getTime() + 300 * 1000); // 5 minutes (300 seconds)
 
       const assignment = manager.create(DeliveryAssignment, {
         orderId,

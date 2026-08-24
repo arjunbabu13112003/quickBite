@@ -455,6 +455,7 @@ export default function App() {
   // Active Multi-Order Live Tracking & Details State (Declared at top to avoid Temporal Dead Zone ReferenceError in useEffect hooks)
   const [activeOrderDetail, setActiveOrderDetail] = useState(null);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const [myOrdersList, setMyOrdersList] = useState([]);
   const [orderStepMap, setOrderStepMap] = useState({});
 
@@ -8048,11 +8049,11 @@ export default function App() {
           </Modal>
 
           {/* FULL ORDER TRACKING DETAILS MODAL (TRIGGERED ON CLICKING ROW CARD) */}
-          <Modal visible={!!selectedOrderForDetail} animationType="slide" statusBarTranslucent onRequestClose={() => setSelectedOrderForDetail(null)}>
+          <Modal visible={!!selectedOrderForDetail} animationType="slide" statusBarTranslucent onRequestClose={() => { setSelectedOrderForDetail(null); setMapLoaded(false); }}>
             {selectedOrderForDetail && (
               <SafeAreaView style={{ flex: 1, backgroundColor: D.modalBg }}>
-                <View style={[styles.modalHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder, paddingTop: STATUSBAR_HEIGHT + 4 }]}>
-                  <TouchableOpacity onPress={() => setSelectedOrderForDetail(null)} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
+                <View style={[styles.modalHeader, { backgroundColor: D.headerBg, borderBottomColor: D.navBorder, paddingTop: 12 }]}>
+                  <TouchableOpacity onPress={() => { setSelectedOrderForDetail(null); setMapLoaded(false); }} style={[styles.closeCircleBtn, { backgroundColor: D.chipBg }]}>
                     <ArrowLeft size={20} color={D.text} />
                   </TouchableOpacity>
                   {(() => {
@@ -8240,76 +8241,88 @@ export default function App() {
                               {riderLat && riderLng && isValidCoordinate(riderLat, riderLng) ? (
                                 <View>
                                   {/* MapLibre Map Container */}
-                                  <View style={{ height: 180, borderRadius: 12, marginBottom: 12, overflow: 'hidden' }}>
-                                    <MapView
-                                      style={{ width: '100%', height: '100%' }}
-                                      styleURL={darkMode 
-                                        ? "https://tiles.openfreemap.org/styles/dark" 
-                                        : "https://tiles.openfreemap.org/styles/positron"
-                                      }
-                                      logoEnabled={false}
-                                      attributionEnabled={false}
-                                    >
-                                      <MapCamera
-                                        initialViewState={{
-                                          center: [parseFloat(riderLng), parseFloat(riderLat)],
-                                          zoom: 14,
-                                        }}
+                                  <View style={{ height: 180, borderRadius: 12, marginBottom: 12, overflow: 'hidden', backgroundColor: '#FAF6F0', position: 'relative' }}>
+                                    {/* Fallback street-grid tracking visual background */}
+                                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+                                      <Image 
+                                        source={require('./assets/live_tracking_bg.jpg')} 
+                                        style={{ width: '100%', height: '100%', resizeMode: 'cover' }} 
                                       />
-                                      
-                                      <Marker lngLat={[parseFloat(riderLng), parseFloat(riderLat)]}>
-                                        <View style={{
-                                          width: 32, height: 32, borderRadius: 16,
-                                          backgroundColor: '#059669',
-                                          alignItems: 'center', justifyContent: 'center',
-                                          borderWidth: 2, borderColor: '#ffffff',
-                                          elevation: 4, shadowColor: '#000',
-                                          shadowOffset: { width: 0, height: 2 },
-                                          shadowOpacity: 0.25, shadowRadius: 3.84
-                                        }}>
-                                          <Text style={{ fontSize: 16 }}>🛵</Text>
-                                        </View>
-                                      </Marker>
+                                    </View>
 
-                                      {custLat && custLng && isValidCoordinate(custLat, custLng) && (
-                                        <Marker lngLat={[parseFloat(custLng), parseFloat(custLat)]}>
+                                    {/* Actual MapView (smoothly shown once tiles are ready) */}
+                                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: mapLoaded ? 1 : 0 }}>
+                                      <MapView
+                                        style={{ width: '100%', height: '100%' }}
+                                        styleURL={darkMode 
+                                          ? "https://tiles.openfreemap.org/styles/dark" 
+                                          : "https://tiles.openfreemap.org/styles/positron"
+                                        }
+                                        logoEnabled={false}
+                                        attributionEnabled={false}
+                                        onDidFinishLoadingStyle={() => setMapLoaded(true)}
+                                      >
+                                        <MapCamera
+                                          initialViewState={{
+                                            center: [parseFloat(riderLng), parseFloat(riderLat)],
+                                            zoom: 14,
+                                          }}
+                                        />
+                                        
+                                        <Marker lngLat={[parseFloat(riderLng), parseFloat(riderLat)]}>
                                           <View style={{
                                             width: 32, height: 32, borderRadius: 16,
-                                            backgroundColor: '#3b82f6',
+                                            backgroundColor: '#059669',
                                             alignItems: 'center', justifyContent: 'center',
                                             borderWidth: 2, borderColor: '#ffffff',
                                             elevation: 4, shadowColor: '#000',
                                             shadowOffset: { width: 0, height: 2 },
                                             shadowOpacity: 0.25, shadowRadius: 3.84
                                           }}>
-                                            <Text style={{ fontSize: 16 }}>📍</Text>
+                                            <Text style={{ fontSize: 16 }}>🛵</Text>
                                           </View>
                                         </Marker>
-                                      )}
 
-                                      {(() => {
-                                        const hLat = activeOrderDetail?.hotel?.latitude ? parseFloat(activeOrderDetail.hotel.latitude.toString()) : null;
-                                        const hLng = activeOrderDetail?.hotel?.longitude ? parseFloat(activeOrderDetail.hotel.longitude.toString()) : null;
-                                        if (hLat && hLng && isValidCoordinate(hLat, hLng)) {
-                                          return (
-                                            <Marker lngLat={[hLng, hLat]}>
-                                              <View style={{
-                                                width: 32, height: 32, borderRadius: 16,
-                                                backgroundColor: '#f59e0b',
-                                                alignItems: 'center', justifyContent: 'center',
-                                                borderWidth: 2, borderColor: '#ffffff',
-                                                elevation: 4, shadowColor: '#000',
-                                                shadowOffset: { width: 0, height: 2 },
-                                                shadowOpacity: 0.25, shadowRadius: 3.84
-                                              }}>
-                                                <Text style={{ fontSize: 16 }}>🍔</Text>
-                                              </View>
-                                            </Marker>
-                                          );
-                                        }
-                                        return null;
-                                      })()}
-                                    </MapView>
+                                        {custLat && custLng && isValidCoordinate(custLat, custLng) && (
+                                          <Marker lngLat={[parseFloat(custLng), parseFloat(custLat)]}>
+                                            <View style={{
+                                              width: 32, height: 32, borderRadius: 16,
+                                              backgroundColor: '#3b82f6',
+                                              alignItems: 'center', justifyContent: 'center',
+                                              borderWidth: 2, borderColor: '#ffffff',
+                                              elevation: 4, shadowColor: '#000',
+                                              shadowOffset: { width: 0, height: 2 },
+                                              shadowOpacity: 0.25, shadowRadius: 3.84
+                                            }}>
+                                              <Text style={{ fontSize: 16 }}>📍</Text>
+                                            </View>
+                                          </Marker>
+                                        )}
+
+                                        {(() => {
+                                          const hLat = activeOrderDetail?.hotel?.latitude ? parseFloat(activeOrderDetail.hotel.latitude.toString()) : null;
+                                          const hLng = activeOrderDetail?.hotel?.longitude ? parseFloat(activeOrderDetail.hotel.longitude.toString()) : null;
+                                          if (hLat && hLng && isValidCoordinate(hLat, hLng)) {
+                                            return (
+                                              <Marker lngLat={[hLng, hLat]}>
+                                                <View style={{
+                                                  width: 32, height: 32, borderRadius: 16,
+                                                  backgroundColor: '#f59e0b',
+                                                  alignItems: 'center', justifyContent: 'center',
+                                                  borderWidth: 2, borderColor: '#ffffff',
+                                                  elevation: 4, shadowColor: '#000',
+                                                  shadowOffset: { width: 0, height: 2 },
+                                                  shadowOpacity: 0.25, shadowRadius: 3.84
+                                                }}>
+                                                  <Text style={{ fontSize: 16 }}>🍔</Text>
+                                                </View>
+                                              </Marker>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
+                                      </MapView>
+                                    </View>
                                   </View>
 
                                   {/* Map attribution notice */}

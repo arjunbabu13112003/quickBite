@@ -15,13 +15,68 @@ import {
   AppState,
   AppStateStatus,
   BackHandler,
-  Modal
+  Modal,
+  Alert
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
-import { api, getAuthToken, setAuthToken } from '../services/api';
+import { api, getAuthToken, setAuthToken, API_BASE_URL } from '../services/api';
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
+import * as SecureStore from 'expo-secure-store';
+
+const BACKGROUND_LOCATION_TASK_NAME = 'QUICKBITE_BACKGROUND_DELIVERY_LOCATION';
+
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK_NAME, async ({ data, error }) => {
+  if (error) {
+    console.warn('[BACKGROUND WATCHER] Task error:', error);
+    return;
+  }
+  
+  if (data) {
+    const { locations } = data as { locations: Location.LocationObject[] };
+    if (!locations || locations.length === 0) return;
+
+    const latestLoc = locations[locations.length - 1];
+    const { latitude, longitude, accuracy, heading, speed } = latestLoc.coords;
+
+    // Range check coordinates
+    if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude) || Math.abs(latitude) < 0.0001 || Math.abs(longitude) < 0.0001) {
+      console.warn('[BACKGROUND WATCHER] Invalid location ignored:', latitude, longitude);
+      return;
+    }
+
+    try {
+      const token = await SecureStore.getItemAsync('deliveryPartnerAccessToken');
+      if (!token) return;
+
+      const orderIdStr = await SecureStore.getItemAsync('deliveryPartnerActiveOrderId');
+      if (!orderIdStr) return;
+
+      const orderId = parseInt(orderIdStr, 10);
+      if (isNaN(orderId)) return;
+
+      await fetch(`${API_BASE_URL}/delivery-partners/me/active-delivery/location`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          latitude,
+          longitude,
+          accuracy: accuracy || undefined,
+          heading: heading || undefined,
+          speed: speed !== null && speed >= 0 ? speed : undefined,
+          capturedAt: new Date(latestLoc.timestamp).toISOString(),
+        }),
+      });
+    } catch (err: any) {
+      console.warn('[BACKGROUND WATCHER] Update call failed:', err.message || err);
+    }
+  }
+});
 
 // Import Reusable Components
 import Header from '../components/header';
@@ -225,11 +280,64 @@ export default function AppIndex() {
   const [currentPartner, setCurrentPartner] = useState<any>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
+  const [isBackgroundTrackingActive, setIsBackgroundTrackingActive] = useState(false);
   const [appState, setAppState] = useState(AppState.currentState);
   const isRequestingRef = useRef(false);
   const isFirstActiveRef = useRef(true);
 
+  const startTrackingCoordinator = async (orderId: number, useBackground: boolean) => {
+    try {
+      await stopTrackingCoordinator();
+
+      // Persist tracking-enabled state and activeOrderId to SecureStore
+      await SecureStore.setItemAsync('deliveryPartnerActiveOrderId', orderId.toString());
+      await SecureStore.setItemAsync('deliveryPartnerTrackingEnabled', 'true');
+
+      if (useBackground) {
+        console.log('[TRACKING COORDINATOR] Starting background-capable location tracking...');
+        setIsBackgroundTrackingActive(true);
+        
+        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 10000, // 10 seconds
+          distanceInterval: 15, // 15 meters
+          foregroundService: {
+            notificationTitle: 'QuickBite delivery in progress',
+            notificationBody: 'Live location is being shared for your active delivery.',
+            notificationColor: '#F97316',
+          },
+          pausesUpdatesAutomatically: false,
+        });
+      } else {
+        console.log('[TRACKING COORDINATOR] Starting foreground location tracking fallback...');
+        setIsBackgroundTrackingActive(false);
+      }
+    } catch (err) {
+      console.warn('[TRACKING COORDINATOR] Error starting location tracking:', err);
+    }
+  };
+
+  const stopTrackingCoordinator = async () => {
+    try {
+      console.log('[TRACKING COORDINATOR] Stopping location tracking...');
+      
+      const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK_NAME);
+      if (isRegistered) {
+        await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK_NAME);
+      }
+      setIsBackgroundTrackingActive(false);
+
+      await SecureStore.deleteItemAsync('deliveryPartnerActiveOrderId');
+      await SecureStore.setItemAsync('deliveryPartnerTrackingEnabled', 'false');
+    } catch (err) {
+      console.warn('[TRACKING COORDINATOR] Error stopping location tracking:', err);
+    }
+  };
+
   const handleLogout = async (forceLocalOnly = false) => {
+    // Clean up background location tracking on logout
+    await stopTrackingCoordinator();
+
     if (!forceLocalOnly) {
       try {
         await api.updateOnlineStatus(false);
@@ -325,15 +433,32 @@ export default function AppIndex() {
         const status = deliveryData.assignment.order?.orderStatus;
         if (status === 'picked_up') {
           setDeliveryState('active-start-delivery');
+          await stopTrackingCoordinator();
         } else if (status === 'out_for_delivery') {
           setDeliveryState('active-delivery');
+          const restoreTracking = async () => {
+            const { status: fgCheck } = await Location.getForegroundPermissionsAsync();
+            const { status: bgCheck } = await Location.getBackgroundPermissionsAsync();
+            
+            if (fgCheck === 'granted') {
+              const useBackground = bgCheck === 'granted';
+              await startTrackingCoordinator(deliveryData.assignment.order.id, useBackground);
+            } else {
+              await stopTrackingCoordinator();
+            }
+          };
+          restoreTracking();
         } else if (status === 'ready_for_pickup') {
           setDeliveryState(prev => (prev === 'active-pickup' ? 'active-pickup' : 'active-restaurant'));
+          await stopTrackingCoordinator();
         } else if (status === 'preparing' || status === 'accepted') {
           setDeliveryState('active-restaurant');
+          await stopTrackingCoordinator();
         } else {
           setDeliveryState('none');
           setActiveAssignment(null);
+          setViewingActiveOrder(false);
+          await stopTrackingCoordinator();
         }
         setIsAvailable(false);
         if (deliveryData.assignment.order && deliveryData.assignment.order.cashCollectedAt) {
@@ -344,6 +469,8 @@ export default function AppIndex() {
       } else {
         setDeliveryState(prev => (prev !== 'incoming-request' && prev !== 'delivery-completed') ? 'none' : prev);
         setActiveAssignment(null);
+        setViewingActiveOrder(false);
+        await stopTrackingCoordinator();
       }
     } catch (activeErr) {
       console.error('Failed to sync active delivery:', activeErr);
@@ -355,6 +482,7 @@ export default function AppIndex() {
     setIsAcceptingDeclining(true);
     try {
       const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'delivered');
+      await stopTrackingCoordinator();
       
       const order = activeAssignment.order;
       const earningsAmount = result.partnerEarning !== undefined ? result.partnerEarning : 65;
@@ -478,7 +606,7 @@ export default function AppIndex() {
       const isApproved = accountStatus === 'APPROVED' || currentPartner?.accountStatus === 'APPROVED';
       const hasActiveDelivery = deliveryState === 'active-delivery' || activeAssignment?.order?.orderStatus === 'out_for_delivery';
 
-      if (!isAuthenticated || !isApproved || !hasActiveDelivery || appState !== 'active') {
+      if (!isAuthenticated || !isApproved || !hasActiveDelivery || appState !== 'active' || isBackgroundTrackingActive) {
         return;
       }
 
@@ -508,8 +636,8 @@ export default function AppIndex() {
                 speed: loc.coords.speed !== null && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
                 capturedAt: new Date(loc.timestamp).toISOString(),
               });
-            } catch (err) {
-              console.error('[WATCHER] Failed to send location update:', err);
+            } catch (err: any) {
+              console.warn('[WATCHER] Failed to send location update:', err.message || err);
             }
           }
         );
@@ -530,7 +658,7 @@ export default function AppIndex() {
         console.log('[WATCHER] Stopped foreground location watcher.');
       }
     };
-  }, [isAuthenticated, accountStatus, currentPartner?.accountStatus, deliveryState, activeAssignment?.order?.orderStatus, appState]);
+  }, [isAuthenticated, accountStatus, currentPartner?.accountStatus, deliveryState, activeAssignment?.order?.orderStatus, appState, isBackgroundTrackingActive]);
 
   useEffect(() => {
     let intervalId: any = null;
@@ -1194,6 +1322,9 @@ export default function AppIndex() {
           <View style={styles.incomingMapOverlay} />
         </View>
 
+        {/* Full-screen Semi-transparent Dark overlay */}
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.45)' }} />
+
         {/* Floating Headers */}
         <View style={styles.incomingFloatingHeader}>
           <TouchableOpacity style={styles.incomingMenuBtn} activeOpacity={0.7}>
@@ -1373,22 +1504,75 @@ export default function AppIndex() {
             alert('Location access is required to start live delivery tracking.');
             return;
           }
+
+          let firstLoc;
           try {
-            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-            await api.updateActiveDeliveryLocation({
-              latitude: loc.coords.latitude,
-              longitude: loc.coords.longitude,
-              accuracy: loc.coords.accuracy || undefined,
-              heading: loc.coords.heading || undefined,
-              speed: loc.coords.speed !== null && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
-              capturedAt: new Date(loc.timestamp).toISOString(),
-            });
+            firstLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const { latitude, longitude } = firstLoc.coords;
+            if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude) || Math.abs(latitude) < 0.0001 || Math.abs(longitude) < 0.0001) {
+              alert('Invalid GPS coordinates received. Please try again in an area with better GPS signal.');
+              return;
+            }
           } catch (locErr) {
             alert('Unable to retrieve current GPS location. Please ensure location services are enabled.');
             return;
           }
 
+          let useBackground = false;
+          try {
+            const { status: bgCheck } = await Location.getBackgroundPermissionsAsync();
+            if (bgCheck === 'granted') {
+              useBackground = true;
+            } else {
+              const userChoice = await new Promise<'settings' | 'foreground'>((resolve) => {
+                Alert.alert(
+                  'Background Location Sharing',
+                  'To share your live delivery progress with customers when the app is minimized or the screen is locked, please enable "Allow all the time" in the next screen.',
+                  [
+                    { text: 'Go to Settings', onPress: () => resolve('settings') },
+                    { text: 'Foreground Only', style: 'cancel', onPress: () => resolve('foreground') }
+                  ],
+                  { cancelable: false }
+                );
+              });
+
+              if (userChoice === 'settings') {
+                const { status: bgReq } = await Location.requestBackgroundPermissionsAsync();
+                if (bgReq === 'granted') {
+                  useBackground = true;
+                } else {
+                  Alert.alert(
+                    'Foreground Only Enabled',
+                    'Background location sharing was not granted. Live tracking will only update while the app is active in the foreground.'
+                  );
+                }
+              } else {
+                Alert.alert(
+                  'Foreground Only Enabled',
+                  'Live tracking will only update while the app is active in the foreground.'
+                );
+              }
+            }
+          } catch (err) {
+            console.warn('Error checking background location permissions:', err);
+          }
+
+          try {
+            await api.updateActiveDeliveryLocation({
+              latitude: firstLoc.coords.latitude,
+              longitude: firstLoc.coords.longitude,
+              accuracy: firstLoc.coords.accuracy || undefined,
+              heading: firstLoc.coords.heading || undefined,
+              speed: firstLoc.coords.speed !== null && firstLoc.coords.speed >= 0 ? firstLoc.coords.speed : undefined,
+              capturedAt: new Date(firstLoc.timestamp).toISOString(),
+            });
+          } catch (updateErr) {
+            console.warn('First location update call failed, continuing status change:', updateErr);
+          }
+
           const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'out_for_delivery');
+          await startTrackingCoordinator(activeAssignment.order.id, useBackground);
+          
           setActiveAssignment((prev: any) => {
             if (!prev) return prev;
             return {
