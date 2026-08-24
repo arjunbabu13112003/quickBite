@@ -14,7 +14,8 @@ import {
   ActivityIndicator,
   AppState,
   AppStateStatus,
-  BackHandler
+  BackHandler,
+  Modal
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -120,6 +121,18 @@ const initialMockCompletedOrders = [
 ];
 
 export default function AppIndex() {
+  console.log('[DIAGNOSTIC] Header:', typeof Header);
+  console.log('[DIAGNOSTIC] BottomNavigation:', typeof BottomNavigation);
+  console.log('[DIAGNOSTIC] HomeStatsCard:', typeof HomeStatsCard);
+  console.log('[DIAGNOSTIC] LargeEarningsCard:', typeof LargeEarningsCard);
+  console.log('[DIAGNOSTIC] PeriodStatsCard:', typeof PeriodStatsCard);
+  console.log('[DIAGNOSTIC] EarningsBreakdown:', typeof EarningsBreakdown);
+  console.log('[DIAGNOSTIC] DeliveryCard:', typeof DeliveryCard);
+  console.log('[DIAGNOSTIC] ProgressTimeline:', typeof ProgressTimeline);
+  console.log('[DIAGNOSTIC] MapPlaceholder:', typeof MapPlaceholder);
+  console.log('[DIAGNOSTIC] MenuRow:', typeof MenuRow);
+  console.log('[DIAGNOSTIC] OnlineStatus:', typeof OnlineStatus);
+
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 12) {
@@ -162,14 +175,41 @@ export default function AppIndex() {
   const [dashboardStats, setDashboardStats] = useState<{
     todayEarnings: number;
     todayDeliveries: number;
+    weeklyEarnings: number;
+    weeklyDeliveries: number;
+    monthlyEarnings: number;
+    monthlyDeliveries: number;
+    weeklyChart: Array<{
+      day: string;
+      value: number;
+      height: number;
+      selected?: boolean;
+    }>;
     onlineMinutes: number;
   }>({
     todayEarnings: 0,
     todayDeliveries: 0,
+    weeklyEarnings: 0,
+    weeklyDeliveries: 0,
+    monthlyEarnings: 0,
+    monthlyDeliveries: 0,
+    weeklyChart: [
+      { day: 'M', value: 0, height: 5 },
+      { day: 'T', value: 0, height: 5 },
+      { day: 'W', value: 0, height: 5 },
+      { day: 'T', value: 0, height: 5 },
+      { day: 'F', value: 0, height: 5 },
+      { day: 'S', value: 0, height: 5 },
+      { day: 'S', value: 0, height: 5 }
+    ],
     onlineMinutes: 0,
   });
-  const [completedFilter, setCompletedFilter] = useState<'today' | 'week' | 'month'>('today');
+  const [completedFilter, setCompletedFilter] = useState<'today' | 'week' | 'month' | 'all' | 'delivered' | 'cancelled_rejected'>('today');
   const [showFilterPicker, setShowFilterPicker] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [showFullChartModal, setShowFullChartModal] = useState(false);
+  const [selectedChartDayIdx, setSelectedChartDayIdx] = useState<number | null>(null);
 
   // Phase 5 assignment states
   const [incomingAssignment, setIncomingAssignment] = useState<any>(null);
@@ -206,6 +246,7 @@ export default function AppIndex() {
     setDeliveryState('none');
     setIncomingAssignment(null);
     setActiveAssignment(null);
+    setAvailableOrders([]);
     setOrdersSubTab('current');
     setActiveTab('home');
     changeAuthScreen('login');
@@ -276,8 +317,41 @@ export default function AppIndex() {
     }
   };
 
+  const syncActiveDeliveryState = async () => {
+    try {
+      const deliveryData = await api.getActiveDelivery();
+      if (deliveryData && deliveryData.assignment) {
+        setActiveAssignment(deliveryData.assignment);
+        const status = deliveryData.assignment.order?.orderStatus;
+        if (status === 'picked_up') {
+          setDeliveryState('active-start-delivery');
+        } else if (status === 'out_for_delivery') {
+          setDeliveryState('active-delivery');
+        } else if (status === 'ready_for_pickup') {
+          setDeliveryState(prev => (prev === 'active-pickup' ? 'active-pickup' : 'active-restaurant'));
+        } else if (status === 'preparing' || status === 'accepted') {
+          setDeliveryState('active-restaurant');
+        } else {
+          setDeliveryState('none');
+          setActiveAssignment(null);
+        }
+        setIsAvailable(false);
+        if (deliveryData.assignment.order && deliveryData.assignment.order.cashCollectedAt) {
+          setIsCashCollected(true);
+        } else {
+          setIsCashCollected(false);
+        }
+      } else {
+        setDeliveryState(prev => (prev !== 'incoming-request' && prev !== 'delivery-completed') ? 'none' : prev);
+        setActiveAssignment(null);
+      }
+    } catch (activeErr) {
+      console.error('Failed to sync active delivery:', activeErr);
+    }
+  };
+
   const completeActiveOrder = async () => {
-    if (!activeAssignment || !activeAssignment.order) return;
+    if (!activeAssignment || !activeAssignment.order || isAcceptingDeclining) return;
     setIsAcceptingDeclining(true);
     try {
       const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'delivered');
@@ -357,30 +431,7 @@ export default function AppIndex() {
           setIsAuthenticated(true);
 
           if (data.partner.accountStatus === 'APPROVED') {
-            try {
-              const deliveryData = await api.getActiveDelivery();
-              if (deliveryData && deliveryData.assignment) {
-                setActiveAssignment(deliveryData.assignment);
-                const status = deliveryData.assignment.order?.orderStatus;
-                if (status === 'picked_up') {
-                  setDeliveryState('active-start-delivery');
-                } else if (status === 'out_for_delivery') {
-                  setDeliveryState('active-delivery');
-                } else if (status === 'ready_for_pickup') {
-                  setDeliveryState('active-pickup');
-                } else {
-                  setDeliveryState('active-restaurant');
-                }
-                setIsAvailable(false);
-                if (deliveryData.assignment.order && deliveryData.assignment.order.cashCollectedAt) {
-                  setIsCashCollected(true);
-                } else {
-                  setIsCashCollected(false);
-                }
-              }
-            } catch (activeErr) {
-              console.error('Failed to restore active delivery:', activeErr);
-            }
+            await syncActiveDeliveryState();
           }
         }
       } catch (err) {
@@ -403,6 +454,13 @@ export default function AppIndex() {
       subscription.remove();
     };
   }, []);
+
+  // Automatically sync active delivery state from backend when app state resumes, tab changes, or active order screen opens
+  useEffect(() => {
+    if (isAuthenticated) {
+      syncActiveDeliveryState();
+    }
+  }, [appState, activeTab, viewingActiveOrder, isAuthenticated]);
 
   const locationWatcherRef = useRef<any>(null);
 
@@ -538,15 +596,52 @@ export default function AppIndex() {
   const fetchCompletedOrders = useCallback(async () => {
     try {
       const data = await api.getCompletedOrders();
+      const now = new Date();
+      
+      // Calculate start and end of current week (Monday-Sunday) in local time
+      const currentDay = now.getDay();
+      const daysSinceMonday = currentDay === 0 ? 6 : currentDay - 1;
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - daysSinceMonday);
+      startOfWeek.setHours(0, 0, 0, 0);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+
       const mapped = data.map((order: any) => {
         const orderDate = new Date(order.deliveredAt || order.assignedAt);
-        const diffMs = Date.now() - orderDate.getTime();
-        const diffDays = diffMs / (1000 * 60 * 60 * 24);
         
-        const filterGroup = ['month'];
-        if (diffDays <= 1) filterGroup.push('today');
-        if (diffDays <= 7) filterGroup.push('week');
+        const filterGroup = ['all'];
         
+        // Today check (calendar day comparison)
+        const isToday = orderDate.getDate() === now.getDate() &&
+                        orderDate.getMonth() === now.getMonth() &&
+                        orderDate.getFullYear() === now.getFullYear();
+        if (isToday) filterGroup.push('today');
+        
+        // This Week check (Monday-Sunday calendar week comparison)
+        const isThisWeek = orderDate >= startOfWeek && orderDate <= endOfWeek;
+        if (isThisWeek) filterGroup.push('week');
+        
+        // This Month check
+        const isThisMonth = orderDate.getMonth() === now.getMonth() &&
+                            orderDate.getFullYear() === now.getFullYear();
+        if (isThisMonth) filterGroup.push('month');
+        
+        const status = order.orderStatus || 'Delivered';
+        const normalizedStatus = status.toLowerCase();
+        if (normalizedStatus === 'delivered') {
+          filterGroup.push('delivered');
+        } else if (normalizedStatus === 'cancelled' || normalizedStatus === 'rejected') {
+          filterGroup.push('cancelled_rejected');
+        }
+        
+        let displayStatus = 'Delivered';
+        if (normalizedStatus === 'cancelled') displayStatus = 'Cancelled';
+        else if (normalizedStatus === 'rejected') displayStatus = 'Rejected';
+        else if (normalizedStatus === 'picked_up') displayStatus = 'Picked Up';
+        else if (normalizedStatus === 'out_for_delivery') displayStatus = 'Out For Delivery';
+
         return {
           orderId: `Order #${order.orderNumber || order.orderId}`,
           date: orderDate.toLocaleDateString('en-IN', {
@@ -556,7 +651,7 @@ export default function AppIndex() {
             minute: '2-digit',
           }),
           filterGroup,
-          status: 'Delivered',
+          status: displayStatus,
           restaurantName: order.hotel?.name || 'QuickBite Kitchen',
           dropArea: order.deliveryAddress?.area || order.deliveryAddress?.addressLine1 || 'Drop Location',
           distance: '—',
@@ -565,9 +660,29 @@ export default function AppIndex() {
           earnings: order.partnerEarning !== undefined ? order.partnerEarning : (order.earning !== undefined ? order.earning : 0),
         };
       });
-      setCompletedOrders(mapped);
+      
+      // Deduplicate completed orders to prevent duplicates
+      const uniqueMapped = [];
+      const seenIds = new Set();
+      for (const item of mapped) {
+        if (!seenIds.has(item.orderId)) {
+          seenIds.add(item.orderId);
+          uniqueMapped.push(item);
+        }
+      }
+
+      setCompletedOrders(uniqueMapped);
     } catch (err) {
       console.error('[Orders] Fetch completed orders failed:', err);
+    }
+  }, []);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const data = await api.getPartnerNotifications();
+      setNotifications(data || []);
+    } catch (err) {
+      console.error('[Notifications] Fetch failed:', err);
     }
   }, []);
 
@@ -611,7 +726,7 @@ export default function AppIndex() {
   };
 
   const handleCollectCod = async () => {
-    if (!activeAssignment || !activeAssignment.order) return;
+    if (!activeAssignment || !activeAssignment.order || isAcceptingDeclining) return;
     setIsAcceptingDeclining(true);
     try {
       await api.collectCodCash(activeAssignment.order.id);
@@ -636,8 +751,9 @@ export default function AppIndex() {
     await checkIncomingAssignment();
     if (isOnline) {
       await fetchDashboardStats();
+      await fetchNotifications();
     }
-  }, [checkIncomingAssignment, fetchDashboardStats, isOnline]);
+  }, [checkIncomingAssignment, fetchDashboardStats, fetchNotifications, isOnline]);
 
   // Polling incoming assignments
   useEffect(() => {
@@ -670,19 +786,22 @@ export default function AppIndex() {
     };
   }, [isAuthenticated, accountStatus, isOnline, isAvailable, appState, checkIncomingAssignment]);
 
-  // Poll Dashboard Stats when online
+  // Poll Dashboard Stats & Notifications
   useEffect(() => {
     let intervalId: any = null;
 
     const shouldPollStats = 
       isAuthenticated && 
       accountStatus === 'APPROVED' && 
-      isOnline && 
       appState === 'active';
 
     if (shouldPollStats) {
       fetchDashboardStats();
-      intervalId = setInterval(fetchDashboardStats, 15000); // 15 seconds
+      fetchNotifications();
+      intervalId = setInterval(() => {
+        fetchDashboardStats();
+        fetchNotifications();
+      }, 15000); // 15 seconds
     }
 
     return () => {
@@ -690,14 +809,17 @@ export default function AppIndex() {
         clearInterval(intervalId);
       }
     };
-  }, [isAuthenticated, accountStatus, isOnline, appState, fetchDashboardStats]);
+  }, [isAuthenticated, accountStatus, appState, activeTab, isOnline, fetchDashboardStats, fetchNotifications]);
 
-  // Fetch completed orders when orders or earnings tab is focused
+  // Fetch completed orders/notifications when active tab changes
   useEffect(() => {
-    if (isAuthenticated && (activeTab === 'orders' || activeTab === 'earnings')) {
-      fetchCompletedOrders();
+    if (isAuthenticated) {
+      fetchNotifications();
+      if (activeTab === 'orders' || activeTab === 'earnings') {
+        fetchCompletedOrders();
+      }
     }
-  }, [isAuthenticated, activeTab, fetchCompletedOrders]);
+  }, [isAuthenticated, activeTab, fetchCompletedOrders, fetchNotifications]);
 
   // Handle Android back button when viewing active order
   useEffect(() => {
@@ -721,8 +843,6 @@ export default function AppIndex() {
 
     const shouldPollAvailable = 
       isAuthenticated && 
-      activeTab === 'orders' && 
-      ordersSubTab === 'available' && 
       isOnline && 
       isAvailable && 
       appState === 'active';
@@ -737,7 +857,7 @@ export default function AppIndex() {
         clearInterval(intervalId);
       }
     };
-  }, [isAuthenticated, activeTab, ordersSubTab, isOnline, isAvailable, appState, fetchAvailableOrders]);
+  }, [isAuthenticated, isOnline, isAvailable, appState, fetchAvailableOrders]);
 
   useEffect(() => {
     return () => {
@@ -801,25 +921,29 @@ export default function AppIndex() {
       setIsAvailable(data.isAvailable);
       if (!data.isOnline) {
         setIncomingAssignment(null);
+        setAvailableOrders([]);
         if (deliveryState === 'incoming-request') {
           changeDeliveryState('none');
         }
       }
     } catch (err) {
       const error = err as any;
-      console.error('Failed to toggle online status:', error.message);
-      if (error.message === 'Unauthorized' || error.message === 'Forbidden resource') {
+      if (error.message && (error.message.includes('active delivery') || error.message.includes('Complete or resolve'))) {
+        alert('Complete your active delivery before going offline.');
+      } else if (error.message === 'Unauthorized' || error.message === 'Forbidden resource') {
+        console.error('Failed to toggle online status:', error.message);
         await handleLogout(true);
       } else {
+        console.error('Failed to toggle online status:', error.message);
         alert(error.message || 'Unable to change status. Please try again.');
-        try {
-          const profile = await api.getMe();
-          setAccountStatus(profile.partner.accountStatus);
-          setIsOnline(profile.partner.isOnline);
-          setIsAvailable(profile.partner.isAvailable);
-        } catch (meErr) {
-          // ignore
-        }
+      }
+      try {
+        const profile = await api.getMe();
+        setAccountStatus(profile.partner.accountStatus);
+        setIsOnline(profile.partner.isOnline);
+        setIsAvailable(profile.partner.isAvailable);
+      } catch (meErr) {
+        // ignore
       }
     } finally {
       setIsMutatingOnline(false);
@@ -897,9 +1021,18 @@ export default function AppIndex() {
               <Text style={styles.riderNameText}>{currentUser?.name?.split(' ')[0] || 'Partner'}</Text>
             </View>
             <View style={styles.rightActionsRow}>
-              <TouchableOpacity style={styles.bellButton} activeOpacity={0.7}>
+              <TouchableOpacity 
+                style={styles.bellButton} 
+                activeOpacity={0.7}
+                onPress={() => {
+                  fetchNotifications();
+                  setShowNotificationsModal(true);
+                }}
+              >
                 <Ionicons name="notifications" size={20} color="#38220F" />
-                <View style={styles.notificationDot} />
+                {notifications.filter(n => !n.isRead).length > 0 && (
+                  <View style={styles.notificationDot} />
+                )}
               </TouchableOpacity>
               
               {/* Custom Toggle Switch */}
@@ -1196,13 +1329,43 @@ export default function AppIndex() {
     }
 
     const handleStepCtaPress = async () => {
-      if (!activeAssignment || !activeAssignment.order) return;
+      if (!activeAssignment || !activeAssignment.order || isAcceptingDeclining) return;
       setIsAcceptingDeclining(true);
       try {
+        // Fetch fresh status from backend to verify current state before executing actions
+        const latestData = await api.getActiveDelivery();
+        if (latestData && latestData.assignment) {
+          setActiveAssignment(latestData.assignment);
+          const currentBackendStatus = latestData.assignment.order?.orderStatus;
+
+          // Idempotency: check if backend is already at or past the target state
+          if (currentStep === 'pickup' && (currentBackendStatus === 'picked_up' || currentBackendStatus === 'out_for_delivery')) {
+            if (currentBackendStatus === 'out_for_delivery') {
+              changeDeliveryState('active-delivery');
+            } else {
+              changeDeliveryState('active-start-delivery');
+            }
+            setIsAcceptingDeclining(false);
+            return;
+          }
+          if (currentStep === 'start-delivery' && currentBackendStatus === 'out_for_delivery') {
+            changeDeliveryState('active-delivery');
+            setIsAcceptingDeclining(false);
+            return;
+          }
+        }
+
         if (currentStep === 'reach-restaurant') {
           changeDeliveryState('active-pickup');
         } else if (currentStep === 'pickup') {
-          await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'picked_up');
+          const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'picked_up');
+          setActiveAssignment((prev: any) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              order: { ...prev.order, orderStatus: result.orderStatus || 'picked_up' }
+            };
+          });
           changeDeliveryState('active-start-delivery');
         } else if (currentStep === 'start-delivery') {
           const { status } = await Location.requestForegroundPermissionsAsync();
@@ -1225,7 +1388,14 @@ export default function AppIndex() {
             return;
           }
 
-          await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'out_for_delivery');
+          const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'out_for_delivery');
+          setActiveAssignment((prev: any) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              order: { ...prev.order, orderStatus: result.orderStatus || 'out_for_delivery' }
+            };
+          });
           changeDeliveryState('active-delivery');
         }
       } catch (err: any) {
@@ -1534,18 +1704,26 @@ export default function AppIndex() {
 
   // 2. ORDERS TAB (Orders tab with Current & Completed lists)
   const renderOrdersTab = () => {
-    const isOrderActive = deliveryState === 'active-restaurant' || deliveryState === 'active-pickup' || deliveryState === 'active-start-delivery' || deliveryState === 'active-delivery';
+    const isOrderActive = activeAssignment && activeAssignment.order && 
+      ['accepted', 'preparing', 'ready_for_pickup', 'picked_up', 'out_for_delivery'].includes(activeAssignment.order.orderStatus);
     
     let orderStatusText = 'Reach Restaurant';
-    if (deliveryState === 'active-pickup') {
-      orderStatusText = 'Confirm Pickup';
-    } else if (deliveryState === 'active-start-delivery') {
+    if (activeAssignment?.order?.orderStatus === 'picked_up') {
       orderStatusText = 'Start Delivery';
-    } else if (deliveryState === 'active-delivery') {
+    } else if (activeAssignment?.order?.orderStatus === 'out_for_delivery') {
       orderStatusText = 'Out for Delivery';
+    } else if (activeAssignment?.order?.orderStatus === 'ready_for_pickup') {
+      if (deliveryState === 'active-pickup') {
+        orderStatusText = 'Confirm Pickup';
+      } else {
+        orderStatusText = 'Reach Restaurant';
+      }
+    } else if (activeAssignment?.order?.orderStatus === 'preparing' || activeAssignment?.order?.orderStatus === 'accepted') {
+      orderStatusText = 'Reach Restaurant';
     }
 
     const handleContinueDelivery = () => {
+      setViewingActiveOrder(true);
       setActiveTab('home');
     };
 
@@ -1669,6 +1847,54 @@ export default function AppIndex() {
                 completedFilter === 'month' && styles.filterDropdownItemTextActive
               ]}>This Month</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={() => {
+                setCompletedFilter('all');
+                setShowFilterPicker(false);
+              }}
+              style={[
+                styles.filterDropdownItem,
+                completedFilter === 'all' && styles.filterDropdownItemActive
+              ]}
+            >
+              <Text style={[
+                styles.filterDropdownItemText,
+                completedFilter === 'all' && styles.filterDropdownItemTextActive
+              ]}>All Orders</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={() => {
+                setCompletedFilter('delivered');
+                setShowFilterPicker(false);
+              }}
+              style={[
+                styles.filterDropdownItem,
+                completedFilter === 'delivered' && styles.filterDropdownItemActive
+              ]}
+            >
+              <Text style={[
+                styles.filterDropdownItemText,
+                completedFilter === 'delivered' && styles.filterDropdownItemTextActive
+              ]}>Delivered Only</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={() => {
+                setCompletedFilter('cancelled_rejected');
+                setShowFilterPicker(false);
+              }}
+              style={[
+                styles.filterDropdownItem,
+                completedFilter === 'cancelled_rejected' && styles.filterDropdownItemActive
+              ]}
+            >
+              <Text style={[
+                styles.filterDropdownItemText,
+                completedFilter === 'cancelled_rejected' && styles.filterDropdownItemTextActive
+              ]}>Cancelled / Rejected</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -1760,7 +1986,11 @@ export default function AppIndex() {
           >
             {isOrderActive && activeAssignment ? (
               // Active Order Card
-              <View style={styles.currentOrderCard}>
+              <TouchableOpacity 
+                activeOpacity={0.9} 
+                onPress={handleContinueDelivery}
+                style={styles.currentOrderCard}
+              >
                 <View style={styles.currentOrderCardHeader}>
                   <Text style={styles.currentOrderCardTitle}>ORDER #{activeAssignment.order?.orderNumber || activeAssignment.order?.id}</Text>
                   <View style={styles.currentOrderStatusBadge}>
@@ -1816,7 +2046,7 @@ export default function AppIndex() {
                 >
                   <Text style={styles.continueDeliveryBtnText}>Continue Delivery →</Text>
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             ) : (
               // Empty State
               <View style={styles.emptyStateContainer}>
@@ -1938,16 +2168,20 @@ export default function AppIndex() {
 
   // 3. EARNINGS TAB (Earnings screen, charts, transactions)
   const renderEarningsTab = () => {
-    // Custom Daily trend chart mock details
-    const chartDays = [
-      { day: 'M', value: 0, height: 5 },
-      { day: 'T', value: 0, height: 5 },
-      { day: 'W', value: 0, height: 5 },
-      { day: 'T', value: 0, height: 5 },
-      { day: 'F', value: 0, height: 5 },
-      { day: 'S', value: 0, height: 5 },
-      { day: 'S', value: dashboardStats.todayEarnings, height: dashboardStats.todayEarnings > 0 ? 80 : 5, selected: true }
-    ];
+    // Find the max daily earnings in the week to scale the chart bars dynamically
+    const maxEarnings = Math.max(...(dashboardStats.weeklyChart?.map(d => d.value) || [0]));
+    
+    const chartDays = (dashboardStats.weeklyChart || []).map(dayItem => {
+      let height = 5;
+      if (dayItem.value > 0) {
+        // Scale proportionally between 5 and 80 based on the maximum daily value in the week
+        height = maxEarnings > 0 ? Math.max(5, Math.floor((dayItem.value / maxEarnings) * 80)) : 5;
+      }
+      return {
+        ...dayItem,
+        height
+      };
+    });
 
     return (
       <View style={styles.tabContentContainer}>
@@ -1963,8 +2197,8 @@ export default function AppIndex() {
 
           {/* Period totals side-by-side cards */}
           <View style={styles.periodCardsRow}>
-            <PeriodStatsCard label="THIS WEEK" amount={`₹${dashboardStats.todayEarnings}`} />
-            <PeriodStatsCard label="THIS MONTH" amount={`₹${dashboardStats.todayEarnings}`} />
+            <PeriodStatsCard label="THIS WEEK" amount={`₹${dashboardStats.weeklyEarnings}`} />
+            <PeriodStatsCard label="THIS MONTH" amount={`₹${dashboardStats.monthlyEarnings}`} />
           </View>
 
           {/* Earnings breakdown details card */}
@@ -1974,7 +2208,7 @@ export default function AppIndex() {
           <View style={styles.chartContainer}>
             <View style={styles.chartHeaderRow}>
               <Text style={styles.chartTitle}>Daily Trend</Text>
-              <TouchableOpacity activeOpacity={0.7}>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => setShowFullChartModal(true)}>
                 <Text style={styles.viewChartText}>View Full Chart</Text>
               </TouchableOpacity>
             </View>
@@ -1982,26 +2216,34 @@ export default function AppIndex() {
             <View style={styles.chartCard}>
               {/* Chart Bars */}
               <View style={styles.barsContainer}>
-                {chartDays.map((dayItem, index) => (
-                  <View key={index} style={styles.barColumn}>
-                    {dayItem.selected && (
-                      <View style={styles.selectedDayBubble}>
-                        <Text style={styles.selectedDayBubbleText}>₹{dayItem.value}</Text>
-                      </View>
-                    )}
-                    <View style={[
-                      styles.chartBar,
-                      { height: dayItem.height },
-                      dayItem.selected ? styles.selectedChartBar : styles.defaultChartBar
-                    ]} />
-                    <Text style={[
-                      styles.barLabel,
-                      dayItem.selected && styles.selectedBarLabel
-                    ]}>
-                      {dayItem.day}
-                    </Text>
-                  </View>
-                ))}
+                {chartDays.map((dayItem, index) => {
+                  const isSelected = selectedChartDayIdx !== null ? (selectedChartDayIdx === index) : dayItem.selected;
+                  return (
+                    <TouchableOpacity 
+                      key={index} 
+                      activeOpacity={0.8}
+                      onPress={() => setSelectedChartDayIdx(index)}
+                      style={styles.barColumn}
+                    >
+                      {isSelected && (
+                        <View style={styles.selectedDayBubble}>
+                          <Text style={styles.selectedDayBubbleText}>₹{dayItem.value}</Text>
+                        </View>
+                      )}
+                      <View style={[
+                        styles.chartBar,
+                        { height: dayItem.height },
+                        isSelected ? styles.selectedChartBar : styles.defaultChartBar
+                      ]} />
+                      <Text style={[
+                        styles.barLabel,
+                        isSelected && styles.selectedBarLabel
+                      ]}>
+                        {dayItem.day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
           </View>
@@ -2735,6 +2977,293 @@ export default function AppIndex() {
     return renderSuspendedScreen();
   }
 
+  const handleNotificationPress = async (item: any) => {
+    if (!item.isRead) {
+      try {
+        await api.markPartnerNotificationAsRead(item.id);
+        fetchNotifications();
+      } catch (err) {
+        console.error('Failed to mark read:', err);
+      }
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    try {
+      await api.clearAllPartnerNotifications();
+      fetchNotifications();
+    } catch (err) {
+      console.error('Failed to clear all:', err);
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await api.markAllPartnerNotificationsAsRead();
+      fetchNotifications();
+    } catch (err) {
+      console.error('Failed to mark all read:', err);
+    }
+  };
+
+  const renderNotificationsModal = () => {
+    const unreadList = notifications.filter(n => !n.isRead);
+    return (
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={showNotificationsModal}
+        onRequestClose={() => setShowNotificationsModal(false)}
+      >
+        <SafeAreaView style={[styles.container, styles.screenBg, { flex: 1 }]}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            backgroundColor: '#FFFFFF',
+            borderBottomWidth: 1,
+            borderColor: '#E2E8F0',
+          }}>
+            <TouchableOpacity 
+              activeOpacity={0.7} 
+              onPress={() => setShowNotificationsModal(false)}
+              style={{ padding: 4 }}
+            >
+              <Ionicons name="arrow-back" size={24} color="#38220F" />
+            </TouchableOpacity>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: '#38220F' }}>Notifications</Text>
+            {notifications.length > 0 ? (
+              <TouchableOpacity activeOpacity={0.7} onPress={handleClearAllNotifications} style={{ padding: 4 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#EF4444' }}>Clear All</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: 60 }} />
+            )}
+          </View>
+
+          {unreadList.length > 0 && (
+            <View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFFBEB', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: '#B45309' }}>You have {unreadList.length} unread alerts</Text>
+              <TouchableOpacity activeOpacity={0.7} onPress={handleMarkAllNotificationsRead}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#D97706' }}>Mark all read</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <ScrollView 
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollPadding}
+            style={styles.screenBg}
+          >
+            {notifications.length > 0 ? (
+              notifications.map((item, idx) => {
+                const date = new Date(item.createdAt);
+                const formattedDate = date.toLocaleDateString('en-IN', {
+                  day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                });
+                return (
+                  <TouchableOpacity 
+                    key={item.id || idx}
+                    activeOpacity={0.8}
+                    onPress={() => handleNotificationPress(item)}
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 12,
+                      padding: 16,
+                      marginBottom: 12,
+                      borderWidth: 1,
+                      borderColor: item.isRead ? '#F1F5F9' : '#FDE68A',
+                      flexDirection: 'row',
+                      alignItems: 'flex-start',
+                      shadowColor: '#38220F',
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: 0.03,
+                      shadowRadius: 2,
+                      elevation: 1,
+                    }}
+                  >
+                    <View style={{
+                      backgroundColor: item.isRead ? '#F1F5F9' : '#FEF3C7',
+                      borderRadius: 10,
+                      padding: 8,
+                      marginRight: 12,
+                    }}>
+                      <Ionicons 
+                        name={item.type === 'earnings_credited' ? "wallet-outline" : "notifications-outline"} 
+                        size={18} 
+                        color={item.isRead ? "#8A7A6E" : "#D97706"} 
+                      />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#38220F', flex: 1, marginRight: 8 }}>{item.title}</Text>
+                        {!item.isRead && (
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#D97706' }} />
+                        )}
+                      </View>
+                      <Text style={{ fontSize: 13, color: '#8A7A6E', lineHeight: 18, marginBottom: 8 }}>{item.message}</Text>
+                      <Text style={{ fontSize: 11, color: '#A1A1AA', fontWeight: '500' }}>{formattedDate}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={{ paddingVertical: 100, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="notifications-off-outline" size={48} color="#A1A1AA" />
+                <Text style={{ marginTop: 12, fontSize: 14, color: '#8A7A6E', fontWeight: '600' }}>No notifications yet</Text>
+                <Text style={{ marginTop: 4, fontSize: 12, color: '#A1A1AA' }}>We'll notify you about active orders and earnings.</Text>
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  };
+
+  const renderFullChartModal = () => {
+    const chartDays = dashboardStats.weeklyChart || [];
+    const maxVal = Math.max(...chartDays.map(d => Number(d.value) || 0), 100);
+    const scaledChartDays = chartDays.map(dayItem => {
+      const val = Number(dayItem.value) || 0;
+      const height = 10 + (val / maxVal) * 140;
+      return {
+        ...dayItem,
+        height,
+      };
+    });
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={showFullChartModal}
+        onRequestClose={() => setShowFullChartModal(false)}
+      >
+        <SafeAreaView style={[styles.container, styles.screenBg, { flex: 1 }]}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            backgroundColor: '#FFFFFF',
+            borderBottomWidth: 1,
+            borderColor: '#E2E8F0',
+          }}>
+            <TouchableOpacity 
+              activeOpacity={0.7} 
+              onPress={() => setShowFullChartModal(false)}
+              style={{ padding: 4 }}
+            >
+              <Ionicons name="arrow-back" size={24} color="#38220F" />
+            </TouchableOpacity>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: '#38220F' }}>Weekly Earnings Details</Text>
+            <View style={{ width: 32 }} />
+          </View>
+
+          <ScrollView 
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollPadding}
+            style={styles.screenBg}
+          >
+            <View style={{ padding: 16 }}>
+              <View style={styles.offlineEarningsCard}>
+                <Text style={styles.offlineEarningsTitle}>This Week's Earnings</Text>
+                <Text style={styles.offlineEarningsAmount}>₹{dashboardStats.weeklyEarnings}</Text>
+                <Text style={styles.offlineEarningsCount}>
+                  {dashboardStats.weeklyDeliveries} completed deliveries
+                </Text>
+              </View>
+              
+              <View style={[styles.periodCardsRow, { marginTop: 12 }]}>
+                <View style={{ flex: 1, backgroundColor: '#FFFFFF', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9', marginRight: 8 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#8A7A6E', marginBottom: 4 }}>AVERAGE DAILY</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#38220F' }}>₹{(dashboardStats.weeklyEarnings / 7).toFixed(0)}</Text>
+                </View>
+                <View style={{ flex: 1, backgroundColor: '#FFFFFF', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9', marginLeft: 8 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#8A7A6E', marginBottom: 4 }}>THIS MONTH</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#38220F' }}>₹{dashboardStats.monthlyEarnings}</Text>
+                </View>
+              </View>
+
+              <View style={[styles.chartContainer, { marginTop: 24 }]}>
+                <Text style={styles.chartTitle}>Weekly Trend</Text>
+                <View style={[styles.chartCard, { height: 260, justifyContent: 'flex-end', paddingTop: 40 }]}>
+                  <View style={styles.barsContainer}>
+                    {scaledChartDays.map((dayItem, index) => {
+                      const isSelected = selectedChartDayIdx !== null ? (selectedChartDayIdx === index) : dayItem.selected;
+                      return (
+                        <TouchableOpacity
+                          key={index}
+                          activeOpacity={0.8}
+                          onPress={() => setSelectedChartDayIdx(index)}
+                          style={[styles.barColumn, { height: 220, justifyContent: 'flex-end' }]}
+                        >
+                          {isSelected && (
+                            <View style={[styles.selectedDayBubble, { bottom: dayItem.height + 25 }]}>
+                              <Text style={styles.selectedDayBubbleText}>₹{dayItem.value}</Text>
+                            </View>
+                          )}
+                          <View style={[
+                            styles.chartBar,
+                            { height: dayItem.height },
+                            isSelected ? styles.selectedChartBar : styles.defaultChartBar
+                          ]} />
+                          <Text style={[
+                            styles.barLabel,
+                            isSelected && styles.selectedBarLabel
+                          ]}>
+                            {dayItem.day}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              </View>
+
+              <View style={{ marginTop: 28 }}>
+                <Text style={styles.transactionsTitle}>This Week's Deliveries</Text>
+                <View style={[styles.transactionsListCard, { marginTop: 12 }]}>
+                  {completedOrders.filter(o => o.filterGroup.includes('week')).length > 0 ? (
+                    completedOrders.filter(o => o.filterGroup.includes('week')).map((order, idx) => (
+                      <View 
+                        key={idx} 
+                        style={[
+                          styles.transactionRow,
+                          idx < completedOrders.filter(o => o.filterGroup.includes('week')).length - 1 && styles.transactionRowDivider
+                        ]}
+                      >
+                        <View style={styles.transactionLeft}>
+                          <View style={styles.iconCircleBg}>
+                            <Ionicons name="bicycle" size={16} color="#8A7A6E" />
+                          </View>
+                          <View style={{ marginLeft: 12 }}>
+                            <Text style={styles.transactionItemTitle}>{order.orderId}</Text>
+                            <Text style={styles.transactionItemSub}>{order.restaurantName} • {order.date}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.transactionAmountText}>+₹{order.earnings}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 13, color: '#8A7A6E', fontWeight: '500' }}>No deliveries this week</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  };
+
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <StatusBar style="dark" />
@@ -2751,8 +3280,16 @@ export default function AppIndex() {
           setActiveTab={(tab) => {
             setActiveTab(tab);
           }} 
+          unreadOrdersCount={
+            availableOrders.filter(
+              ao => !incomingAssignment || !incomingAssignment.order || ao.id !== incomingAssignment.order.id
+            ).length + (incomingAssignment ? 1 : 0)
+          }
         />
       )}
+
+      {renderNotificationsModal()}
+      {renderFullChartModal()}
     </SafeAreaView>
   );
 }

@@ -881,13 +881,19 @@ export class OrdersService {
       order.outForDeliveryAt = now;
     } else if (nextStatus === 'delivered') {
       order.deliveredAt = now;
-      // Inactivate any active delivery partner assignments for this order
-      await this.dataSource.getRepository('DeliveryAssignment').update(
-        { orderId: order.id, isActive: true },
-        { isActive: false, unassignedAt: now }
-      );
+      await this.deliveryPartnersService.releaseRiderForOrder(order.id, 'DELIVERED').catch(err => {
+        console.error(`[Release Rider Error] Failed to release rider for order ${order.id}:`, err);
+      });
     } else if (nextStatus === 'cancelled') {
       order.cancelledAt = now;
+      await this.deliveryPartnersService.releaseRiderForOrder(order.id, 'CANCELLED').catch(err => {
+        console.error(`[Release Rider Error] Failed to release rider for order ${order.id}:`, err);
+      });
+    } else if (nextStatus === 'rejected') {
+      order.rejectedAt = now;
+      await this.deliveryPartnersService.releaseRiderForOrder(order.id, 'CANCELLED').catch(err => {
+        console.error(`[Release Rider Error] Failed to release rider for order ${order.id}:`, err);
+      });
     }
 
     await this.orderRepository.save(order);
@@ -927,11 +933,10 @@ export class OrdersService {
     const now = new Date();
     order.cancelledAt = now;
 
-    // Inactivate any active delivery partner assignments for this order
-    await this.dataSource.getRepository('DeliveryAssignment').update(
-      { orderId: order.id, isActive: true },
-      { isActive: false, unassignedAt: now }
-    );
+    // Release the rider and inactivate the assignment
+    await this.deliveryPartnersService.releaseRiderForOrder(order.id, 'CANCELLED').catch(err => {
+      console.error(`[Release Rider Error] Failed to release rider for order ${order.id}:`, err);
+    });
 
     await this.orderRepository.save(order);
 

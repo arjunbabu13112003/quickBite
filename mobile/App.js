@@ -28,7 +28,7 @@ import {
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
 import * as Location from 'expo-location';
-import { MapView, Camera as MapCamera, MarkerView } from '@maplibre/maplibre-react-native';
+import { Map as MapView, Camera as MapCamera, Marker } from '@maplibre/maplibre-react-native';
 import {
   Sparkles,
   Flame,
@@ -112,7 +112,7 @@ const getExpoHostIp = () => {
   } catch (e) {
     console.warn('Expo hostUri detection:', e);
   }
-  return '192.168.1.8';
+  return '192.168.220.92';
 };
 
 const { width, height } = Dimensions.get('window');
@@ -289,7 +289,7 @@ const getBasePrice = (item, spiceLevel) => {
 };
 
 const resolveProductImage = (imgStr, activeBackend) => {
-  const host = activeBackend || 'http://192.168.1.8:5000';
+  const host = activeBackend || 'http://192.168.220.92:5000';
   if (!imgStr) return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
   
   let resolved = imgStr;
@@ -438,7 +438,7 @@ export default function App() {
   };
 
   // Backend API & Authentication State
-  const API_BASE_URL = 'http://192.168.1.8:5000'; // NestJS + PostgreSQL Backend
+  const API_BASE_URL = 'http://192.168.220.92:5000'; // NestJS + PostgreSQL Backend
   const [currentUser, setCurrentUser] = useState(null);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
@@ -2087,7 +2087,7 @@ export default function App() {
     const detectedIp = getExpoHostIp();
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.1.8:5000',
+      'http://192.168.220.92:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];
@@ -2481,7 +2481,7 @@ export default function App() {
 
     const backendEndpoints = [
       `http://${detectedIp}:5000`,
-      'http://192.168.1.8:5000',
+      'http://192.168.220.92:5000',
       'http://localhost:5000',
       'http://10.0.2.2:5000'
     ];
@@ -8251,13 +8251,13 @@ export default function App() {
                                       attributionEnabled={false}
                                     >
                                       <MapCamera
-                                        defaultSettings={{
-                                          centerCoordinate: [parseFloat(riderLng), parseFloat(riderLat)],
-                                          zoomLevel: 14,
+                                        initialViewState={{
+                                          center: [parseFloat(riderLng), parseFloat(riderLat)],
+                                          zoom: 14,
                                         }}
                                       />
                                       
-                                      <MarkerView coordinate={[parseFloat(riderLng), parseFloat(riderLat)]}>
+                                      <Marker lngLat={[parseFloat(riderLng), parseFloat(riderLat)]}>
                                         <View style={{
                                           width: 32, height: 32, borderRadius: 16,
                                           backgroundColor: '#059669',
@@ -8269,10 +8269,10 @@ export default function App() {
                                         }}>
                                           <Text style={{ fontSize: 16 }}>🛵</Text>
                                         </View>
-                                      </MarkerView>
+                                      </Marker>
 
                                       {custLat && custLng && isValidCoordinate(custLat, custLng) && (
-                                        <MarkerView coordinate={[parseFloat(custLng), parseFloat(custLat)]}>
+                                        <Marker lngLat={[parseFloat(custLng), parseFloat(custLat)]}>
                                           <View style={{
                                             width: 32, height: 32, borderRadius: 16,
                                             backgroundColor: '#3b82f6',
@@ -8284,7 +8284,7 @@ export default function App() {
                                           }}>
                                             <Text style={{ fontSize: 16 }}>📍</Text>
                                           </View>
-                                        </MarkerView>
+                                        </Marker>
                                       )}
 
                                       {(() => {
@@ -8292,7 +8292,7 @@ export default function App() {
                                         const hLng = activeOrderDetail?.hotel?.longitude ? parseFloat(activeOrderDetail.hotel.longitude.toString()) : null;
                                         if (hLat && hLng && isValidCoordinate(hLat, hLng)) {
                                           return (
-                                            <MarkerView coordinate={[hLng, hLat]}>
+                                            <Marker lngLat={[hLng, hLat]}>
                                               <View style={{
                                                 width: 32, height: 32, borderRadius: 16,
                                                 backgroundColor: '#f59e0b',
@@ -8304,7 +8304,7 @@ export default function App() {
                                               }}>
                                                 <Text style={{ fontSize: 16 }}>🍔</Text>
                                               </View>
-                                            </MarkerView>
+                                            </Marker>
                                           );
                                         }
                                         return null;

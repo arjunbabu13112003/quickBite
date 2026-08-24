@@ -4,6 +4,7 @@ import { DeliveryPartner } from './delivery-partner.entity';
 import { DeliveryPartnerDocument } from './delivery-partner-document.entity';
 import { DeliveryPartnerBankDetails } from './delivery-partner-bank-details.entity';
 import { DeliveryAssignment } from './delivery-assignment.entity';
+import { DeliveryPartnerOnlineSession } from './delivery-partner-online-session.entity';
 import { User } from '../users/user.entity';
 import { Order } from '../orders/order.entity';
 import { DeliveryPartnersService } from './delivery-partners.service';
@@ -12,6 +13,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { BankEncryptionService } from './bank-encryption.service';
 
 import { UsersModule } from '../users/users.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -20,11 +22,13 @@ import { UsersModule } from '../users/users.module';
       DeliveryPartnerDocument,
       DeliveryPartnerBankDetails,
       DeliveryAssignment,
+      DeliveryPartnerOnlineSession,
       User,
       Order,
     ]),
     PaymentsModule,
     UsersModule,
+    NotificationsModule,
   ],
   controllers: [DeliveryPartnersController, DeliveryPartnersLoginController],
   providers: [DeliveryPartnersService, BankEncryptionService],

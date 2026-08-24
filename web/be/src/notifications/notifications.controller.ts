@@ -39,4 +39,36 @@ export class NotificationsController {
   clearAllNotifications(@Request() req) {
     return this.notificationsService.clearAllNotifications(req.user.hotelId);
   }
+
+  // --- DELIVERY PARTNER NOTIFICATIONS ---
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('partner/me')
+  getPartnerNotifications(@Request() req) {
+    return this.notificationsService.getPartnerNotifications(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Patch('partner/me/read-all')
+  markAllPartnerAsRead(@Request() req) {
+    return this.notificationsService.markAllPartnerAsRead(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Patch('partner/me/:id/read')
+  markPartnerAsRead(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.notificationsService.markPartnerAsRead(id, req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Delete('partner/me/:id')
+  deletePartnerNotification(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.notificationsService.deletePartnerNotification(id, req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Delete('partner/me')
+  clearAllPartnerNotifications(@Request() req) {
+    return this.notificationsService.clearAllPartnerNotifications(req.user.userId);
+  }
 }

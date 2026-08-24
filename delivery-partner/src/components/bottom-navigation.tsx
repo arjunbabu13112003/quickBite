@@ -12,7 +12,7 @@ interface BottomNavigationProps {
 export default function BottomNavigation({
   activeTab,
   setActiveTab,
-  unreadOrdersCount = 2
+  unreadOrdersCount = 0
 }: BottomNavigationProps) {
   const insets = useSafeAreaInsets();
 

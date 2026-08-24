@@ -15,11 +15,13 @@ import { DeliveryPartner, DeliveryPartnerAccountStatus } from './delivery-partne
 import { DeliveryPartnerDocument, DocumentType, DocumentVerificationStatus } from './delivery-partner-document.entity';
 import { DeliveryPartnerBankDetails } from './delivery-partner-bank-details.entity';
 import { DeliveryAssignment, DeliveryAssignmentStatus } from './delivery-assignment.entity';
+import { DeliveryPartnerOnlineSession } from './delivery-partner-online-session.entity';
 import { User } from '../users/user.entity';
 import { Order } from '../orders/order.entity';
 import { UserRole } from '../users/user-role.enum';
 import { OrderStatus } from '../orders/enums/order-status.enum';
 import { PaymentsService } from '../payments/payments.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { OrderFinancialAllocation } from '../payments/entities/order-financial-allocation.entity';
 import { CreateDeliveryPartnerDto } from './dto/create-delivery-partner.dto';
 import { AdminCreateDeliveryPartnerDto } from './dto/admin-create-delivery-partner.dto';
@@ -48,6 +50,7 @@ export class DeliveryPartnersService implements OnModuleInit {
     private readonly paymentsService: PaymentsService,
     private readonly bankEncryptionService: BankEncryptionService,
     private readonly jwtService: JwtService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async onModuleInit() {
@@ -466,42 +469,142 @@ export class DeliveryPartnersService implements OnModuleInit {
       throw new NotFoundException('Delivery partner profile not found.');
     }
 
-    // Calculate start of current day in IST (UTC+5:30) and convert to UTC for database comparison
+    // Calculate start of current day/week/month in IST (UTC+5:30) and convert to UTC for database comparison
     const now = new Date();
     const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const istTime = new Date(utcTime + (3600000 * 5.5));
-    istTime.setHours(0, 0, 0, 0);
-    const todayStart = new Date(istTime.getTime() - (3600000 * 5.5));
+    const istNow = new Date(utcTime + (3600000 * 5.5));
+    
+    // Today's Start (00:00:00 IST)
+    const istToday = new Date(istNow);
+    istToday.setHours(0, 0, 0, 0);
+    const todayStart = new Date(istToday.getTime() - (3600000 * 5.5));
+
+    // Week Start (Monday at 00:00:00 IST of the current week)
+    const dayOfWeek = istNow.getDay(); // 0 (Sun) - 6 (Sat)
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const istWeek = new Date(istToday);
+    istWeek.setDate(istWeek.getDate() + diffToMonday);
+    const weekStart = new Date(istWeek.getTime() - (3600000 * 5.5));
+
+    // Month Start (1st of the current month at 00:00:00 IST)
+    const istMonth = new Date(istToday);
+    istMonth.setDate(1);
+    const monthStart = new Date(istMonth.getTime() - (3600000 * 5.5));
 
     // Calculate today's completed deliveries
-    const completedAssignments = await this.assignmentRepository.createQueryBuilder('assignment')
-      .innerJoinAndSelect('assignment.order', 'order')
+    const todayDeliveries = await this.assignmentRepository.createQueryBuilder('assignment')
+      .innerJoin('assignment.order', 'order')
       .where('assignment.deliveryPartnerId = :partnerId', { partnerId: partner.id })
       .andWhere('assignment.isActive = :isActive', { isActive: false })
       .andWhere('assignment.status = :status', { status: DeliveryAssignmentStatus.ACCEPTED })
       .andWhere('order.orderStatus = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
       .andWhere('assignment.unassignedAt >= :todayStart', { todayStart })
-      .getMany();
+      .getCount();
 
-    const todayDeliveries = completedAssignments.length;
+    // Calculate this week's completed deliveries
+    const weeklyDeliveries = await this.assignmentRepository.createQueryBuilder('assignment')
+      .innerJoin('assignment.order', 'order')
+      .where('assignment.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('assignment.isActive = :isActive', { isActive: false })
+      .andWhere('assignment.status = :status', { status: DeliveryAssignmentStatus.ACCEPTED })
+      .andWhere('order.orderStatus = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
+      .andWhere('assignment.unassignedAt >= :weekStart', { weekStart })
+      .getCount();
 
-    // Calculate today's earnings using correct lowercased ledger entryType and direction values
+    // Calculate this month's completed deliveries
+    const monthlyDeliveries = await this.assignmentRepository.createQueryBuilder('assignment')
+      .innerJoin('assignment.order', 'order')
+      .where('assignment.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('assignment.isActive = :isActive', { isActive: false })
+      .andWhere('assignment.status = :status', { status: DeliveryAssignmentStatus.ACCEPTED })
+      .andWhere('order.orderStatus = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
+      .andWhere('assignment.unassignedAt >= :monthStart', { monthStart })
+      .getCount();
+
+    // Calculate today's, this week's, and this month's earnings using correct credit ledger entries
     const ledgerRepo = this.dataSource.getRepository('LedgerEntry');
-    const ledgerEntries = await ledgerRepo.createQueryBuilder('le')
+
+    const todayEntries = await ledgerRepo.createQueryBuilder('le')
       .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
       .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
       .andWhere('le.direction = :direction', { direction: 'credit' })
       .andWhere('le.createdAt >= :todayStart', { todayStart })
       .getMany();
+    const todayEarnings = todayEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
 
-    const todayEarnings = ledgerEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+    const weeklyEntries = await ledgerRepo.createQueryBuilder('le')
+      .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
+      .andWhere('le.direction = :direction', { direction: 'credit' })
+      .andWhere('le.createdAt >= :weekStart', { weekStart })
+      .getMany();
+    const weeklyEarnings = weeklyEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
 
-    // Online time: since online session tracking is not implemented, we return 0
-    const onlineMinutes = 0;
+    const monthlyEntries = await ledgerRepo.createQueryBuilder('le')
+      .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
+      .andWhere('le.direction = :direction', { direction: 'credit' })
+      .andWhere('le.createdAt >= :monthStart', { monthStart })
+      .getMany();
+    const monthlyEarnings = monthlyEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+
+    // Calculate daily earnings trend for current week (Monday to Sunday)
+    const weeklyChart = [];
+    const daysLabel = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+    for (let i = 0; i < 7; i++) {
+      const dayStartIst = new Date(istWeek);
+      dayStartIst.setDate(dayStartIst.getDate() + i);
+      const dayStart = new Date(dayStartIst.getTime() - (3600000 * 5.5));
+      
+      const dayEndIst = new Date(dayStartIst);
+      dayEndIst.setDate(dayEndIst.getDate() + 1);
+      const dayEnd = new Date(dayEndIst.getTime() - (3600000 * 5.5));
+      
+      const dayEntries = await ledgerRepo.createQueryBuilder('le')
+        .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+        .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
+        .andWhere('le.direction = :direction', { direction: 'credit' })
+        .andWhere('le.createdAt >= :dayStart AND le.createdAt < :dayEnd', { dayStart, dayEnd })
+        .getMany();
+        
+      const dayEarnings = dayEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+      
+      weeklyChart.push({
+        day: daysLabel[i],
+        value: dayEarnings,
+        height: 5, // Visual height scaling will be calculated dynamically on the frontend
+        selected: i === (dayOfWeek === 0 ? 6 : dayOfWeek - 1),
+      });
+    }
+
+    // Calculate cumulative online minutes today in IST
+    const sessionRepo = this.dataSource.getRepository(DeliveryPartnerOnlineSession);
+    const sessions = await sessionRepo.createQueryBuilder('session')
+      .where('session.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('(session.endTime IS NULL OR session.endTime >= :todayStart)', { todayStart })
+      .getMany();
+
+    let totalOnlineMs = 0;
+    const nowTime = new Date();
+    for (const session of sessions) {
+      const sessionStart = session.startTime.getTime() < todayStart.getTime() ? todayStart : session.startTime;
+      const sessionEnd = session.endTime ? session.endTime : nowTime;
+      
+      if (sessionEnd.getTime() > sessionStart.getTime()) {
+        totalOnlineMs += (sessionEnd.getTime() - sessionStart.getTime());
+      }
+    }
+    const onlineMinutes = Math.round(totalOnlineMs / 60000);
 
     const stats = {
       todayEarnings,
       todayDeliveries,
+      weeklyEarnings,
+      weeklyDeliveries,
+      monthlyEarnings,
+      monthlyDeliveries,
+      weeklyChart,
       onlineMinutes,
     };
     console.log('[Dashboard Stats Dev Log]:', stats);
@@ -533,6 +636,18 @@ export class DeliveryPartnersService implements OnModuleInit {
         throw new BadRequestException(
           'Delivery partner must be active, verified, and online to be available',
         );
+      }
+    }
+
+    if (isOnline === false && profile.isOnline === true) {
+      const sessionRepo = this.dataSource.getRepository(DeliveryPartnerOnlineSession);
+      const openSessions = await sessionRepo.find({
+        where: { deliveryPartnerId: profile.id, endTime: IsNull() }
+      });
+      const nowTime = new Date();
+      for (const sess of openSessions) {
+        sess.endTime = nowTime;
+        await sessionRepo.save(sess);
       }
     }
 
@@ -687,7 +802,7 @@ export class DeliveryPartnersService implements OnModuleInit {
       );
     }
 
-    return await this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       // Re-verify and lock inside transaction to protect concurrency
       const lockedPartner = await manager.findOne(DeliveryPartner, {
         where: { id: partnerId },
@@ -748,6 +863,19 @@ export class DeliveryPartnersService implements OnModuleInit {
 
       return await manager.save(DeliveryAssignment, assignment);
     });
+
+    const orderRecord = await this.orderRepository.findOne({ where: { id: orderId } });
+    const orderNo = orderRecord ? (orderRecord.orderNumber || orderRecord.id) : orderId;
+    await this.notificationsService.createPartnerNotification(
+      partnerId,
+      'New Delivery Assignment Offered',
+      `You have been offered a new delivery request (Order #${orderNo}). You have 23 seconds to accept or decline it.`,
+      'assignment_offered',
+      orderId,
+      saved.id
+    ).catch(err => console.error('[Notification Offer Error]:', err));
+
+    return saved;
   }
 
   async getAssignedOrders(userId: number): Promise<any[]> {
@@ -997,6 +1125,16 @@ export class DeliveryPartnersService implements OnModuleInit {
       order.orderStatus = nextStatus as OrderStatus;
       order.pickedUpAt = now;
       await this.orderRepository.save(order);
+
+      await this.notificationsService.createPartnerNotification(
+        partner.id,
+        'Order Picked Up',
+        `You have picked up Order #${order.orderNumber || order.id}. Proceed to deliver to customer.`,
+        'order_picked_up',
+        order.id,
+        assignment.id
+      ).catch(err => console.error('[Notification PickedUp Error]:', err));
+
       return {
         message: `Order status updated to ${nextStatus}`,
         orderId: order.id,
@@ -1008,6 +1146,16 @@ export class DeliveryPartnersService implements OnModuleInit {
       order.orderStatus = nextStatus as OrderStatus;
       order.outForDeliveryAt = now;
       await this.orderRepository.save(order);
+
+      await this.notificationsService.createPartnerNotification(
+        partner.id,
+        'Out for Delivery',
+        `You are now out for delivery for Order #${order.orderNumber || order.id}.`,
+        'order_out_for_delivery',
+        order.id,
+        assignment.id
+      ).catch(err => console.error('[Notification OutForDelivery Error]:', err));
+
       return {
         message: `Order status updated to ${nextStatus}`,
         orderId: order.id,
@@ -1088,6 +1236,26 @@ export class DeliveryPartnersService implements OnModuleInit {
         partnerEarning,
         earning: partnerEarning,
       };
+
+      await this.notificationsService.createPartnerNotification(
+        partner.id,
+        'Delivery Completed!',
+        `Successfully delivered Order #${order.orderNumber || order.id}. Great job!`,
+        'order_delivered',
+        order.id,
+        assignment.id
+      ).catch(err => console.error('[Notification Delivered Error]:', err));
+
+      if (partnerEarning > 0) {
+        await this.notificationsService.createPartnerNotification(
+          partner.id,
+          'Earnings Credited',
+          `You have been credited ₹${partnerEarning.toFixed(2)} for Order #${order.orderNumber || order.id}.`,
+          'earnings_credited',
+          order.id,
+          assignment.id
+        ).catch(err => console.error('[Notification Earning Error]:', err));
+      }
     }
   }
 
@@ -1546,6 +1714,8 @@ export class DeliveryPartnersService implements OnModuleInit {
       throw new NotFoundException(`Delivery partner profile not found.`);
     }
 
+    const sessionRepo = this.dataSource.getRepository(DeliveryPartnerOnlineSession);
+
     if (isOnline) {
       const canonicalStatus = partner.accountStatus || (partner.isVerified ? DeliveryPartnerAccountStatus.APPROVED : DeliveryPartnerAccountStatus.PENDING);
       if (
@@ -1555,6 +1725,16 @@ export class DeliveryPartnersService implements OnModuleInit {
       ) {
         throw new ForbiddenException('Delivery partner account is not approved or verified.');
       }
+      
+      // Start session if transitioning from offline to online
+      if (!partner.isOnline) {
+        const newSession = sessionRepo.create({
+          deliveryPartnerId: partner.id,
+          startTime: new Date(),
+        });
+        await sessionRepo.save(newSession);
+      }
+
       partner.isOnline = true;
       partner.isAvailable = true;
       
@@ -1569,10 +1749,19 @@ export class DeliveryPartnersService implements OnModuleInit {
           deliveryPartnerId: partner.id,
           status: DeliveryAssignmentStatus.ACCEPTED,
           isActive: true
-        }
+        },
+        relations: ['order']
       });
       if (activeAccepted) {
-        throw new ConflictException('Complete or resolve the active delivery before going offline.');
+        const order = activeAccepted.order;
+        if (order && (order.orderStatus === 'cancelled' || order.orderStatus === 'delivered' || order.orderStatus === 'rejected')) {
+          // Stale assignment! Deactivate it.
+          activeAccepted.isActive = false;
+          activeAccepted.unassignedAt = new Date();
+          await this.assignmentRepository.save(activeAccepted);
+        } else {
+          throw new ConflictException('Complete or resolve the active delivery before going offline.');
+        }
       }
 
       // 2. Check if they have any OFFERED assignment
@@ -1593,6 +1782,18 @@ export class DeliveryPartnersService implements OnModuleInit {
         this.triggerDispatchForOrder(assignment.orderId).catch(err => {
           console.error(`[Dispatch Requeue Error] Failed to re-dispatch order ${assignment.orderId}:`, err);
         });
+      }
+
+      // Close open sessions if transitioning from online to offline
+      if (partner.isOnline) {
+        const openSessions = await sessionRepo.find({
+          where: { deliveryPartnerId: partner.id, endTime: IsNull() }
+        });
+        const nowTime = new Date();
+        for (const sess of openSessions) {
+          sess.endTime = nowTime;
+          await sessionRepo.save(sess);
+        }
       }
 
       partner.isOnline = false;
@@ -1648,6 +1849,15 @@ export class DeliveryPartnersService implements OnModuleInit {
         activeOffer.isActive = false;
         activeOffer.unassignedAt = new Date();
         await this.assignmentRepository.save(activeOffer);
+
+        await this.notificationsService.createPartnerNotification(
+          activeOffer.deliveryPartnerId,
+          'Offer Expired',
+          `The offer for Order #${activeOffer.orderId} has expired.`,
+          'assignment_expired',
+          activeOffer.orderId,
+          activeOffer.id
+        ).catch(err => console.error('[Notification Expired Error]:', err));
         
         // Restore partner availability if still online
         const p = await this.partnerRepository.findOne({ where: { id: activeOffer.deliveryPartnerId } });
@@ -1809,6 +2019,16 @@ export class DeliveryPartnersService implements OnModuleInit {
       assignment.isActive = false;
       assignment.unassignedAt = new Date();
       await this.assignmentRepository.save(assignment);
+
+      const orderNo = assignment.order ? (assignment.order.orderNumber || assignment.order.id) : assignment.orderId;
+      await this.notificationsService.createPartnerNotification(
+        partner.id,
+        'Offer Expired',
+        `The offer for Order #${orderNo} has expired.`,
+        'assignment_expired',
+        assignment.orderId,
+        assignment.id
+      ).catch(err => console.error('[Notification Expired Error]:', err));
       
       partner.isAvailable = true;
       await this.partnerRepository.save(partner);
@@ -1832,6 +2052,7 @@ export class DeliveryPartnersService implements OnModuleInit {
         order: {
           id: order.id,
           orderNumber: order.orderNumber,
+          orderStatus: order.orderStatus,
           restaurantName: order.hotel?.name || 'QuickBite Kitchen',
           pickupAddress: order.hotel?.address || 'Near Fort Road, Kannur',
           deliveryAddress: `${order.deliveryAddressLine1}${order.deliveryAddressLine2 ? ', ' + order.deliveryAddressLine2 : ''}`,
@@ -1845,15 +2066,13 @@ export class DeliveryPartnersService implements OnModuleInit {
         }
       }
     };
-  }
-
-  async acceptAssignment(userId: number, assignmentId: number): Promise<any> {
+  }  async acceptAssignment(userId: number, assignmentId: number): Promise<any> {
     const partner = await this.partnerRepository.findOne({ where: { userId } });
     if (!partner) {
       throw new NotFoundException('Delivery partner not found.');
     }
 
-    return await this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const assignment = await manager.findOne(DeliveryAssignment, {
         where: { id: assignmentId, deliveryPartnerId: partner.id },
         lock: { mode: 'pessimistic_write' }
@@ -1928,8 +2147,23 @@ export class DeliveryPartnersService implements OnModuleInit {
       return {
         message: 'Assignment accepted successfully',
         assignment,
+        order,
       };
     });
+
+    await this.notificationsService.createPartnerNotification(
+      partner.id,
+      'Delivery Request Accepted',
+      `You have accepted the delivery for Order #${result.order.orderNumber || result.order.id}. Please proceed to the restaurant.`,
+      'assignment_accepted',
+      result.order.id,
+      result.assignment.id
+    ).catch(err => console.error('[Notification Accept Error]:', err));
+
+    return {
+      message: result.message,
+      assignment: result.assignment,
+    };
   }
 
   async declineAssignment(userId: number, assignmentId: number, declineReason?: string): Promise<any> {
@@ -2012,6 +2246,7 @@ export class DeliveryPartnersService implements OnModuleInit {
         order: {
           id: order.id,
           orderNumber: order.orderNumber,
+          orderStatus: order.orderStatus,
           restaurantName: order.hotel?.name || 'QuickBite Kitchen',
           pickupAddress: order.hotel?.address || 'Near Fort Road, Kannur',
           deliveryAddress: `${order.deliveryAddressLine1}${order.deliveryAddressLine2 ? ', ' + order.deliveryAddressLine2 : ''}`,
