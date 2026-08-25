@@ -154,6 +154,15 @@ export class DeliveryPartnersController {
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/heartbeat')
+  registerHeartbeat(@Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.registerHeartbeat(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
   @Get('delivery-partners/me/incoming-assignment')
   getIncomingAssignment(@Request() req) {
     if (req.user?.role !== UserRole.DELIVERY_PARTNER) {

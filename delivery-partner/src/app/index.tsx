@@ -668,20 +668,23 @@ export default function AppIndex() {
       const order = activeAssignment.order;
       const earningsAmount = result.financials?.totalEarned !== undefined ? result.financials.totalEarned : 65;
       
-      // Store justCompletedOrder details for rendering on success screen
+      // 1. Store authoritative completion response and enter success screen state immediately
+      if (order && order.items && result) {
+        if (!result.order) {
+          result.order = {};
+        }
+        result.order.items = order.items;
+      }
       setJustCompletedOrder(result);
+      setViewingActiveOrder(false);
+      changeDeliveryState('delivery-completed');
 
-      // Post-completion mobile cleanup in deterministic order:
-      // 1. stop active-delivery polling/timers (none running)
-      // 2. clear incoming assignment
+      // 2. Perform active delivery cleanup
       setIncomingAssignment(null);
-      // 3. clear activeAssignment
       setActiveAssignment(null);
-      // 4. reset delivery lifecycle step/state (will change to 'delivery-completed')
-      // 5. clear COD local confirmation state
       setIsCashCollected(false);
-      // 6. clear loading/mutation flags (in finally)
-      // 7. refresh authenticated /me state
+
+      // 3. Perform background refreshes
       try {
         const profile = await api.getMe();
         setCurrentUser(profile.partner.user);
@@ -692,12 +695,11 @@ export default function AppIndex() {
       } catch (meErr) {
         console.error('Failed to refresh profile:', meErr);
       }
-      // 8. refresh dashboard stats
+      
       await fetchDashboardStats();
-      // 9. refresh completed orders
       await fetchCompletedOrders();
       
-      // Update local state to show completed order with exact backend earnings
+      // 4. Update local state to show completed order with exact backend earnings
       const newCompletedOrder = {
         orderId: `Order ${order.orderNumber || ''}`,
         date: new Date().toLocaleString(),
@@ -711,8 +713,6 @@ export default function AppIndex() {
         earnings: earningsAmount
       };
       setCompletedOrders(prev => [newCompletedOrder, ...prev]);
-      
-      changeDeliveryState('delivery-completed');
     } catch (err: any) {
       alert(err.message || 'Failed to complete delivery');
     } finally {
@@ -930,6 +930,40 @@ export default function AppIndex() {
     };
   }, [isOnline, isAuthenticated, dashboardStats.onlineSeconds, fetchDashboardStats]);
 
+  // Heartbeat sender (authenticated & online)
+  useEffect(() => {
+    let intervalId: any = null;
+
+    const sendHeartbeat = async () => {
+      try {
+        const response = await api.heartbeat();
+        // If the backend has marked the partner offline (due to stale heartbeat)
+        if (response && response.isOnline === false) {
+          console.log('[Heartbeat] Backend marked partner offline.');
+          setIsOnline(false);
+          setIsAvailable(false);
+          await fetchDashboardStats();
+        }
+      } catch (err) {
+        console.warn('[Heartbeat] Failed to send heartbeat:', err);
+      }
+    };
+
+    if (isOnline && isAuthenticated) {
+      // Send immediately on going online
+      sendHeartbeat();
+
+      // Set interval to send every 25 seconds
+      intervalId = setInterval(sendHeartbeat, 25000);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isOnline, isAuthenticated, fetchDashboardStats]);
+
   // Automatically sync active delivery state from backend when app state resumes, tab changes, or active order screen opens
   useEffect(() => {
     if (isAuthenticated) {
@@ -1022,8 +1056,16 @@ export default function AppIndex() {
         setCurrentUser(data.partner.user);
         setCurrentPartner(data.partner);
         setAccountStatus(data.partner.accountStatus);
-        setIsOnline(data.partner.isOnline);
-        setIsAvailable(data.partner.isAvailable);
+        
+        // If the backend marked the partner offline, but the app still thinks it's online
+        if (isOnline && !data.partner.isOnline) {
+          setIsOnline(false);
+          setIsAvailable(false);
+          await fetchDashboardStats();
+        } else {
+          setIsOnline(data.partner.isOnline);
+          setIsAvailable(data.partner.isAvailable);
+        }
       } catch (err) {
         const error = err as any;
         console.error('[Polling] Status refresh failed:', error.message);
@@ -1431,6 +1473,11 @@ export default function AppIndex() {
     // Only incoming offered requests take global precedence.
     if (deliveryState === 'incoming-request') {
       return renderHomeTab();
+    }
+
+    // Capture success completion screen with render priority before other tabs
+    if (deliveryState === 'delivery-completed' && justCompletedOrder) {
+      return renderDeliveryCompletedScreen();
     }
 
     switch (activeTab) {
@@ -2467,6 +2514,9 @@ export default function AppIndex() {
     const delivery = res.delivery || {};
 
     const orderNumber = orderData.orderNumber || 'QB-XXXXXXXX-XXXXXX';
+    const items = orderData.items || [];
+    const foodItemsText = items.map((item: any) => `${item.quantity}x ${item.foodName}`).join(', ');
+
     const totalEarned = financials.totalEarned !== undefined ? financials.totalEarned : 65;
     const deliveryFee = financials.earningComponents?.deliveryFee !== undefined 
       ? financials.earningComponents.deliveryFee 
@@ -2493,12 +2543,12 @@ export default function AppIndex() {
         >
           {/* Centered green check icon */}
           <View style={styles.completedSuccessCircle}>
-            <Ionicons name="checkmark" size={32} color="#10B981" />
+            <Ionicons name="checkmark" size={32} color="#FFFFFF" />
           </View>
 
           <Text style={styles.completedTitle}>DELIVERY{"\n"}COMPLETED</Text>
           <Text style={styles.completedSubtitle}>Great job! The order was delivered successfully.</Text>
-          <Text style={styles.completedOrderText}>#{orderNumber}</Text>
+          <Text style={styles.completedOrderText}>{foodItemsText || `#${orderNumber}`}</Text>
 
           {/* Earning Card */}
           <View style={styles.completedEarningCard}>
@@ -5727,7 +5777,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#D1FAE5', // Light green circular check background
+    backgroundColor: '#10B981', // Solid emerald green check background
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',

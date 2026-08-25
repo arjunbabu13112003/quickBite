@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
   OnModuleInit,
+  OnModuleDestroy,
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -38,7 +39,7 @@ import { decryptPin } from '../orders/orders.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
-export class DeliveryPartnersService implements OnModuleInit {
+export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(DeliveryPartner)
     private readonly partnerRepository: Repository<DeliveryPartner>,
@@ -55,8 +56,100 @@ export class DeliveryPartnersService implements OnModuleInit {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private heartbeatIntervalId: any;
+
   async onModuleInit() {
     await this.runLegacyStatusBackfill();
+    this.startHeartbeatMonitor();
+  }
+
+  onModuleDestroy() {
+    if (this.heartbeatIntervalId) {
+      clearInterval(this.heartbeatIntervalId);
+    }
+  }
+
+  private startHeartbeatMonitor() {
+    this.heartbeatIntervalId = setInterval(async () => {
+      try {
+        await this.checkStalePartners();
+      } catch (err) {
+        console.error('[Heartbeat Monitor Error]:', err);
+      }
+    }, 15000);
+  }
+
+  private async checkStalePartners() {
+    const staleTime = new Date(Date.now() - 75000); // 75 seconds ago
+    const onlinePartners = await this.partnerRepository.find({
+      where: { isOnline: true },
+    });
+
+    for (const partner of onlinePartners) {
+      const lastHeartbeat = partner.lastHeartbeatAt;
+      if (!lastHeartbeat || lastHeartbeat < staleTime) {
+        await this.processStalePartner(partner);
+      }
+    }
+  }
+
+  private async processStalePartner(partner: DeliveryPartner) {
+    console.log(`[Heartbeat Monitor] Partner ${partner.id} has gone stale. lastHeartbeatAt: ${partner.lastHeartbeatAt}`);
+
+    // 1. Cancel offered assignments and re-dispatch
+    const activeOffered = await this.assignmentRepository.find({
+      where: {
+        deliveryPartnerId: partner.id,
+        status: DeliveryAssignmentStatus.OFFERED,
+        isActive: true
+      }
+    });
+    for (const assignment of activeOffered) {
+      assignment.status = DeliveryAssignmentStatus.CANCELLED;
+      assignment.isActive = false;
+      assignment.unassignedAt = new Date();
+      await this.assignmentRepository.save(assignment);
+      this.triggerDispatchForOrder(assignment.orderId).catch(err => {
+        console.error(`[Heartbeat Monitor Dispatch Error] Failed to re-dispatch order ${assignment.orderId}:`, err);
+      });
+    }
+
+    // 2. Close open sessions
+    const sessionRepo = this.dataSource.getRepository(DeliveryPartnerOnlineSession);
+    const openSessions = await sessionRepo.find({
+      where: { deliveryPartnerId: partner.id, endTime: IsNull() }
+    });
+    const cutoffTime = partner.lastHeartbeatAt || new Date();
+    for (const sess of openSessions) {
+      sess.endTime = cutoffTime;
+      await sessionRepo.save(sess);
+    }
+
+    // 3. Mark offline
+    partner.isOnline = false;
+    partner.isAvailable = false;
+    await this.partnerRepository.save(partner);
+  }
+
+  async registerHeartbeat(userId: number): Promise<any> {
+    const partner = await this.partnerRepository.findOne({
+      where: { userId },
+    });
+
+    if (!partner) {
+      throw new NotFoundException('Delivery partner profile not found.');
+    }
+
+    if (partner.isOnline) {
+      partner.lastHeartbeatAt = new Date();
+      await this.partnerRepository.save(partner);
+    }
+
+    return {
+      isOnline: partner.isOnline,
+      isAvailable: partner.isAvailable,
+      accountStatus: partner.accountStatus || (partner.isVerified ? DeliveryPartnerAccountStatus.APPROVED : DeliveryPartnerAccountStatus.PENDING),
+    };
   }
 
   private async runLegacyStatusBackfill() {
@@ -793,6 +886,9 @@ export class DeliveryPartnersService implements OnModuleInit {
     profile.currentLatitude = latitude;
     profile.currentLongitude = longitude;
     profile.locationUpdatedAt = new Date();
+    if (profile.isOnline) {
+      profile.lastHeartbeatAt = new Date();
+    }
     await this.partnerRepository.save(profile);
     return { success: true };
   }
@@ -809,10 +905,9 @@ export class DeliveryPartnersService implements OnModuleInit {
     if (
       profile.accountStatus !== 'APPROVED' ||
       !profile.isVerified ||
-      !profile.isActive ||
-      !profile.isOnline
+      !profile.isActive
     ) {
-      throw new ForbiddenException('Delivery partner is not active, verified, or online');
+      throw new ForbiddenException('Delivery partner is not active or verified');
     }
 
     const assignment = await this.assignmentRepository.findOne({
@@ -847,6 +942,7 @@ export class DeliveryPartnersService implements OnModuleInit {
     profile.locationHeading = dto.heading !== undefined ? dto.heading : null;
     profile.locationSpeed = dto.speed !== undefined ? dto.speed : null;
     profile.locationUpdatedAt = new Date();
+    profile.lastHeartbeatAt = new Date();
 
     await this.partnerRepository.save(profile);
     return { success: true };
@@ -1904,6 +2000,7 @@ export class DeliveryPartnersService implements OnModuleInit {
 
       partner.isOnline = true;
       partner.isAvailable = true;
+      partner.lastHeartbeatAt = new Date();
       
       // Trigger a safe dispatch attempt for waiting matching orders
       this.triggerDispatchForWaitingOrders(partner).catch(err => {

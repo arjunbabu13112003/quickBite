@@ -3,7 +3,17 @@ import { Platform } from 'react-native';
 
 const TOKEN_KEY = 'deliveryPartnerAccessToken';
 
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.220.92:5000';
+const getApiBaseUrl = () => {
+  let url = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.220.92:5000';
+  if (Platform.OS === 'android') {
+    // If running on an Android emulator/device and URL points to localhost or 127.0.0.1,
+    // redirect to 10.0.2.2 (which is the Android emulator's loopback to the host machine).
+    url = url.replace(/(localhost|127\.0\.0\.1)/g, '10.0.2.2');
+  }
+  return url;
+};
+
+export const API_BASE_URL = getApiBaseUrl();
 
 export const setAuthToken = async (token: string | null) => {
   if (token) {
@@ -230,6 +240,31 @@ export const api = {
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Failed to update online status.');
+    }
+
+    return await res.json();
+  },
+
+  heartbeat: async () => {
+    const token = await getAuthToken();
+    if (!token) throw new Error('No token found');
+
+    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (res.status === 401) {
+      await setAuthToken(null);
+      throw new Error('Unauthorized');
+    }
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Heartbeat failed');
     }
 
     return await res.json();

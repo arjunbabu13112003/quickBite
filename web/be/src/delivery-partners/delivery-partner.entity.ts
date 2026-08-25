@@ -76,6 +76,8 @@ export class DeliveryPartner {
 
   @Column({ type: 'timestamp', nullable: true })
   locationUpdatedAt?: Date;
+  @Column({ type: 'timestamptz', nullable: true })
+  lastHeartbeatAt?: Date;
 
   @Column({ type: 'decimal', precision: 10, scale: 4, nullable: true })
   locationAccuracy?: number;
