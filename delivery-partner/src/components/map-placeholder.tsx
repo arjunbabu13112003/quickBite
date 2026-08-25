@@ -1,44 +1,385 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { Map as MapView, Camera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
+import { routingService } from '../services/routingService';
 
 interface MapPlaceholderProps {
   eta: string;
   etaPosition?: 'top-left' | 'bottom-right';
   destinationName?: string;
+  order?: any;
+  riderCoords?: { latitude: number; longitude: number; heading?: number | null } | null;
+  deliveryState?: string;
+}
+
+// Helper: Haversine distance in meters
+function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371e3; // meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
+// Helper: check if rider is off-route
+function isRiderOffRoute(riderLat: number, riderLng: number, routeCoordinates: [number, number][]): boolean {
+  if (!routeCoordinates || routeCoordinates.length === 0) return false;
+  
+  let minDistance = Infinity;
+  for (const coord of routeCoordinates) {
+    const [lng, lat] = coord;
+    const dist = getDistance(riderLat, riderLng, lat, lng);
+    if (dist < minDistance) {
+      minDistance = dist;
+    }
+  }
+  
+  return minDistance > 50; // deviating > 50 meters
 }
 
 export default function MapPlaceholder({
   eta = '8 mins',
   etaPosition = 'top-left',
-  destinationName
+  destinationName,
+  order,
+  riderCoords,
+  deliveryState
 }: MapPlaceholderProps) {
+  // Determine lifecycle stage & coordinates
+  const isPickupStage = useMemo(() => {
+    // If backend status is available, use it as the authoritative source
+    if (order && order.orderStatus) {
+      const status = order.orderStatus.toLowerCase();
+      if (status === 'accepted' || status === 'ready_for_pickup') {
+        return true;
+      }
+      if (status === 'picked_up' || status === 'out_for_delivery') {
+        return false;
+      }
+    }
+
+    // Fallback to deliveryState client representation
+    return (
+      deliveryState === 'active-restaurant' ||
+      deliveryState === 'active-pickup'
+    );
+  }, [order?.orderStatus, deliveryState]);
+
+  const destLat = useMemo(() => {
+    if (!order) return null;
+    return isPickupStage ? order.restaurantLatitude : order.deliveryLatitude;
+  }, [order, isPickupStage]);
+
+  const destLng = useMemo(() => {
+    if (!order) return null;
+    return isPickupStage ? order.restaurantLongitude : order.deliveryLongitude;
+  }, [order, isPickupStage]);
+
+  const destType = isPickupStage ? 'pickup' : 'dropoff';
+
+  const hasValidRiderCoords = !!(riderCoords && riderCoords.latitude && riderCoords.longitude);
+  const hasValidDestCoords = !!(destLat && destLng && destLat !== 0 && destLng !== 0);
+  const shouldRenderMap = hasValidRiderCoords && hasValidDestCoords;
+
+  // Routing states
+  const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
+  const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+  const [loadingRoute, setLoadingRoute] = useState<boolean>(false);
+  const [routingError, setRoutingError] = useState<string | null>(null);
+
+  // Camera tracking states
+  const [isCameraFollowing, setIsCameraFollowing] = useState<boolean>(true);
+  const cameraRef = useRef<any>(null);
+
+  const lastFetchCoordsRef = useRef<{ riderLat: number; riderLng: number; destLat: number; destLng: number } | null>(null);
+  const lastFetchTimeRef = useRef<number>(0);
+  const activeRequestKeyRef = useRef<string>('');
+  const [hasFitInitialBounds, setHasFitInitialBounds] = useState<boolean>(false);
+
+  // Reset initial zoom fit when destination changes
+  useEffect(() => {
+    setHasFitInitialBounds(false);
+    lastFetchCoordsRef.current = null;
+    lastFetchTimeRef.current = 0;
+  }, [destLat, destLng]);
+
+  // Route calculation hook
+  useEffect(() => {
+    if (!shouldRenderMap) {
+      setRouteCoordinates([]);
+      setDistanceMeters(null);
+      setDurationSeconds(null);
+      setRoutingError(null);
+      return;
+    }
+
+    const riderLat = riderCoords!.latitude;
+    const riderLng = riderCoords!.longitude;
+    const requestKey = `${riderLat},${riderLng}->${destLat},${destLng}`;
+
+    const distMoved = lastFetchCoordsRef.current
+      ? getDistance(riderLat, riderLng, lastFetchCoordsRef.current.riderLat, lastFetchCoordsRef.current.riderLng)
+      : Infinity;
+
+    const isDestChanged = lastFetchCoordsRef.current
+      ? (lastFetchCoordsRef.current.destLat !== destLat || lastFetchCoordsRef.current.destLng !== destLng)
+      : true;
+
+    const timeSinceLastFetch = Date.now() - lastFetchTimeRef.current;
+    const isRiderOff = routeCoordinates.length > 0 && isRiderOffRoute(riderLat, riderLng, routeCoordinates);
+
+    const shouldFetch =
+      isDestChanged ||
+      distMoved > 35 ||
+      isRiderOff ||
+      (timeSinceLastFetch > 30000);
+
+    const isThrottled = timeSinceLastFetch < 15000 && !isDestChanged && !isRiderOff;
+
+    if (!shouldFetch || isThrottled) {
+      return;
+    }
+
+    let active = true;
+    activeRequestKeyRef.current = requestKey;
+
+    const fetchRoute = async () => {
+      setLoadingRoute(true);
+      try {
+        const res = await routingService.getRoute({
+          originLatitude: riderLat,
+          originLongitude: riderLng,
+          destinationLatitude: destLat!,
+          destinationLongitude: destLng!,
+        });
+
+        if (!active || activeRequestKeyRef.current !== requestKey) {
+          return;
+        }
+
+        setRouteCoordinates(res.coordinates);
+        setDistanceMeters(res.distanceMeters);
+        setDurationSeconds(res.durationSeconds);
+        setRoutingError(null);
+
+        lastFetchCoordsRef.current = { riderLat, riderLng, destLat: destLat!, destLng: destLng! };
+        lastFetchTimeRef.current = Date.now();
+      } catch (err: any) {
+        console.warn('[Routing] Failed to fetch route:', err.message || err);
+        if (active && activeRequestKeyRef.current === requestKey) {
+          setRoutingError('Route temporarily unavailable');
+        }
+      } finally {
+        if (active && activeRequestKeyRef.current === requestKey) {
+          setLoadingRoute(false);
+        }
+      }
+    };
+
+    fetchRoute();
+
+    return () => {
+      active = false;
+    };
+  }, [shouldRenderMap, riderCoords?.latitude, riderCoords?.longitude, destLat, destLng]);
+
+  // Route bounds fit helper
+  const routeBounds = useMemo(() => {
+    if (!routeCoordinates || routeCoordinates.length === 0) return null;
+    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const [lng, lat] of routeCoordinates) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    return {
+      ne: [maxLng, maxLat],
+      sw: [minLng, minLat],
+    };
+  }, [routeCoordinates]);
+
+  // Camera follow / fit updates
+  useEffect(() => {
+    if (!shouldRenderMap || !cameraRef.current) return;
+
+    if (!hasFitInitialBounds && routeBounds) {
+      cameraRef.current.setCamera({
+        bounds: {
+          ne: routeBounds.ne,
+          sw: routeBounds.sw,
+          paddingLeft: 40,
+          paddingRight: 40,
+          paddingTop: 40,
+          paddingBottom: 40,
+        },
+        duration: 1500,
+      });
+      setHasFitInitialBounds(true);
+    } else if (isCameraFollowing) {
+      cameraRef.current.setCamera({
+        centerCoordinate: [riderCoords!.longitude, riderCoords!.latitude],
+        zoomLevel: 15.5,
+        heading: riderCoords!.heading || 0,
+        pitch: 45,
+        duration: 1000,
+      });
+    }
+  }, [riderCoords?.latitude, riderCoords?.longitude, isCameraFollowing, routeBounds, hasFitInitialBounds]);
+
+  const distanceText = useMemo(() => {
+    if (distanceMeters === null) return '—';
+    const km = distanceMeters / 1000;
+    return `${km.toFixed(1)} km`;
+  }, [distanceMeters]);
+
+  const durationText = useMemo(() => {
+    if (durationSeconds === null) return '—';
+    const mins = Math.round(durationSeconds / 60);
+    return `~${mins} min`;
+  }, [durationSeconds]);
+
+  // Render MapLibre Live Navigation Map
+  if (shouldRenderMap) {
+    return (
+      <View style={styles.container}>
+        <MapView
+          style={styles.map}
+          mapStyle="https://tiles.openfreemap.org/styles/liberty"
+          logo={false}
+          attribution={false}
+          onRegionWillChange={(event: any) => {
+            if (event.properties?.isUserGesture) {
+              setIsCameraFollowing(false);
+            }
+          }}
+        >
+          <Camera ref={cameraRef} />
+
+          {/* Render Route Polyline */}
+          {routeCoordinates.length > 0 && (
+            <GeoJSONSource
+              id="routeSource"
+              data={{
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: routeCoordinates,
+                },
+                properties: {},
+              }}
+            >
+              <Layer
+                id="routeLayer"
+                type="line"
+                style={{
+                  lineColor: '#F97316',
+                  lineWidth: 5,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+            </GeoJSONSource>
+          )}
+
+          {/* Destination Marker */}
+          <Marker
+            id="destinationMarker"
+            lngLat={[destLng!, destLat!]}
+          >
+            <View style={styles.liveDestPin}>
+              {destType === 'pickup' ? (
+                <Ionicons name="business" size={14} color="#FFFFFF" />
+              ) : (
+                <Ionicons name="home" size={14} color="#FFFFFF" />
+              )}
+            </View>
+          </Marker>
+
+          {/* Rider Marker */}
+          <Marker
+            id="riderMarker"
+            lngLat={[riderCoords!.longitude, riderCoords!.latitude]}
+          >
+            <View style={[
+              styles.liveRiderPin,
+              riderCoords!.heading ? { transform: [{ rotate: `${riderCoords!.heading}deg` }] } : {}
+            ]}>
+              <FontAwesome5 name="motorcycle" size={13} color="#FFFFFF" />
+            </View>
+          </Marker>
+        </MapView>
+
+        {/* Floating Recenter Control */}
+        {!isCameraFollowing && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setIsCameraFollowing(true)}
+            style={styles.recenterBtn}
+          >
+            <Ionicons name="navigate" size={12} color="#FFFFFF" />
+            <Text style={styles.recenterBtnText}>Recenter</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* HUD Info Badge */}
+        <View style={[styles.etaBadge, styles.etaTopLeft]}>
+          <Text style={styles.etaTitle}>
+            {destType === 'pickup' ? 'TO PICKUP' : 'TO CUSTOMER'}
+          </Text>
+          <Text style={styles.etaValue}>{distanceText}</Text>
+          <Text style={styles.etaDuration}>{durationText}</Text>
+        </View>
+
+        {/* Status Recalculation overlay */}
+        {(loadingRoute || routingError) && (
+          <View style={styles.routeStatusBadge}>
+            {loadingRoute ? (
+              <>
+                <ActivityIndicator size="small" color="#F97316" style={{ marginRight: 6 }} />
+                <Text style={styles.routeStatusText}>Recalculating route…</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="warning" size={12} color="#EF4444" style={{ marginRight: 6 }} />
+                <Text style={[styles.routeStatusText, { color: '#EF4444' }]}>{routingError}</Text>
+              </>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  // Render original static styled layout fallback if coordinates are missing/loading
   return (
     <View style={styles.container}>
-      {/* 1. Styled Map Background */}
-      {/* Soft blue water background on left, soft beige land on right */}
       <View style={styles.seaBg} />
       <View style={styles.landBg} />
 
-      {/* Styled Grid/Streets */}
       <View style={[styles.street, styles.streetH1]} />
       <View style={[styles.street, styles.streetH2]} />
       <View style={[styles.street, styles.streetV1]} />
       <View style={[styles.street, styles.streetV2]} />
       <View style={[styles.street, styles.streetDiag]} />
 
-      {/* 2. Route Path (dashed or solid colored line representing the path) */}
       <View style={styles.routePath} />
       <View style={styles.routePathH} />
 
-      {/* 3. Map Labels/Names */}
       <Text style={[styles.mapLabel, styles.seaLabel]}>Arabian Sea</Text>
       <Text style={[styles.mapLabel, styles.fortKochiLabel]}>Fort Kochi</Text>
       <Text style={[styles.mapLabel, styles.mattancherryLabel]}>Mattancherry</Text>
       <Text style={[styles.mapLabel, styles.eranakulamLabel]}>Ernakulam</Text>
 
-      {/* 4. Map Markers (Restaurant Pin & Partner Bike Pin) */}
-      {/* Partner/Rider Starting point Marker */}
       <View style={[styles.marker, styles.riderMarker]}>
         <View style={styles.riderPin}>
           <FontAwesome5 name="motorcycle" size={12} color="#FFFFFF" />
@@ -46,15 +387,15 @@ export default function MapPlaceholder({
         <View style={styles.markerPulse} />
       </View>
 
-      {/* Restaurant Destination point Marker */}
       <View style={[styles.marker, styles.destMarker]}>
         <View style={styles.destPin}>
           <Ionicons name="location" size={16} color="#FF7A00" />
         </View>
-        <Text style={styles.destLabel}>{destinationName || 'Restaurant'}</Text>
+        <Text style={styles.destLabel}>
+          {isPickupStage ? 'Pickup route unavailable' : 'Delivery route unavailable'}
+        </Text>
       </View>
 
-      {/* 5. Floating Estimated Time Badge */}
       {etaPosition === 'top-left' ? (
         <View style={[styles.etaBadge, styles.etaTopLeft]}>
           <Text style={styles.etaTitle}>Est. Time</Text>
@@ -74,8 +415,8 @@ export default function MapPlaceholder({
 
 const styles = StyleSheet.create({
   container: {
-    height: 180,
-    backgroundColor: '#E4F1FE', // Fallback water color
+    height: 200,
+    backgroundColor: '#E4F1FE',
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
@@ -84,13 +425,88 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     position: 'relative',
   },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  liveRiderPin: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#EA580C', // Orange theme
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  liveDestPin: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#3B82F6', // Blue theme for destination
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  recenterBtn: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: '#EA580C',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+  },
+  recenterBtnText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+    marginLeft: 4,
+    textTransform: 'uppercase',
+  },
+  routeStatusBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  routeStatusText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#374151',
+  },
   seaBg: {
     position: 'absolute',
     left: 0,
     top: 0,
     bottom: 0,
     width: '35%',
-    backgroundColor: '#D6EBF8', // Soft water blue
+    backgroundColor: '#D6EBF8',
   },
   landBg: {
     position: 'absolute',
@@ -98,7 +514,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: '65%',
-    backgroundColor: '#F3EFEB', // Soft warm cream land
+    backgroundColor: '#F3EFEB',
   },
   street: {
     position: 'absolute',
@@ -142,7 +558,7 @@ const styles = StyleSheet.create({
     top: 90,
     width: 60,
     height: 4,
-    backgroundColor: '#F97316', // Orange route line
+    backgroundColor: '#F97316',
     transform: [{ rotate: '-30deg' }],
     zIndex: 1,
   },
@@ -152,7 +568,7 @@ const styles = StyleSheet.create({
     top: 120,
     width: 80,
     height: 4,
-    backgroundColor: '#F97316', // Orange route line continues
+    backgroundColor: '#F97316',
     zIndex: 1,
   },
   mapLabel: {
@@ -254,7 +670,7 @@ const styles = StyleSheet.create({
     bottom: 12,
   },
   etaTitle: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '800',
     color: '#8A7A6E',
     textTransform: 'uppercase',
@@ -264,6 +680,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     color: '#38220F',
+  },
+  etaDuration: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#10B981',
+    marginTop: 1,
   },
   etaBadgeRow: {
     flexDirection: 'row',

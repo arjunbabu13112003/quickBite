@@ -92,27 +92,11 @@ import {
   DRIVER_PROFILES
 } from './src/data/mockData';
 
-import Constants from 'expo-constants';
+import { getApiBaseUrl, resolveApiUrl } from './src/services/apiResolver';
 
 // Helper to dynamically extract current PC IP address from Expo Metro
 const getExpoHostIp = () => {
-  try {
-    const scriptURL = NativeModules?.SourceCode?.scriptURL;
-    if (scriptURL) {
-      const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
-      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
-        return match[1];
-      }
-    }
-    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
-    if (hostUri) {
-      const ip = hostUri.split(':')[0];
-      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') return ip;
-    }
-  } catch (e) {
-    console.warn('Expo hostUri detection:', e);
-  }
-  return '192.168.220.92';
+  return getApiBaseUrl().replace(/^https?:\/\//, '').split(':')[0];
 };
 
 const { width, height } = Dimensions.get('window');
@@ -289,7 +273,7 @@ const getBasePrice = (item, spiceLevel) => {
 };
 
 const resolveProductImage = (imgStr, activeBackend) => {
-  const host = activeBackend || 'http://192.168.220.92:5000';
+  const host = activeBackend || getApiBaseUrl();
   if (!imgStr) return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
   
   let resolved = imgStr;
@@ -395,7 +379,16 @@ const FloatingCartBar = ({
 };
 
 export default function App() {
-  const bottomInset = initialWindowMetrics?.insets?.bottom || (Platform.OS === 'android' ? 24 : 34);
+  return (
+    <SafeAreaProvider>
+      <MainApp />
+    </SafeAreaProvider>
+  );
+}
+
+function MainApp() {
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets.bottom || initialWindowMetrics?.insets?.bottom || 0;
 
   // Navigation & Tab state: 'home' | 'wishlist' | 'orders' | 'profile' | 'admin'
   const [activeTab, _setActiveTab] = useState('home');
@@ -438,7 +431,6 @@ export default function App() {
   };
 
   // Backend API & Authentication State
-  const API_BASE_URL = 'http://192.168.220.92:5000'; // NestJS + PostgreSQL Backend
   const [currentUser, setCurrentUser] = useState(null);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
@@ -494,29 +486,8 @@ export default function App() {
 
   const resolveImage = (imgStr) => resolveProductImage(imgStr, resolvedBackendUrl);
 
-  // Helper to dynamically detect active backend endpoint
-  const getActiveBackend = async () => {
-    if (cachedBackendUrl) return cachedBackendUrl;
-    const endpoints = [
-      `http://${getExpoHostIp()}:5000`,
-      'http://127.0.0.1:5000',
-      'http://localhost:5000',
-      'http://10.0.2.2:5000'
-    ];
-    for (const url of endpoints) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1200);
-        const res = await fetch(`${url}/hotels`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          cachedBackendUrl = url;
-          return url;
-        }
-      } catch (e) {}
-    }
-    return 'http://127.0.0.1:5000'; // fallback
-  };
+  // Helper to get backend endpoint — delegates to dynamic resolver (no stale cache)
+  const getActiveBackend = async () => getApiBaseUrl();
 
   // Dynamic restaurant category classifier based on food items / categories sold
   const mapBackendRestaurantCategory = (dbCategories, dbFoods) => {
@@ -2085,13 +2056,7 @@ export default function App() {
     }
 
     // Try to call backend PATCH /users/profile
-    const detectedIp = getExpoHostIp();
-    const backendEndpoints = [
-      `http://${detectedIp}:5000`,
-      'http://192.168.220.92:5000',
-      'http://localhost:5000',
-      'http://10.0.2.2:5000'
-    ];
+    const backendEndpoints = [getApiBaseUrl()];
 
     const mobileClean = editPhone.replace(/\D/g, '').slice(-10);
     const body = {
@@ -2478,14 +2443,7 @@ export default function App() {
 
     setIsLoadingAuth(true);
 
-    const detectedIp = getExpoHostIp();
-
-    const backendEndpoints = [
-      `http://${detectedIp}:5000`,
-      'http://192.168.220.92:5000',
-      'http://localhost:5000',
-      'http://10.0.2.2:5000'
-    ];
+    const backendEndpoints = [getApiBaseUrl()];
 
     if (authMode === 'register') {
       if (!name.trim()) {
@@ -4646,7 +4604,7 @@ export default function App() {
                         <AlertTriangle size={24} color="#EF4444" />
                         <Text style={[styles.errorTitle, { color: darkMode ? '#FCA5A5' : '#991B1B' }]}>Connection Error</Text>
                         <Text style={[styles.errorText, { color: darkMode ? '#F87171' : '#B91C1C' }]}>
-                          Unable to connect to the backend server. Make sure the NestJS server is running on port 5000 and the port is reversed.
+                          Unable to connect to QuickBite server. Tap Retry.
                         </Text>
                         <TouchableOpacity
                           style={[styles.retryBtn, { backgroundColor: '#EF4444' }]}
@@ -5087,10 +5045,10 @@ export default function App() {
           </View>
 
           {/* Sticky Swiggy Green Floating Cart Bar (Appears on tabs where items are added) */}
-          {(activeTab === 'home' || activeTab === 'wishlist') && !selectedRestaurant && activeCampaignId === null && renderFloatingCartBar(66, false)}
+          {(activeTab === 'home' || activeTab === 'wishlist') && !selectedRestaurant && activeCampaignId === null && renderFloatingCartBar(66 + bottomInset, false)}
 
           {/* FEATURE 4: Bottom Navigation Bar with Explore Click Reset */}
-          <Animated.View style={[styles.bottomNav, { backgroundColor: D.navBg, borderTopColor: D.navBorder, transform: [{ translateY: bottomNavTranslateY }] }]}>
+          <Animated.View style={[styles.bottomNav, { backgroundColor: D.navBg, borderTopColor: D.navBorder, transform: [{ translateY: bottomNavTranslateY }], height: 60 + bottomInset, paddingBottom: bottomInset }]}>
             <TouchableOpacity style={styles.navBtn} onPress={() => { if (bottomControlsVisibleRef.current) handleHeavyAction(handleExploreClick); }}>
               <Home size={20} color={activeTab === 'home' ? '#FF5252' : (darkMode ? '#64748B' : '#9CA3AF')} />
               <Text style={[styles.navLabel, { color: darkMode ? '#64748B' : '#9CA3AF' }, activeTab === 'home' && styles.navLabelActive]}>Explore</Text>
@@ -6943,7 +6901,8 @@ export default function App() {
                       borderTopWidth: 1,
                       borderTopColor: D.navBorder,
                       paddingHorizontal: 16,
-                      paddingVertical: 12,
+                      paddingTop: 12,
+                      paddingBottom: 12 + bottomInset,
                       flexDirection: 'row',
                       alignItems: 'center',
                       justifyContent: 'space-between',

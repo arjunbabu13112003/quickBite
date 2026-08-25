@@ -1,3 +1,212 @@
+# Fix Delivery Partner Earnings, Chart & Orders Badge
+
+Fix the remaining Delivery Partner dashboard data issues end-to-end using the real backend/database.
+
+## Current Bugs
+
+1. A delivery completed yesterday is not reflected correctly in Earnings.
+2. Today / This Week earnings are showing incorrect or static values such as ₹50.
+3. The earnings chart is using dummy/hardcoded data.
+4. The bottom `Orders` tab always shows a notification badge like `2`, even when that is not the real number of orders.
+
+Do NOT patch the UI with hardcoded numbers. Trace the real database records and implement proper backend-driven values.
+
+---
+
+## 1. Fix Earnings Data
+
+Inspect how Delivery Partner earnings are currently stored/calculated.
+
+Do not confuse:
+
+* Customer order total
+* COD cash collected
+* Rider/delivery partner earning
+
+Use the project's actual delivery-partner earning/delivery-fee/payout logic.
+
+For every successfully completed/delivered order, make sure the corresponding rider earning is recorded or derivable exactly once.
+
+Verify that a completed delivery from yesterday is included in:
+
+* Yesterday's historical earnings
+* This Week total, if yesterday belongs to the current week
+* Relevant chart data
+* Completed delivery count
+
+### Required aggregates
+
+Fetch and display real backend values for:
+
+* Today's Earnings
+* Today's completed deliveries
+* This Week earnings
+* This Week completed deliveries
+* Any other existing earning cards already present in the UI
+
+Use server/database timestamps consistently and handle the app's local date boundaries correctly.
+
+Do not count:
+
+* cancelled orders
+* rejected orders
+* incomplete deliveries
+* the same delivery twice
+
+---
+
+## 2. Fix Completed Delivery → Earnings Recording
+
+Trace the complete delivery flow.
+
+When an order becomes `delivered`:
+
+* Verify which delivery partner completed it.
+* Ensure earning is generated/recorded once.
+* If an earnings/payment record already exists, do not duplicate it.
+* If earnings are derived directly from completed assignments rather than a separate table, keep that architecture and calculate correctly.
+
+Existing historical delivered orders should also appear correctly. Do not only fix newly delivered orders.
+
+---
+
+## 3. Replace Dummy Chart With Real Data
+
+Remove every hardcoded/sample/dummy chart value.
+
+The Earnings chart must come from real completed-delivery earnings in the backend.
+
+For the existing chart range such as `This Week`:
+
+* Return one data point for each day in the current week.
+* Each day's value must be the sum of that day's actual rider earnings.
+* Days with no completed delivery should return `0`.
+* Use the actual completed/delivered timestamp to place the earning on the correct day.
+
+Example concept only:
+
+Monday → actual DB earnings
+Tuesday → actual DB earnings
+Wednesday → 0 if none
+etc.
+
+Do NOT use example values.
+
+If the UI allows another range such as week/month, make those ranges backend-driven as well.
+
+---
+
+## 4. Make Dashboard Auto Refresh
+
+After:
+
+* completing a delivery
+* returning to Home
+* opening Earnings
+* switching tabs
+* app returning from background
+* app restart
+
+refresh the latest earnings summary and chart from the backend.
+
+A completed delivery should become visible without reinstalling or rebuilding the app.
+
+---
+
+## 5. Fix Orders Bottom-Tab Badge
+
+The `Orders` tab currently shows a static badge such as `2`.
+
+Find and remove any hardcoded badge count.
+
+The badge must be derived from real backend data.
+
+Determine the intended meaning from the existing app flow. Prefer counting genuinely actionable/new available delivery requests assigned/offered to this partner.
+
+Rules:
+
+* If real pending/actionable order count = 0 → hide the badge completely.
+* If count = 1 → show `1`.
+* If count = 2 → show `2`.
+* Update automatically when an order arrives, is accepted, rejected, expires, cancelled, or completed.
+* Do not include completed orders in the notification badge.
+* Do not keep an old cached count after opening Orders or after the underlying orders disappear.
+
+If the application already has an endpoint for available/incoming assignments, use it instead of creating duplicate logic.
+
+---
+
+## 6. Keep Earnings and COD Separate
+
+For COD deliveries:
+
+* `cashCollectedAt` / COD amount is payment collection information.
+* Delivery Partner Earnings must use the actual rider earning/fee defined by the platform.
+
+Do not display the full COD customer payment as rider earnings unless the existing business model explicitly says so.
+
+---
+
+## 7. Backend as Source of Truth
+
+Remove frontend fallback values such as:
+
+* fixed ₹50
+* hardcoded weekly totals
+* static delivery counts
+* mock chart arrays
+* static Orders badge `2`
+
+All these values must come from backend/database responses.
+
+Keep one consistent calculation source so Home Earnings, Earnings page, chart, completed deliveries, and Orders badge cannot disagree.
+
+---
+
+## Do Not Change
+
+Do not change:
+
+* existing UI design
+* colors/layout
+* navigation design
+* active delivery flow
+* maps
+* payment workflow
+* authentication
+* unrelated APIs
+* database schema unless genuinely necessary
+
+Do not add mock data.
+
+---
+
+## Verification Required
+
+Test with the real logged-in delivery partner.
+
+Verify:
+
+1. Identify yesterday's actual delivered order in the database.
+2. Show its rider earning and completion timestamp.
+3. Confirm it contributes to This Week earnings.
+4. Confirm Today's Earnings only contains today's completed earnings.
+5. Confirm chart values exactly match database totals day-by-day.
+6. Complete a new delivery and verify dashboard + Earnings + chart update.
+7. Verify no completed delivery is counted twice.
+8. Verify cancelled/rejected orders contribute ₹0.
+9. Orders badge matches the real actionable order count.
+10. When there are no actionable orders, the Orders badge disappears.
+
+Before claiming success, report:
+
+* exact root cause for incorrect ₹50 / weekly earnings
+* source of the previous dummy chart
+* source of the hardcoded `2` badge
+* actual database record used for yesterday's delivery
+* backend endpoints/services changed
+* frontend files changed
+* final real calculated values after the fix
 {
   "expo": {
     "name": "QuickBite Mobile App",
@@ -6,7 +215,6 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },

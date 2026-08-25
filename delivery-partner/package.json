@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo/ui": "~57.0.12",
     "@expo/vector-icons": "^15.1.1",
+    "@maplibre/maplibre-react-native": "^11.3.7",
     "expo": "~57.0.15",
     "expo-constants": "~57.0.13",
     "expo-device": "~57.0.1",

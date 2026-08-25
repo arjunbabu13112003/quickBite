@@ -24,7 +24,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
-import { api, getAuthToken, setAuthToken, API_BASE_URL } from '../services/api';
+import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
@@ -60,7 +60,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK_NAME, async ({ data, error }) =>
       const orderId = parseInt(orderIdStr, 10);
       if (isNaN(orderId)) return;
 
-      await fetch(`${API_BASE_URL}/delivery-partners/me/active-delivery/location`, {
+      await fetch(resolveApiUrl('/delivery-partners/me/active-delivery/location'), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -339,7 +339,7 @@ export default function AppIndex() {
   // Draggable Bottom Sheet States & Coordinate calculation for Incoming Request UI
   const [sheetState, setSheetState] = useState<'expanded' | 'collapsed'>('expanded');
   const [sheetHeight, setSheetHeight] = useState(600); // Measured height default
-  const [riderCoords, setRiderCoords] = useState<{ latitude: number, longitude: number } | null>(null);
+  const [riderCoords, setRiderCoords] = useState<{ latitude: number, longitude: number, heading?: number | null } | null>(null);
   const [itemsExpanded, setItemsExpanded] = useState(false);
 
   const COLLAPSED_HEIGHT = 140; // Preview height
@@ -830,7 +830,7 @@ export default function AppIndex() {
       setPreviewError('');
       setPreviewImageUri(null);
       try {
-        const url = `${API_BASE_URL}${selectedPreviewDoc.previewUrl}`;
+        const url = resolveApiUrl(selectedPreviewDoc.previewUrl);
         console.log('[Preview] Fetching:', url);
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${authToken}` }
@@ -973,6 +973,7 @@ export default function AppIndex() {
 
   const locationWatcherRef = useRef<any>(null);
 
+  // Single unified foreground location watcher: updates UI coords always, updates backend API only if background tracking is inactive
   useEffect(() => {
     let active = true;
 
@@ -985,9 +986,13 @@ export default function AppIndex() {
       }
 
       const isApproved = accountStatus === 'APPROVED' || currentPartner?.accountStatus === 'APPROVED';
-      const hasActiveDelivery = deliveryState === 'active-delivery' || activeAssignment?.order?.orderStatus === 'out_for_delivery';
+      const hasActiveDelivery =
+        deliveryState === 'active-restaurant' ||
+        deliveryState === 'active-pickup' ||
+        deliveryState === 'active-start-delivery' ||
+        deliveryState === 'active-delivery';
 
-      if (!isAuthenticated || !isApproved || !hasActiveDelivery || appState !== 'active' || isBackgroundTrackingActive) {
+      if (!isAuthenticated || !isApproved || !hasActiveDelivery || appState !== 'active') {
         return;
       }
 
@@ -997,28 +1002,51 @@ export default function AppIndex() {
         return;
       }
 
+      // 1. Get initial position immediately to populate rider marker
+      try {
+        const lastLoc = await Location.getLastKnownPositionAsync();
+        if (lastLoc && lastLoc.coords && active) {
+          setRiderCoords({
+            latitude: lastLoc.coords.latitude,
+            longitude: lastLoc.coords.longitude,
+            heading: lastLoc.coords.heading,
+          });
+        }
+      } catch (e) {}
+
       console.log('[WATCHER] Starting foreground location watcher...');
       try {
         locationWatcherRef.current = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.Balanced,
-            distanceInterval: 15,
-            timeInterval: 10000,
+            distanceInterval: 10, // UI updates every 10 meters
+            timeInterval: 5000,   // Or every 5 seconds
           },
           async (loc) => {
             if (!active) return;
-            try {
-              console.log('[WATCHER] Position updated:', loc.coords.latitude, loc.coords.longitude);
-              await api.updateActiveDeliveryLocation({
-                latitude: loc.coords.latitude,
-                longitude: loc.coords.longitude,
-                accuracy: loc.coords.accuracy || undefined,
-                heading: loc.coords.heading || undefined,
-                speed: loc.coords.speed !== null && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
-                capturedAt: new Date(loc.timestamp).toISOString(),
-              });
-            } catch (err: any) {
-              console.warn('[WATCHER] Failed to send location update:', err.message || err);
+
+            // 1. Update UI coordinates locally in all cases
+            setRiderCoords({
+              latitude: loc.coords.latitude,
+              longitude: loc.coords.longitude,
+              heading: loc.coords.heading,
+            });
+
+            // 2. Only send location updates to backend if background task (Phase 6B) is inactive
+            if (!isBackgroundTrackingActive) {
+              try {
+                console.log('[WATCHER] Sending location update to backend:', loc.coords.latitude, loc.coords.longitude);
+                await api.updateActiveDeliveryLocation({
+                  latitude: loc.coords.latitude,
+                  longitude: loc.coords.longitude,
+                  accuracy: loc.coords.accuracy || undefined,
+                  heading: loc.coords.heading || undefined,
+                  speed: loc.coords.speed !== null && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
+                  capturedAt: new Date(loc.timestamp).toISOString(),
+                });
+              } catch (err: any) {
+                console.warn('[WATCHER] Failed to send location update:', err.message || err);
+              }
             }
           }
         );
@@ -1039,7 +1067,7 @@ export default function AppIndex() {
         console.log('[WATCHER] Stopped foreground location watcher.');
       }
     };
-  }, [isAuthenticated, accountStatus, currentPartner?.accountStatus, deliveryState, activeAssignment?.order?.orderStatus, appState, isBackgroundTrackingActive]);
+  }, [isAuthenticated, accountStatus, currentPartner?.accountStatus, deliveryState, appState, isBackgroundTrackingActive]);
 
   useEffect(() => {
     let intervalId: any = null;
@@ -2172,7 +2200,14 @@ export default function AppIndex() {
           </View>
 
           {/* Map Preview */}
-          <MapPlaceholder eta="N/A" etaPosition="top-left" destinationName={order.restaurantName} />
+          <MapPlaceholder 
+            eta="N/A" 
+            etaPosition="top-left" 
+            destinationName={order.restaurantName} 
+            order={order}
+            riderCoords={riderCoords}
+            deliveryState={deliveryState}
+          />
 
           {/* Progress Timeline */}
           <ProgressTimeline 
@@ -2289,7 +2324,14 @@ export default function AppIndex() {
             </View>
 
             {/* Map Preview */}
-            <MapPlaceholder eta="N/A" etaPosition="bottom-right" destinationName={order.customerName} />
+            <MapPlaceholder 
+              eta="N/A" 
+              etaPosition="bottom-right" 
+              destinationName={order.customerName} 
+              order={order}
+              riderCoords={riderCoords}
+              deliveryState={deliveryState}
+            />
 
             {/* Customer Instructions */}
             <View style={styles.instructionCard}>

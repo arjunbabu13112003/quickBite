@@ -1,19 +1,11 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+import { getApiBaseUrl, resolveApiUrl } from './apiResolver';
+
 const TOKEN_KEY = 'deliveryPartnerAccessToken';
 
-const getApiBaseUrl = () => {
-  let url = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.220.92:5000';
-  if (Platform.OS === 'android') {
-    // If running on an Android emulator/device and URL points to localhost or 127.0.0.1,
-    // redirect to 10.0.2.2 (which is the Android emulator's loopback to the host machine).
-    url = url.replace(/(localhost|127\.0\.0\.1)/g, '10.0.2.2');
-  }
-  return url;
-};
-
-export const API_BASE_URL = getApiBaseUrl();
+export { resolveApiUrl };
 
 export const setAuthToken = async (token: string | null) => {
   if (token) {
@@ -36,7 +28,7 @@ export const api = {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
     try {
-      const res = await fetch(`${API_BASE_URL}/delivery-partners/login`, {
+      const res = await fetch(resolveApiUrl('/delivery-partners/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -60,9 +52,9 @@ export const api = {
     } catch (err: any) {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError') {
-        throw new Error(`Connection timeout. Backend at ${API_BASE_URL} is unreachable.`);
+        throw new Error(`Connection timeout. Backend at ${getApiBaseUrl()} is unreachable.`);
       }
-      throw new Error(err.message ? `${err.message} (URL: ${API_BASE_URL})` : `Failed to connect to backend at ${API_BASE_URL}`);
+      throw new Error(err.message ? `${err.message} (URL: ${getApiBaseUrl()})` : `Failed to connect to backend at ${getApiBaseUrl()}`);
     }
   },
 
@@ -72,7 +64,7 @@ export const api = {
       throw new Error('No token found');
     }
     
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me'), {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -98,7 +90,7 @@ export const api = {
       throw new Error('No token found');
     }
     
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me'), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -124,7 +116,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/incoming-assignment`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/incoming-assignment'), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -147,7 +139,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/assignments/${assignmentId}/accept`, {
+    const res = await fetch(resolveApiUrl(`/delivery-partners/me/assignments/${assignmentId}/accept`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -172,7 +164,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/assignments/${assignmentId}/decline`, {
+    const res = await fetch(resolveApiUrl(`/delivery-partners/me/assignments/${assignmentId}/decline`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -198,7 +190,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/active-delivery`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/active-delivery'), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -223,7 +215,7 @@ export const api = {
       throw new Error('No token found');
     }
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/online-status`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/online-status'), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -249,7 +241,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/heartbeat`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/heartbeat'), {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -274,7 +266,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/dashboard`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/dashboard'), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -297,7 +289,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/orders/history`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/orders/history'), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -320,7 +312,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/available-orders`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/available-orders'), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -343,7 +335,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/orders/${orderId}/claim`, {
+    const res = await fetch(resolveApiUrl(`/delivery-partners/me/orders/${orderId}/claim`), {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -368,7 +360,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/orders/${orderId}/status`, {
+    const res = await fetch(resolveApiUrl(`/delivery-partners/me/orders/${orderId}/status`), {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -394,7 +386,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/active-delivery/verify-pin`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/active-delivery/verify-pin'), {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -420,7 +412,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/orders/${orderId}/cod/collect`, {
+    const res = await fetch(resolveApiUrl(`/orders/${orderId}/cod/collect`), {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -452,7 +444,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/delivery-partners/me/active-delivery/location`, {
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/active-delivery/location'), {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -478,7 +470,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/notifications/partner/me`, {
+    const res = await fetch(resolveApiUrl('/notifications/partner/me'), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -501,7 +493,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/notifications/partner/me/${id}/read`, {
+    const res = await fetch(resolveApiUrl(`/notifications/partner/me/${id}/read`), {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -525,7 +517,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/notifications/partner/me/read-all`, {
+    const res = await fetch(resolveApiUrl('/notifications/partner/me/read-all'), {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -549,7 +541,7 @@ export const api = {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
-    const res = await fetch(`${API_BASE_URL}/notifications/partner/me`, {
+    const res = await fetch(resolveApiUrl('/notifications/partner/me'), {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${token}`,
