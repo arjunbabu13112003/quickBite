@@ -958,6 +958,33 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
     profile.lastHeartbeatAt = new Date();
 
     await this.partnerRepository.save(profile);
+
+    // 300m CAS proximity alert trigger
+    if (order.orderStatus === 'out_for_delivery' && order.deliveryLatitude && order.deliveryLongitude) {
+      const distKm = this.calculateDistance(
+        dto.latitude,
+        dto.longitude,
+        Number(order.deliveryLatitude),
+        Number(order.deliveryLongitude)
+      );
+
+      if (distKm <= 0.3) {
+        const updateResult = await this.orderRepository.update(
+          { id: order.id, partnerNearbyNotified: false },
+          { partnerNearbyNotified: true }
+        );
+        if (updateResult.affected > 0) {
+          console.log(`[PUSH] Triggering Partner Nearby Push for Order #${order.id}`);
+          this.notificationsService.sendCustomerPush(
+            order.userId,
+            'Delivery Partner Nearby',
+            `Your delivery partner is nearby with order #${order.orderNumber}. Get ready to collect it!`,
+            { orderId: order.id, type: 'partner_nearby' }
+          );
+        }
+      }
+    }
+
     return { success: true };
   }
 
@@ -1107,6 +1134,13 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
       orderId,
       saved.id
     ).catch(err => console.error('[Notification Offer Error]:', err));
+
+    this.notificationsService.sendPartnerPush(
+      partnerId,
+      'New Delivery Assigned',
+      `You have been offered a new delivery request (Order #${orderNo}).`,
+      { orderId, type: 'new_assignment' }
+    );
 
     return saved;
   }
@@ -1371,6 +1405,20 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
         assignment.id
       ).catch(err => console.error('[Notification PickedUp Error]:', err));
 
+      this.notificationsService.sendCustomerPush(
+        order.userId,
+        'Order Picked Up',
+        `Your order #${order.orderNumber} has been picked up by the delivery partner and is on the way.`,
+        { orderId: order.id, type: 'picked_up' }
+      );
+
+      this.notificationsService.createHotelNotification(
+        order.hotelId,
+        'Order Picked Up',
+        `Rider has picked up Order #${order.orderNumber} and started delivery.`,
+        order.id
+      ).catch(err => console.error('[Notification Hotel PickedUp Error]:', err));
+
       return {
         message: `Order status updated to ${nextStatus}`,
         orderId: order.id,
@@ -1391,6 +1439,13 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
         order.id,
         assignment.id
       ).catch(err => console.error('[Notification OutForDelivery Error]:', err));
+
+      this.notificationsService.sendCustomerPush(
+        order.userId,
+        'Out for Delivery',
+        `Your order #${order.orderNumber} is out for delivery.`,
+        { orderId: order.id, type: 'out_for_delivery' }
+      );
 
       return {
         message: `Order status updated to ${nextStatus}`,
@@ -1463,6 +1518,13 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
         order.id,
         assignment.id
       ).catch(err => console.error('[Notification Delivered Error]:', err));
+
+      this.notificationsService.sendCustomerPush(
+        order.userId,
+        'Order Delivered',
+        `Your order #${order.orderNumber} has been delivered successfully. Enjoy your meal!`,
+        { orderId: order.id, type: 'delivered' }
+      );
 
       if (partnerEarning > 0) {
         await this.notificationsService.createPartnerNotification(
@@ -1670,7 +1732,7 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
   }
 
   async claimAvailableOrder(userId: number, orderId: number): Promise<any> {
-    return await this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const partner = await manager.findOne(DeliveryPartner, {
         where: { userId },
         lock: { mode: 'pessimistic_write' },
@@ -1753,6 +1815,44 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
         assignment: newAssignment,
       };
     });
+
+    // Notify outside of the transaction block
+    (async () => {
+      try {
+        const order = await this.orderRepository.findOne({ where: { id: orderId } });
+        const partner = await this.partnerRepository.findOne({
+          where: { userId },
+          relations: ['user'],
+        });
+
+        if (order && partner) {
+          this.notificationsService.sendCustomerPush(
+            order.userId,
+            'Delivery Partner Assigned',
+            `A delivery partner has been assigned to your order #${order.orderNumber}.`,
+            { orderId: order.id, type: 'partner_assigned' }
+          );
+
+          this.notificationsService.createHotelNotification(
+            order.hotelId,
+            'Rider Assigned',
+            `Delivery partner ${partner.user?.name || 'Rider'} has accepted Order #${order.orderNumber}.`,
+            order.id
+          ).catch(err => console.error('Failed to notify hotel:', err));
+
+          this.notificationsService.sendPartnerPush(
+            partner.id,
+            'New delivery assigned',
+            `You have claimed Order #${order.orderNumber}. Proceed to restaurant.`,
+            { orderId: order.id, type: 'new_assignment' }
+          );
+        }
+      } catch (err: any) {
+        console.error('Failed to dispatch notifications for claimed order:', err);
+      }
+    })();
+
+    return result;
   }
 
   async getPartnerDetailsForAdmin(id: number): Promise<any> {
@@ -2375,7 +2475,10 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
       }
     };
   }  async acceptAssignment(userId: number, assignmentId: number): Promise<any> {
-    const partner = await this.partnerRepository.findOne({ where: { userId } });
+    const partner = await this.partnerRepository.findOne({
+      where: { userId },
+      relations: ['user'],
+    });
     if (!partner) {
       throw new NotFoundException('Delivery partner not found.');
     }
@@ -2467,6 +2570,20 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
       result.order.id,
       result.assignment.id
     ).catch(err => console.error('[Notification Accept Error]:', err));
+
+    this.notificationsService.sendCustomerPush(
+      result.order.userId,
+      'Delivery Partner Assigned',
+      `A delivery partner has been assigned to your order #${result.order.orderNumber}.`,
+      { orderId: result.order.id, type: 'partner_assigned' }
+    );
+
+    this.notificationsService.createHotelNotification(
+      result.order.hotelId,
+      'Rider Assigned',
+      `Delivery partner ${partner.user?.name || 'Rider'} has accepted Order #${result.order.orderNumber}.`,
+      result.order.id
+    ).catch(err => console.error('[Notification Hotel Accept Error]:', err));
 
     return {
       message: result.message,

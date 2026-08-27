@@ -42,6 +42,9 @@ module.exports = {
     "@maplibre/maplibre-react-native"
   ],
   extra: {
-    backendIp: localIp
+    backendIp: localIp,
+    eas: {
+      projectId: "86b6a378-0cb9-470f-aa16-1f6cc79e6f3d"
+    }
   }
 };

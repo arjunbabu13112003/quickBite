@@ -6,6 +6,7 @@ import { DeliveryPartnerNotification } from './delivery-partner-notification.ent
 import { Order } from '../orders/order.entity';
 import { DeliveryPartner } from '../delivery-partners/delivery-partner.entity';
 import { OrderStatus } from '../orders/enums/order-status.enum';
+import { User } from '../users/user.entity';
 
 @Injectable()
 export class NotificationsService {
@@ -18,6 +19,8 @@ export class NotificationsService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(DeliveryPartner)
     private readonly partnerRepository: Repository<DeliveryPartner>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   async notifyRestaurant(orderId: number) {
@@ -189,5 +192,143 @@ export class NotificationsService {
     }
     await this.partnerNotificationRepository.delete({ deliveryPartnerId: partner.id });
     return { success: true, message: 'All notifications cleared' };
+  }
+
+  async sendCustomerPush(userId: number, title: string, body: string, data?: any) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      console.warn(`[PUSH] sendCustomerPush failed: User #${userId} not found`);
+      return;
+    }
+    if (!user.pushToken) {
+      console.log(`[PUSH] sendCustomerPush skipped: User #${userId} has no registered pushToken`);
+      return;
+    }
+    this.sendExpoPush(user.pushToken, user.id, title, body, data);
+  }
+
+  async sendPartnerPush(partnerId: number, title: string, body: string, data?: any) {
+    const partner = await this.partnerRepository.findOne({
+      where: { id: partnerId },
+      relations: ['user'],
+    });
+    if (!partner) {
+      console.warn(`[PUSH] sendPartnerPush failed: Partner #${partnerId} not found`);
+      return;
+    }
+    if (!partner.user) {
+      console.warn(`[PUSH] sendPartnerPush failed: Partner #${partnerId} has no linked User record`);
+      return;
+    }
+    if (!partner.user.pushToken) {
+      console.log(`[PUSH] sendPartnerPush skipped: Partner #${partnerId} (User #${partner.user.id}) has no registered pushToken`);
+      return;
+    }
+    this.sendExpoPush(partner.user.pushToken, partner.user.id, title, body, data);
+  }
+
+  async createHotelNotification(
+    hotelId: number,
+    title: string,
+    message: string,
+    orderId?: number,
+  ): Promise<HotelNotification> {
+    const notification = this.notificationRepository.create({
+      hotelId,
+      orderId,
+      title,
+      message,
+    });
+    return await this.notificationRepository.save(notification);
+  }
+
+  private sendExpoPush(pushToken: string, userId: number, title: string, body: string, data?: any) {
+    (async () => {
+      try {
+        console.log(`[PUSH] Sending push to User #${userId} (${pushToken}): ${title}`);
+        const response = await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            to: pushToken,
+            sound: 'default',
+            title,
+            body,
+            data: data || {},
+          }),
+        });
+
+        if (!response.ok) {
+          console.warn(`[PUSH] Expo push API returned status ${response.status} for User #${userId}`);
+          return;
+        }
+
+        const resBody = await response.json();
+        console.log('[PUSH] Expo push ticket response:', JSON.stringify(resBody));
+        const ticket = Array.isArray(resBody?.data) ? resBody.data[0] : resBody?.data;
+
+        if (ticket) {
+          if (ticket.status === 'error') {
+            console.warn(`[PUSH] Expo ticket error for User #${userId}: ${ticket.message}`);
+            if (ticket.details?.error === 'DeviceNotRegistered') {
+              console.log(`[PUSH] Clearing invalid/expired token for User #${userId}`);
+              await this.userRepository.update(userId, { pushToken: null });
+            }
+          } else if (ticket.status === 'ok' && ticket.id) {
+            console.log(`[PUSH] Expo ticket generated: ${ticket.id}. Scheduling receipt check...`);
+            setTimeout(() => {
+              this.checkExpoReceipt(ticket.id, userId);
+            }, 900000);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[PUSH] Failed to send push to User #${userId}:`, err.message || err);
+      }
+    })();
+  }
+
+  private checkExpoReceipt(ticketId: string, userId: number) {
+    (async () => {
+      try {
+        console.log(`[PUSH] Checking receipt for ticket ${ticketId} (User #${userId})...`);
+        const response = await fetch('https://exp.host/--/api/v2/push/getReceipts', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ids: [ticketId],
+          }),
+        });
+
+        if (!response.ok) {
+          console.warn(`[PUSH] Expo receipts API returned status ${response.status} for User #${userId}`);
+          return;
+        }
+
+        const resBody = await response.json();
+        const receipt = resBody?.data && resBody.data[ticketId];
+
+        if (receipt) {
+          if (receipt.status === 'error') {
+            console.warn(`[PUSH] Receipt error for User #${userId}: ${receipt.message}`);
+            if (receipt.details?.error === 'DeviceNotRegistered') {
+              console.log(`[PUSH] Clearing invalid/expired token on receipt check for User #${userId}`);
+              await this.userRepository.update(userId, { pushToken: null });
+            }
+          } else if (receipt.status === 'ok') {
+            console.log(`[PUSH] Receipt check success for User #${userId}`);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[PUSH] Failed to check receipt for User #${userId}:`, err.message || err);
+      }
+    })();
   }
 }

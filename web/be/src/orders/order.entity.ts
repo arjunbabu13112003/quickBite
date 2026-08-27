@@ -186,6 +186,9 @@ export class Order {
   @Column({ nullable: true })
   deliveryPartnerId?: number;
 
+  @Column({ type: 'boolean', default: false })
+  partnerNearbyNotified: boolean;
+
   @ManyToOne(() => DeliveryPartner, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'deliveryPartnerId' })
   deliveryPartner?: DeliveryPartner;

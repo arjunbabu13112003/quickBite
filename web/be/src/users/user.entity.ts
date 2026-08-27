@@ -24,6 +24,9 @@ export class User {
   @Column({ type: 'text', nullable: true })
   profileImage?: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  pushToken?: string;
+
   @CreateDateColumn()
   createdAt: Date;
 }

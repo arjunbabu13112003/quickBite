@@ -24,6 +24,7 @@ import { Food } from '../foods/food.entity';
 import { Offer } from '../offers/offer.entity';
 import { Store99Campaign } from '../offers/store99-campaign.entity';
 import { DeliveryPartnersService } from '../delivery-partners/delivery-partners.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
 
@@ -70,6 +71,7 @@ export class OrdersService {
     private readonly dataSource: DataSource,
     private readonly offersService: OffersService,
     private readonly deliveryPartnersService: DeliveryPartnersService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async calculateEffectiveFoodPrice(food: Food, selectedCampaignId?: number, now = new Date()): Promise<number> {
@@ -427,7 +429,7 @@ export class OrdersService {
     const encryptedPin = encryptPin(rawPin);
 
     // 7. Write transactional updates
-    return await this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const order = manager.create(Order, {
         orderNumber,
         userId,
@@ -500,6 +502,16 @@ export class OrdersService {
 
       return savedOrder;
     });
+
+    // Notify hotel admin on new order
+    this.notificationsService.createHotelNotification(
+      result.hotelId,
+      'New Order Received',
+      `A new order #${result.orderNumber} has been placed.`,
+      result.id,
+    ).catch(err => console.error('[Notification Error] Failed to notify hotel on new order:', err));
+
+    return result;
   }
 
   async getOrders(userId: number): Promise<any[]> {
@@ -892,14 +904,6 @@ export class OrdersService {
       if (nextStatus === 'ready_for_pickup') {
         isValidTransition = true;
       }
-    } else if (current === 'ready_for_pickup') {
-      if (nextStatus === 'out_for_delivery') {
-        isValidTransition = true;
-      }
-    } else if (current === 'out_for_delivery') {
-      if (nextStatus === 'delivered') {
-        isValidTransition = true;
-      }
     }
 
     if (!isValidTransition) {
@@ -938,6 +942,30 @@ export class OrdersService {
     }
 
     await this.orderRepository.save(order);
+
+    // Notify customer on status update
+    if (nextStatus === 'accepted') {
+      this.notificationsService.sendCustomerPush(
+        order.userId,
+        'Restaurant Accepted Order',
+        `Your order #${order.orderNumber} has been accepted by the restaurant.`,
+        { orderId: order.id, type: 'accepted' }
+      );
+    } else if (nextStatus === 'preparing') {
+      this.notificationsService.sendCustomerPush(
+        order.userId,
+        'Preparing Food',
+        `The restaurant is preparing your food for order #${order.orderNumber}.`,
+        { orderId: order.id, type: 'preparing' }
+      );
+    } else if (nextStatus === 'ready_for_pickup') {
+      this.notificationsService.sendCustomerPush(
+        order.userId,
+        'Ready for Pickup',
+        `Your order #${order.orderNumber} is ready for pickup!`,
+        { orderId: order.id, type: 'ready_for_pickup' }
+      );
+    }
 
     if (nextStatus === 'accepted') {
       this.deliveryPartnersService.triggerDispatchForOrder(order.id).catch(err => {
@@ -980,6 +1008,15 @@ export class OrdersService {
     });
 
     await this.orderRepository.save(order);
+
+    if (order.deliveryPartnerId) {
+      this.notificationsService.sendPartnerPush(
+        order.deliveryPartnerId,
+        'Order Cancelled',
+        `Order #${order.orderNumber} has been cancelled.`,
+        { orderId: order.id, type: 'order_cancelled' }
+      );
+    }
 
     return {
       message: 'Order cancelled successfully',

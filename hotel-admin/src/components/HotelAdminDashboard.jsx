@@ -24,8 +24,6 @@ const NEXT_TRANSITIONS = {
   placed:    [{ status: 'accepted', label: 'Accept Order', primary: true }, { status: 'rejected', label: 'Reject', primary: false }],
   accepted:  [{ status: 'preparing', label: 'Start Preparing', primary: true }],
   preparing: [{ status: 'ready_for_pickup', label: 'Mark Ready', primary: true }],
-  ready_for_pickup: [{ status: 'out_for_delivery', label: 'Dispatch Order', primary: true }],
-  out_for_delivery: [{ status: 'delivered', label: 'Mark Delivered', primary: true }],
 };
 
 const PAYMENT_LABELS = {

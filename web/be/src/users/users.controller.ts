@@ -92,4 +92,10 @@ export class UsersController {
   async getDeliveryPartnerCandidates() {
     return this.usersService.getDeliveryPartnerCandidates();
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('push-token')
+  async registerPushToken(@Request() req, @Body('pushToken') pushToken: string) {
+    return this.usersService.registerPushToken(req.user.userId, pushToken);
+  }
 }

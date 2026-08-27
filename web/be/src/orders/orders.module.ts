@@ -12,6 +12,7 @@ import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { OffersModule } from '../offers/offers.module';
 import { DeliveryPartnersModule } from '../delivery-partners/delivery-partners.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { DeliveryPartnersModule } from '../delivery-partners/delivery-partners.m
     ]),
     HotelAdminsModule,
     DeliveryPartnersModule,
+    NotificationsModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

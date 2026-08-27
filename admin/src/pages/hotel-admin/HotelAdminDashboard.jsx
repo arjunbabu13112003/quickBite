@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   LogOut, Store, Utensils, TrendingUp, Activity, ClipboardList,
   Building, RefreshCw, Plus, AlertTriangle, Bell, User,
@@ -27,8 +27,6 @@ const NEXT_TRANSITIONS = {
   placed: [{ status: 'accepted', label: 'Accept Order', primary: true }, { status: 'rejected', label: 'Reject', primary: false }],
   accepted: [{ status: 'preparing', label: 'Start Preparing', primary: true }],
   preparing: [{ status: 'ready_for_pickup', label: 'Mark Ready', primary: true }],
-  ready_for_pickup: [{ status: 'out_for_delivery', label: 'Dispatch Order', primary: true }],
-  out_for_delivery: [{ status: 'delivered', label: 'Mark Delivered', primary: true }],
 };
 
 const PAYMENT_LABELS = {
@@ -3276,11 +3274,23 @@ export default function HotelAdminDashboard({
   // Notifications State
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const prevNotificationsCountRef = useRef(0);
 
   const fetchNotifications = async () => {
     try {
       const data = await api.getHotelNotifications();
-      setNotifications(data || []);
+      const newNotifications = data || [];
+      if (newNotifications.length > prevNotificationsCountRef.current) {
+        const unreadNew = newNotifications.filter(n => !n.isRead);
+        if (unreadNew.length > 0 && 'Notification' in window && Notification.permission === 'granted') {
+          const latest = unreadNew[0];
+          new Notification(latest.title, {
+            body: latest.message,
+          });
+        }
+      }
+      prevNotificationsCountRef.current = newNotifications.length;
+      setNotifications(newNotifications);
     } catch (err) {
       console.error('Failed to load notifications', err);
     }
@@ -3362,6 +3372,18 @@ export default function HotelAdminDashboard({
     }, 5000);
     return () => clearInterval(interval);
   }, [hotel?.id]);
+
+  useEffect(() => {
+    if ('Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(err => {
+          console.warn('Failed to request notification permission:', err);
+        });
+      }
+    } else {
+      console.warn('[PUSH] Native browser notifications are unavailable because this page is not served in a Secure Context (localhost/HTTPS) or is unsupported by your browser.');
+    }
+  }, []);
 
   const handleToggleOpenStatus = async () => {
     if (statusUpdating) return;

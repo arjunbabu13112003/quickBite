@@ -25,7 +25,7 @@ try {
       existingUrl = match[1].trim();
     }
   }
-  
+
   if (existingUrl) {
     console.log(`[AppConfig] Using existing EXPO_PUBLIC_API_BASE_URL=${existingUrl} from .env`);
   } else {
@@ -97,6 +97,9 @@ module.exports = {
     reactCompiler: true
   },
   extra: {
-    backendIp: localIp
-  }
+    backendIp: localIp,
+    eas: {
+      projectId: "babb9a3e-3f0e-4387-ab2b-2da011752f04",
+    },
+  },
 };

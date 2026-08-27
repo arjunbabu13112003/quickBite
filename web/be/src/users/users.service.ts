@@ -320,4 +320,14 @@ export class UsersService {
       role: c.role,
     }));
   }
+
+  async registerPushToken(userId: number, pushToken: string) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    user.pushToken = pushToken || null;
+    await this.usersRepository.save(user);
+    return { success: true, message: 'Push token registered successfully' };
+  }
 }

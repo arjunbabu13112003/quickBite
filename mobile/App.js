@@ -28,7 +28,7 @@ import {
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
 import * as Location from 'expo-location';
-import { Map as MapView, Camera as MapCamera, Marker } from '@maplibre/maplibre-react-native';
+import { Map as MapView, Camera as MapCamera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
 import {
   Sparkles,
   Flame,
@@ -93,6 +93,23 @@ import {
 } from './src/data/mockData';
 
 import { getApiBaseUrl, resolveApiUrl, startBaseUrlDetection } from './src/services/apiResolver';
+let Notifications = null;
+try {
+  Notifications = require('expo-notifications');
+} catch (error) {
+  console.warn('[PUSH] expo-notifications native module not available:', error);
+}
+import Constants from 'expo-constants';
+
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldShowBadge: true,
+    }),
+  });
+}
 
 // Helper to dynamically extract current PC IP address from Expo Metro
 const getExpoHostIp = () => {
@@ -450,6 +467,186 @@ function MainApp() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [myOrdersList, setMyOrdersList] = useState([]);
   const [orderStepMap, setOrderStepMap] = useState({});
+
+  const [trackingRouteCoords, setTrackingRouteCoords] = useState([]);
+  const [trackingDistance, setTrackingDistance] = useState(null);
+  const [trackingEta, setTrackingEta] = useState(null);
+  const [interpolatedCoords, setInterpolatedCoords] = useState(null);
+  const [cameraConfig, setCameraConfig] = useState(null);
+
+  const lastRouteFetchTimeRef = useRef(0);
+  const lastFetchedRiderCoordsRef = useRef(null);
+  const isFetchingRouteRef = useRef(false);
+  const hasFittedBoundsRef = useRef(false);
+
+  const animatedLat = useRef(new Animated.Value(0)).current;
+  const animatedLng = useRef(new Animated.Value(0)).current;
+
+  // Initialize animated value listener
+  useEffect(() => {
+    const latId = animatedLat.addListener((state) => {
+      setInterpolatedCoords((prev) => {
+        if (!prev) return { latitude: state.value, longitude: animatedLng._value };
+        return { ...prev, latitude: state.value };
+      });
+    });
+    const lngId = animatedLng.addListener((state) => {
+      setInterpolatedCoords((prev) => {
+        if (!prev) return { latitude: animatedLat._value, longitude: state.value };
+        return { ...prev, longitude: state.value };
+      });
+    });
+
+    return () => {
+      animatedLat.removeListener(latId);
+      animatedLng.removeListener(lngId);
+    };
+  }, []);
+
+  // Update interpolation whenever new rider location is received from poll
+  useEffect(() => {
+    const partner = activeOrderDetail?.activeAssignment?.deliveryPartner;
+    const rLat = partner?.currentLatitude;
+    const rLng = partner?.currentLongitude;
+
+    if (!rLat || !rLng) {
+      setInterpolatedCoords(null);
+      return;
+    }
+
+    const targetLat = parseFloat(rLat);
+    const targetLng = parseFloat(rLng);
+
+    if (interpolatedCoords === null) {
+      animatedLat.setValue(targetLat);
+      animatedLng.setValue(targetLng);
+      setInterpolatedCoords({ latitude: targetLat, longitude: targetLng });
+    } else {
+      Animated.parallel([
+        Animated.timing(animatedLat, {
+          toValue: targetLat,
+          duration: 3500,
+          useNativeDriver: false,
+        }),
+        Animated.timing(animatedLng, {
+          toValue: targetLng,
+          duration: 3500,
+          useNativeDriver: false,
+        })
+      ]).start();
+    }
+  }, [activeOrderDetail]);
+
+  // Main OSRM route controller and bounds config handler
+  useEffect(() => {
+    if (!activeOrderDetail || activeOrderDetail.orderStatus !== 'out_for_delivery') {
+      setTrackingRouteCoords([]);
+      setTrackingDistance(null);
+      setTrackingEta(null);
+      setCameraConfig(null);
+      hasFittedBoundsRef.current = false;
+      lastRouteFetchTimeRef.current = 0;
+      lastFetchedRiderCoordsRef.current = null;
+      return;
+    }
+
+    const partner = activeOrderDetail?.activeAssignment?.deliveryPartner;
+    const riderLat = partner?.currentLatitude;
+    const riderLng = partner?.currentLongitude;
+    const custLat = activeOrderDetail?.deliveryAddress?.latitude;
+    const custLng = activeOrderDetail?.deliveryAddress?.longitude;
+
+    if (!riderLat || !riderLng || !custLat || !custLng) {
+      setTrackingRouteCoords([]);
+      setTrackingDistance(null);
+      setTrackingEta(null);
+      setCameraConfig(null);
+      hasFittedBoundsRef.current = false;
+      return;
+    }
+
+    const parsedRiderLat = parseFloat(riderLat);
+    const parsedRiderLng = parseFloat(riderLng);
+    const parsedCustLat = parseFloat(custLat);
+    const parsedCustLng = parseFloat(custLng);
+
+    // Initial Bounds Fit (only once per tracking session to avoid annoying zoom snapping)
+    if (!hasFittedBoundsRef.current) {
+      hasFittedBoundsRef.current = true;
+      setCameraConfig({
+        bounds: {
+          ne: [Math.max(parsedRiderLng, parsedCustLng), Math.max(parsedRiderLat, parsedCustLat)],
+          sw: [Math.min(parsedRiderLng, parsedCustLng), Math.min(parsedRiderLat, parsedCustLat)],
+          paddingLeft: 30,
+          paddingRight: 30,
+          paddingTop: 30,
+          paddingBottom: 30,
+        }
+      });
+    }
+
+    // Distance calculation helper
+    const getDistance = (lat1, lon1, lat2, lon2) => {
+      const R = 6371e3; // meters
+      const phi1 = (lat1 * Math.PI) / 180;
+      const phi2 = (lat2 * Math.PI) / 180;
+      const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+      const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+      const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    // Determine if route fetch is needed:
+    // 1. Never fetched yet.
+    // 2. More than 12 seconds have elapsed since last OSRM call.
+    // 3. Rider has moved more than 20 meters.
+    const timeElapsed = Date.now() - lastRouteFetchTimeRef.current;
+    const distanceMoved = lastFetchedRiderCoordsRef.current
+      ? getDistance(parsedRiderLat, parsedRiderLng, lastFetchedRiderCoordsRef.current.latitude, lastFetchedRiderCoordsRef.current.longitude)
+      : 999;
+
+    const needsRecalculation = lastRouteFetchTimeRef.current === 0 || timeElapsed >= 12000 || distanceMoved >= 20;
+
+    if (!needsRecalculation || isFetchingRouteRef.current) {
+      return;
+    }
+
+    let active = true;
+    const fetchRoute = async () => {
+      isFetchingRouteRef.current = true;
+      try {
+        const url = `http://router.project-osrm.org/route/v1/driving/${parsedRiderLng},${parsedRiderLat};${parsedCustLng},${parsedCustLat}?overview=full&geometries=geojson`;
+        const res = await fetch(url);
+        if (res.ok && active) {
+          const data = await res.json();
+          if (data.routes && data.routes[0]) {
+            const coords = data.routes[0].geometry.coordinates;
+            const distMeters = data.routes[0].distance;
+            const durationSecs = data.routes[0].duration;
+
+            setTrackingRouteCoords(coords);
+            setTrackingDistance((distMeters / 1000).toFixed(1) + ' km');
+            setTrackingEta(Math.round(durationSecs / 60) + ' mins');
+
+            lastRouteFetchTimeRef.current = Date.now();
+            lastFetchedRiderCoordsRef.current = { latitude: parsedRiderLat, longitude: parsedRiderLng };
+          }
+        }
+      } catch (err) {
+        console.warn('[USER TRACKING] OSRM fetch route failed:', err);
+      } finally {
+        isFetchingRouteRef.current = false;
+      }
+    };
+
+    fetchRoute();
+    return () => {
+      active = false;
+    };
+  }, [activeOrderDetail]);
 
   const mapStatusToStep = (status) => {
     switch (status?.toLowerCase()) {
@@ -1786,6 +1983,91 @@ function MainApp() {
     tabHistory,
     activeTab
   ]);
+
+  // ─── PUSH NOTIFICATIONS REGISTRATION ──────────────────────────────────────
+  const registerForPushNotificationsAsync = async () => {
+    if (!Notifications) {
+      console.log('[PUSH] Notifications module is not available (native module missing)');
+      return null;
+    }
+    let token;
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+      });
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+      console.log('[PUSH] Failed to get push token: permission not granted');
+      return null;
+    }
+    
+    try {
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
+      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      console.log('[PUSH] Expo token retrieved:', token);
+    } catch (error) {
+      console.warn('[PUSH] Failed to retrieve Expo push token:', error);
+    }
+
+    return token;
+  };
+
+  const registerPushTokenForUser = async (userToken) => {
+    try {
+      const pushToken = await registerForPushNotificationsAsync();
+      if (!pushToken) return;
+
+      const endpoint = getApiBaseUrl();
+      console.log('[PUSH] Registering push token with backend:', pushToken);
+      const res = await fetch(`${endpoint}/users/push-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userToken}`,
+        },
+        body: JSON.stringify({ pushToken }),
+      });
+      if (res.ok) {
+        console.log('[PUSH] Push token successfully registered on backend');
+      } else {
+        console.warn('[PUSH] Failed to register push token on backend:', res.status);
+      }
+    } catch (error) {
+      console.warn('[PUSH] Error during push token registration:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser?.token) {
+      registerPushTokenForUser(currentUser.token);
+    }
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!Notifications) return;
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      const orderId = data?.orderId;
+      if (orderId) {
+        console.log('[PUSH] Tapped notification. Opening order detail for ID:', orderId);
+        setSelectedOrderForDetail({ id: Number(orderId), orderId: Number(orderId) });
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   // ─── PERSISTENCE: Load saved session on app start ─────────────────────────
   useEffect(() => {
@@ -8278,29 +8560,68 @@ function MainApp() {
                                         attributionEnabled={false}
                                         onDidFinishLoadingStyle={() => setMapLoaded(true)}
                                       >
-                                        <MapCamera
-                                          initialViewState={{
-                                            center: [parseFloat(riderLng), parseFloat(riderLat)],
-                                            zoom: 14,
-                                          }}
-                                        />
+                                        {cameraConfig ? (
+                                          <MapCamera
+                                            animationDuration={1500}
+                                            animationMode="easeTo"
+                                            bounds={cameraConfig.bounds}
+                                          />
+                                        ) : (
+                                          <MapCamera
+                                            animationDuration={1500}
+                                            animationMode="easeTo"
+                                            centerCoordinate={[parseFloat(riderLng), parseFloat(riderLat)]}
+                                            zoomLevel={15}
+                                          />
+                                        )}
+
+                                        {trackingRouteCoords && trackingRouteCoords.length > 0 && (
+                                          <GeoJSONSource
+                                            id="userTrackingRouteSource"
+                                            data={{
+                                              type: 'Feature',
+                                              properties: {},
+                                              geometry: {
+                                                type: 'LineString',
+                                                coordinates: trackingRouteCoords,
+                                              },
+                                            }}
+                                          >
+                                            <Layer
+                                              id="userTrackingRouteLayer"
+                                              type="line"
+                                              style={{
+                                                lineColor: '#2563EB',
+                                                lineWidth: 4,
+                                                lineCap: 'round',
+                                                lineJoin: 'round',
+                                              }}
+                                            />
+                                          </GeoJSONSource>
+                                        )}
                                         
-                                        <Marker lngLat={[parseFloat(riderLng), parseFloat(riderLat)]}>
-                                          <View style={{
-                                            width: 32, height: 32, borderRadius: 16,
-                                            backgroundColor: '#059669',
-                                            alignItems: 'center', justifyContent: 'center',
-                                            borderWidth: 2, borderColor: '#ffffff',
-                                            elevation: 4, shadowColor: '#000',
-                                            shadowOffset: { width: 0, height: 2 },
-                                            shadowOpacity: 0.25, shadowRadius: 3.84
-                                          }}>
-                                            <Text style={{ fontSize: 16 }}>🛵</Text>
-                                          </View>
-                                        </Marker>
+                                        <Marker 
+                                           id="userTrackingRiderPin" 
+                                           lngLat={[
+                                             interpolatedCoords ? interpolatedCoords.longitude : parseFloat(riderLng),
+                                             interpolatedCoords ? interpolatedCoords.latitude : parseFloat(riderLat)
+                                           ]}
+                                         >
+                                           <View style={{
+                                             width: 32, height: 32, borderRadius: 16,
+                                             backgroundColor: '#059669',
+                                             alignItems: 'center', justifyContent: 'center',
+                                             borderWidth: 2, borderColor: '#ffffff',
+                                             elevation: 4, shadowColor: '#000',
+                                             shadowOffset: { width: 0, height: 2 },
+                                             shadowOpacity: 0.25, shadowRadius: 3.84
+                                           }}>
+                                             <Text style={{ fontSize: 16 }}>🛵</Text>
+                                           </View>
+                                         </Marker>
 
                                         {custLat && custLng && isValidCoordinate(custLat, custLng) && (
-                                          <Marker lngLat={[parseFloat(custLng), parseFloat(custLat)]}>
+                                          <Marker id="userTrackingCustPin" lngLat={[parseFloat(custLng), parseFloat(custLat)]}>
                                             <View style={{
                                               width: 32, height: 32, borderRadius: 16,
                                               backgroundColor: '#3b82f6',
@@ -8320,7 +8641,7 @@ function MainApp() {
                                           const hLng = activeOrderDetail?.hotel?.longitude ? parseFloat(activeOrderDetail.hotel.longitude.toString()) : null;
                                           if (hLat && hLng && isValidCoordinate(hLat, hLng)) {
                                             return (
-                                              <Marker lngLat={[hLng, hLat]}>
+                                              <Marker id="userTrackingHotelPin" lngLat={[hLng, hLat]}>
                                                 <View style={{
                                                   width: 32, height: 32, borderRadius: 16,
                                                   backgroundColor: '#f59e0b',
@@ -8345,6 +8666,31 @@ function MainApp() {
                                   <Text style={{ fontSize: 9, color: D.textSub, textAlign: 'right', marginBottom: 8, marginRight: 4 }}>
                                     © OpenStreetMap, © OpenFreeMap
                                   </Text>
+
+                                  {/* Real remaining distance and ETA row */}
+                                  {trackingDistance && trackingEta && (
+                                    <View style={{
+                                      flexDirection: 'row',
+                                      justifyContent: 'space-between',
+                                      backgroundColor: darkMode ? '#1F2937' : '#F9FAFB',
+                                      borderRadius: 12,
+                                      paddingVertical: 10,
+                                      paddingHorizontal: 16,
+                                      marginBottom: 12,
+                                      borderWidth: 1,
+                                      borderColor: darkMode ? '#374151' : '#E5E7EB'
+                                    }}>
+                                      <View style={{ flex: 1, alignItems: 'center' }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: D.textSub, textTransform: 'uppercase', letterSpacing: 0.5 }}>Distance</Text>
+                                        <Text style={{ fontSize: 15, fontWeight: '800', color: D.text, marginTop: 4 }}>{trackingDistance}</Text>
+                                      </View>
+                                      <View style={{ width: 1, height: '100%', backgroundColor: darkMode ? '#374151' : '#E5E7EB' }} />
+                                      <View style={{ flex: 1, alignItems: 'center' }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: D.textSub, textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimated Arrival</Text>
+                                        <Text style={{ fontSize: 15, fontWeight: '800', color: '#10B981', marginTop: 4 }}>{trackingEta}</Text>
+                                      </View>
+                                    </View>
+                                  )}
 
                                   {/* Rider location row */}
                                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>

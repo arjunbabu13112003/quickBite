@@ -33,6 +33,25 @@ import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
 
 const BACKGROUND_LOCATION_TASK_NAME = 'QUICKBITE_BACKGROUND_DELIVERY_LOCATION';
+let Notifications: any = null;
+try {
+  Notifications = require('expo-notifications');
+} catch (error) {
+  console.warn('[PUSH] expo-notifications native module not available:', error);
+}
+import Constants from 'expo-constants';
+
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error) {
@@ -381,6 +400,8 @@ export default function AppIndex() {
     timestamp: string;
   } | null>(null);
   const lastRiderCoordsRef = useRef<{ latitude: number, longitude: number } | null>(null);
+  const lastNavRouteFetchTimeRef = useRef<number>(0);
+  const lastNavRouteFetchCoordsRef = useRef<{ latitude: number, longitude: number } | null>(null);
   const [calculatedBearing, setCalculatedBearing] = useState(0);
   const deviceHeadingRef = useRef<number | null>(null);
 
@@ -485,52 +506,81 @@ export default function AppIndex() {
       const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
       const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
 
+      const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 6371e3; // meters
+        const phi1 = (lat1 * Math.PI) / 180;
+        const phi2 = (lat2 * Math.PI) / 180;
+        const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+        const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+        const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                  Math.cos(phi1) * Math.cos(phi2) *
+                  Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      };
+
+      const distMoved = lastNavRouteFetchCoordsRef.current
+        ? getDistance(riderLat, riderLng, lastNavRouteFetchCoordsRef.current.latitude, lastNavRouteFetchCoordsRef.current.longitude)
+        : Infinity;
+      const timeSinceLastFetch = Date.now() - lastNavRouteFetchTimeRef.current;
+
+      const shouldFetch = lastNavRouteFetchTimeRef.current === 0 || distMoved > 30 || timeSinceLastFetch > 15000;
+
+      if (!shouldFetch) {
+        return;
+      }
+
       routingService.getRoute({
         originLatitude: riderLat,
         originLongitude: riderLng,
         destinationLatitude: destLat,
         destinationLongitude: destLng,
       }).then(res => {
-          if (res.coordinates && res.coordinates.length > 0) {
-            setNavRouteCoords(res.coordinates);
-            setNavRouteSteps(res.steps || []);
-            
-            if (res.distanceMeters !== undefined && res.distanceMeters !== null) {
-              const km = res.distanceMeters / 1000;
-              setNavDistanceKm(km.toFixed(1) + ' km');
-            } else {
-              setNavDistanceKm(null);
-            }
-
-            let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
-            for (const [lng, lat] of res.coordinates) {
-              if (lng < minLng) minLng = lng;
-              if (lng > maxLng) maxLng = lng;
-              if (lat < minLat) minLat = lat;
-              if (lat > maxLat) maxLat = lat;
-            }
-
-            if (!isNavigatingLive) {
-              navCameraRef.current?.setStop({
-                bounds: [minLng, minLat, maxLng, maxLat],
-                padding: { left: 60, right: 60, top: 60, bottom: 60 },
-                duration: 0,
-              });
-            }
+        if (res.coordinates && res.coordinates.length > 0) {
+          setNavRouteCoords(res.coordinates);
+          setNavRouteSteps(res.steps || []);
+          
+          if (res.distanceMeters !== undefined && res.distanceMeters !== null) {
+            const km = res.distanceMeters / 1000;
+            setNavDistanceKm(km.toFixed(1) + ' km');
+          } else {
+            setNavDistanceKm(null);
           }
-        }).catch(err => {
-          console.warn('[Navigate Routing] Failed to load route:', err);
-          navCameraRef.current?.setStop({
-            center: [riderLng, riderLat],
-            zoom: 15,
-            duration: 0,
-          });
+
+          let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+          for (const [lng, lat] of res.coordinates) {
+            if (lng < minLng) minLng = lng;
+            if (lng > maxLng) maxLng = lng;
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+          }
+
+          if (!isNavigatingLive) {
+            navCameraRef.current?.setStop({
+              bounds: [minLng, minLat, maxLng, maxLat],
+              padding: { left: 60, right: 60, top: 60, bottom: 60 },
+              duration: 0,
+            });
+          }
+
+          lastNavRouteFetchTimeRef.current = Date.now();
+          lastNavRouteFetchCoordsRef.current = { latitude: riderLat, longitude: riderLng };
+        }
+      }).catch(err => {
+        console.warn('[Navigate Routing] Failed to load route:', err);
+        navCameraRef.current?.setStop({
+          center: [riderLng, riderLat],
+          zoom: 15,
+          duration: 0,
         });
+      });
     } else {
       setNavRouteCoords([]);
       setNavDistanceKm(null);
       setNavRouteSteps([]);
       setIsNavigatingLive(false);
+      lastNavRouteFetchTimeRef.current = 0;
+      lastNavRouteFetchCoordsRef.current = null;
     }
   }, [isNavigationModalOpen, deliveryState, activeAssignment, riderCoords, isNavigatingLive]);
 
@@ -607,8 +657,9 @@ export default function AppIndex() {
             
             // Perform direct imperative MapLibre camera rotation update on the native thread
             if (navCameraRef.current && isNavigatingLive) {
-              const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
-              const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
+              const rCoords = lastRiderCoordsRef.current;
+              const riderLat = rCoords ? rCoords.latitude : 11.8744;
+              const riderLng = rCoords ? rCoords.longitude : 75.3704;
               navCameraRef.current.setStop({
                 center: [riderLng, riderLat],
                 zoom: 17,
@@ -636,7 +687,7 @@ export default function AppIndex() {
         headingSubscription.remove();
       }
     };
-  }, [isNavigationModalOpen, isNavigatingLive, riderCoords]);
+  }, [isNavigationModalOpen, isNavigatingLive]);
 
   useEffect(() => {
     if (isNavigationModalOpen && isNavigatingLive) {
@@ -1290,6 +1341,95 @@ export default function AppIndex() {
     }
   }, [appState, activeTab, viewingActiveOrder, isAuthenticated]);
 
+  // ─── PUSH NOTIFICATIONS REGISTRATION ──────────────────────────────────────
+  const registerForPushNotificationsAsync = async () => {
+    if (!Notifications) {
+      console.log('[PUSH] Notifications module is not available (native module missing)');
+      return null;
+    }
+    let token;
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+      });
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+      console.log('[PUSH] Failed to get push token: permission not granted');
+      return null;
+    }
+    
+    try {
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
+      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      console.log('[PUSH] Expo token retrieved:', token);
+    } catch (error) {
+      console.warn('[PUSH] Failed to retrieve Expo push token:', error);
+    }
+
+    return token;
+  };
+
+  const registerPushTokenForPartner = async () => {
+    try {
+      const pushToken = await registerForPushNotificationsAsync();
+      if (!pushToken) return;
+
+      console.log('[PUSH] Registering push token with backend:', pushToken);
+      const token = await getAuthToken();
+      if (!token) return;
+
+      const endpoint = resolveApiUrl('/users/push-token');
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ pushToken }),
+      });
+      if (res.ok) {
+        console.log('[PUSH] Push token successfully registered on backend');
+      } else {
+        console.warn('[PUSH] Failed to register push token on backend:', res.status);
+      }
+    } catch (error) {
+      console.warn('[PUSH] Error during push token registration:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      registerPushTokenForPartner();
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!Notifications) return;
+    const subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
+      const data = response.notification.request.content.data;
+      const orderId = data?.orderId;
+      if (orderId) {
+        console.log('[PUSH] Tapped notification. Opening Navigate/Active Delivery screen for order:', orderId);
+        setViewingActiveOrder(true);
+        syncActiveDeliveryState();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isAuthenticated]);
+
   const locationWatcherRef = useRef<any>(null);
 
   // Single unified foreground location watcher: updates UI coords always, updates backend API only if background tracking is inactive
@@ -1344,11 +1484,32 @@ export default function AppIndex() {
           async (loc) => {
             if (!active) return;
 
-            // 1. Update UI coordinates locally in all cases
-            setRiderCoords({
-              latitude: loc.coords.latitude,
-              longitude: loc.coords.longitude,
-              heading: loc.coords.heading,
+            // 1. Update UI coordinates locally only if moved meaningfully (> 2 meters or > 5 degrees heading change)
+            setRiderCoords((prev) => {
+              if (prev) {
+                const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+                  const R = 6371e3; // meters
+                  const phi1 = (lat1 * Math.PI) / 180;
+                  const phi2 = (lat2 * Math.PI) / 180;
+                  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+                  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+                  const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                            Math.cos(phi1) * Math.cos(phi2) *
+                            Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+                  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                  return R * c;
+                };
+                const dist = getDistance(prev.latitude, prev.longitude, loc.coords.latitude, loc.coords.longitude);
+                const headingDiff = Math.abs((loc.coords.heading || 0) - (prev.heading || 0));
+                if (dist < 2.0 && headingDiff < 5.0) {
+                  return prev; // No state change, skips re-render!
+                }
+              }
+              return {
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude,
+                heading: loc.coords.heading,
+              };
             });
 
             // 2. Check for customer arrival (30 meters radius) if out for delivery
