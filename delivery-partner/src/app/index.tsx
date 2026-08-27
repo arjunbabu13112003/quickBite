@@ -19,11 +19,13 @@ import {
   Alert,
   Animated,
   PanResponder,
-  useColorScheme
+  useColorScheme,
+  Linking
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Map as MapView, Camera, Marker } from '@maplibre/maplibre-react-native';
 import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
@@ -220,6 +222,24 @@ export default function AppIndex() {
   const insets = useSafeAreaInsets();
   const bottomNavHeight = 60 + Math.max(0, insets.bottom - 10);
 
+  // Error deduplication refs and helpers for polling
+  const lastLoggedErrorsRef = useRef<Record<string, string>>({});
+
+  const logUniqueError = useCallback((category: string, errorMsg: string, level: 'error' | 'warn' = 'error') => {
+    if (lastLoggedErrorsRef.current[category] !== errorMsg) {
+      if (level === 'warn') {
+        console.warn(errorMsg);
+      } else {
+        console.error(errorMsg);
+      }
+      lastLoggedErrorsRef.current[category] = errorMsg;
+    }
+  }, []);
+
+  const clearUniqueError = useCallback((category: string) => {
+    delete lastLoggedErrorsRef.current[category];
+  }, []);
+
   // Navigation & UI States
   const [activeTab, setActiveTab] = useState<'home' | 'orders' | 'earnings' | 'profile'>('home');
 
@@ -251,10 +271,11 @@ export default function AppIndex() {
       setLiveOnlineSeconds(stats.onlineSeconds || 0);
       const dateKey = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
       setCurrentIstDateKey(dateKey);
-    } catch (err) {
-      console.error('[Dashboard] Fetch stats failed:', err);
+      clearUniqueError('dashboard');
+    } catch (err: any) {
+      logUniqueError('dashboard', `[Dashboard] Fetch stats failed: ${err.message || err}`);
     }
-  }, []);
+  }, [clearUniqueError, logUniqueError]);
   
   // Unified Delivery State Machine:
   // - 'none': No active delivery, standard Available Deliveries Home screen.
@@ -315,6 +336,8 @@ export default function AppIndex() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [showFullChartModal, setShowFullChartModal] = useState(false);
+  const [isNavigationModalOpen, setIsNavigationModalOpen] = useState(false);
+  const [isItemsModalOpen, setIsItemsModalOpen] = useState(false);
   const [selectedChartDayIdx, setSelectedChartDayIdx] = useState<number | null>(null);
 
   // Phase 5 assignment states
@@ -341,6 +364,28 @@ export default function AppIndex() {
   const [sheetHeight, setSheetHeight] = useState(600); // Measured height default
   const [riderCoords, setRiderCoords] = useState<{ latitude: number, longitude: number, heading?: number | null } | null>(null);
   const [itemsExpanded, setItemsExpanded] = useState(false);
+
+  const navCameraRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (isNavigationModalOpen) {
+      const order = activeAssignment?.order || {};
+      const isPickup = deliveryState === 'active-restaurant' || deliveryState === 'active-pickup';
+      const destLat = isPickup ? order.restaurantLatitude : order.deliveryLatitude;
+      const destLng = isPickup ? order.restaurantLongitude : order.deliveryLongitude;
+
+      if (destLat && destLng && destLat !== 0 && destLng !== 0) {
+        const timer = setTimeout(() => {
+          navCameraRef.current?.setStop({
+            centerCoordinate: [destLng, destLat],
+            zoomLevel: 16,
+            duration: 0,
+          });
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isNavigationModalOpen, deliveryState, activeAssignment]);
 
   const COLLAPSED_HEIGHT = 140; // Preview height
   const panY = useRef(new Animated.Value(0)).current;
@@ -944,8 +989,9 @@ export default function AppIndex() {
           setIsAvailable(false);
           await fetchDashboardStats();
         }
-      } catch (err) {
-        console.warn('[Heartbeat] Failed to send heartbeat:', err);
+        clearUniqueError('heartbeat');
+      } catch (err: any) {
+        logUniqueError('heartbeat', `[Heartbeat] Failed to send heartbeat: ${err.message || err}`, 'warn');
       }
     };
 
@@ -962,7 +1008,7 @@ export default function AppIndex() {
         clearInterval(intervalId);
       }
     };
-  }, [isOnline, isAuthenticated, fetchDashboardStats]);
+  }, [isOnline, isAuthenticated, fetchDashboardStats, logUniqueError, clearUniqueError]);
 
   // Automatically sync active delivery state from backend when app state resumes, tab changes, or active order screen opens
   useEffect(() => {
@@ -1094,10 +1140,12 @@ export default function AppIndex() {
           setIsOnline(data.partner.isOnline);
           setIsAvailable(data.partner.isAvailable);
         }
+        clearUniqueError('status');
       } catch (err) {
         const error = err as any;
-        console.error('[Polling] Status refresh failed:', error.message);
-        if (error.message === 'Unauthorized' || error.message === 'Forbidden resource') {
+        const errMsg = error.message || 'Unknown error';
+        logUniqueError('status', `[Polling] Status refresh failed: ${errMsg}`);
+        if (errMsg === 'Unauthorized' || errMsg === 'Forbidden resource') {
           await handleLogout(true);
         }
       } finally {
@@ -1119,7 +1167,7 @@ export default function AppIndex() {
         clearInterval(intervalId);
       }
     };
-  }, [isAuthenticated, appState]);
+  }, [isAuthenticated, appState, isOnline, fetchDashboardStats, logUniqueError, clearUniqueError]);
 
   const checkIncomingAssignment = useCallback(async () => {
     try {
@@ -1133,10 +1181,11 @@ export default function AppIndex() {
           setIncomingAssignment(null);
         }
       }
-    } catch (err) {
-      console.error('[Polling] Fetch incoming assignment failed:', err);
+      clearUniqueError('incoming');
+    } catch (err: any) {
+      logUniqueError('incoming', `[Polling] Fetch incoming assignment failed: ${err.message || err}`);
     }
-  }, [deliveryState]);
+  }, [deliveryState, clearUniqueError, logUniqueError]);
 
   const fetchCompletedOrders = useCallback(async () => {
     try {
@@ -1217,28 +1266,31 @@ export default function AppIndex() {
       }
 
       setCompletedOrders(uniqueMapped);
-    } catch (err) {
-      console.error('[Orders] Fetch completed orders failed:', err);
+      clearUniqueError('completed-orders');
+    } catch (err: any) {
+      logUniqueError('completed-orders', `[Orders] Fetch completed orders failed: ${err.message || err}`);
     }
-  }, []);
+  }, [clearUniqueError, logUniqueError]);
 
   const fetchNotifications = useCallback(async () => {
     try {
       const data = await api.getPartnerNotifications();
       setNotifications(data || []);
-    } catch (err) {
-      console.error('[Notifications] Fetch failed:', err);
+      clearUniqueError('notifications');
+    } catch (err: any) {
+      logUniqueError('notifications', `[Notifications] Fetch failed: ${err.message || err}`);
     }
-  }, []);
+  }, [clearUniqueError, logUniqueError]);
 
   const fetchAvailableOrders = useCallback(async () => {
     try {
       const data = await api.getAvailableOrders();
       setAvailableOrders(data || []);
-    } catch (err) {
-      console.error('[Orders] Fetch available orders failed:', err);
+      clearUniqueError('available-orders');
+    } catch (err: any) {
+      logUniqueError('available-orders', `[Orders] Fetch available orders failed: ${err.message || err}`);
     }
-  }, []);
+  }, [clearUniqueError, logUniqueError]);
 
   const handleClaimAvailableOrder = async (orderId: number) => {
     setIsAcceptingDeclining(true);
@@ -1494,6 +1546,202 @@ export default function AppIndex() {
     } finally {
       setIsMutatingOnline(false);
     }
+  };
+
+  const renderNavigationModal = () => {
+    const order = activeAssignment?.order || {};
+    const isPickup = deliveryState === 'active-restaurant' || deliveryState === 'active-pickup';
+    const destLat = isPickup ? order.restaurantLatitude : order.deliveryLatitude;
+    const destLng = isPickup ? order.restaurantLongitude : order.deliveryLongitude;
+    const destName = isPickup ? (order.restaurantName || 'Restaurant') : (order.customerName || 'Customer');
+    const destAddress = isPickup ? (order.restaurantAddress || '') : (order.deliveryAddress || '');
+
+    const hasValidCoords = destLat && destLng && destLat !== 0 && destLng !== 0;
+
+    return (
+      <Modal
+        visible={isNavigationModalOpen}
+        animationType="slide"
+        onRequestClose={() => setIsNavigationModalOpen(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+          {/* Header */}
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            borderBottomWidth: 1,
+            borderBottomColor: '#E2E8F0',
+            backgroundColor: '#FFFFFF',
+          }}>
+            <TouchableOpacity onPress={() => setIsNavigationModalOpen(false)}>
+              <Ionicons name="arrow-back" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <View style={{ marginLeft: 16, flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                Location Pin
+              </Text>
+              <Text style={{ fontSize: 12, color: '#64748B' }} numberOfLines={1}>
+                {destName}
+              </Text>
+            </View>
+          </View>
+
+          {/* Map or Fallback */}
+          {hasValidCoords ? (
+            <View style={{ flex: 1, position: 'relative' }}>
+              <MapView
+                style={{ width: '100%', height: '100%' }}
+                mapStyle="https://tiles.openfreemap.org/styles/liberty"
+                logo={false}
+                attribution={false}
+              >
+                <Camera
+                  ref={navCameraRef}
+                />
+                <Marker id="destPin" lngLat={[destLng, destLat]}>
+                  <View style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    backgroundColor: isPickup ? '#EA580C' : '#3B82F6',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderWidth: 2,
+                    borderColor: '#FFFFFF',
+                  }}>
+                    <Ionicons name={isPickup ? "business" : "home"} size={16} color="#FFFFFF" />
+                  </View>
+                </Marker>
+                {riderCoords && (
+                  <Marker id="riderPin" lngLat={[riderCoords.longitude, riderCoords.latitude]}>
+                     <View style={{
+                       width: 28,
+                       height: 28,
+                       borderRadius: 14,
+                       backgroundColor: '#10B981',
+                       alignItems: 'center',
+                       justifyContent: 'center',
+                       borderWidth: 2,
+                       borderColor: '#FFFFFF',
+                     }}>
+                       <FontAwesome5 name="motorcycle" size={12} color="#FFFFFF" />
+                     </View>
+                  </Marker>
+                )}
+              </MapView>
+
+              {/* Address Floating Card */}
+              <View style={{
+                position: 'absolute',
+                bottom: 24,
+                left: 16,
+                right: 16,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                padding: 16,
+                borderWidth: 1,
+                borderColor: '#E2E8F0',
+                elevation: 4,
+              }}>
+                <Text style={{ fontSize: 14, fontWeight: '800', color: '#0F172A', marginBottom: 4 }}>
+                  {destName}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#64748B' }}>
+                  {destAddress || 'No address provided'}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+              <Ionicons name="map-outline" size={48} color="#CBD5E1" />
+              <Text style={{ marginTop: 16, fontSize: 14, fontWeight: '700', color: '#64748B', textAlign: 'center' }}>
+                Coordinates unavailable for this location
+              </Text>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
+    );
+  };
+
+  const renderItemsModal = () => {
+    const order = activeAssignment?.order || {};
+    const items = order.items || [];
+
+    return (
+      <Modal
+        visible={isItemsModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsItemsModalOpen(false)}
+      >
+        <TouchableOpacity 
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
+          activeOpacity={1}
+          onPress={() => setIsItemsModalOpen(false)}
+        >
+          <View style={{ 
+            width: '85%', 
+            backgroundColor: '#FFFFFF', 
+            borderRadius: 16, 
+            padding: 20, 
+            borderWidth: 1,
+            borderColor: '#E2E8F0',
+            maxHeight: '70%',
+          }}>
+            <Text style={{ fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 16 }}>
+              Order Items
+            </Text>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {items.length > 0 ? (
+                items.map((item: any, idx: number) => (
+                  <View 
+                    key={item.id || idx} 
+                    style={{ 
+                      flexDirection: 'row', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center', 
+                      paddingVertical: 12,
+                      borderBottomWidth: idx === items.length - 1 ? 0 : 1,
+                      borderBottomColor: '#F1F5F9',
+                    }}
+                  >
+                    <View style={{ flex: 1, marginRight: 16 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>
+                        {item.foodName || 'Unknown Item'}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#F97316' }}>
+                      x{item.quantity || 1}
+                    </Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={{ fontSize: 14, color: '#64748B', textAlign: 'center', paddingVertical: 16 }}>
+                  No items found for this order
+                </Text>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity 
+              onPress={() => setIsItemsModalOpen(false)}
+              style={{
+                marginTop: 20,
+                backgroundColor: '#F97316',
+                paddingVertical: 12,
+                borderRadius: 8,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    );
   };
 
   // Helper to render the appropriate screen inside the active tab
@@ -2233,12 +2481,27 @@ export default function AppIndex() {
 
             {/* Nav & Call action buttons */}
             <View style={styles.actionButtonsRow}>
-              <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7}>
+              <TouchableOpacity 
+                style={styles.actionBtn} 
+                activeOpacity={0.7}
+                onPress={() => setIsNavigationModalOpen(true)}
+              >
                 <Ionicons name="navigate-circle-outline" size={18} color="#475569" style={{ marginRight: 6 }} />
                 <Text style={styles.actionBtnText}>Navigate</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7}>
+              <TouchableOpacity 
+                style={styles.actionBtn} 
+                activeOpacity={0.7}
+                onPress={() => {
+                  const phone = order.restaurantPhoneNumber;
+                  if (phone) {
+                    Linking.openURL(`tel:${phone}`);
+                  } else {
+                    Alert.alert('Phone Number Unavailable', 'No phone number stored for this restaurant.');
+                  }
+                }}
+              >
                 <Ionicons name="call-outline" size={16} color="#475569" style={{ marginRight: 6 }} />
                 <Text style={styles.actionBtnText}>Call</Text>
               </TouchableOpacity>
@@ -2249,9 +2512,14 @@ export default function AppIndex() {
           <View style={styles.itemsCardRow}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Ionicons name="bag-handle" size={16} color="#F97316" style={{ marginRight: 8 }} />
-              <Text style={styles.itemsCardText}>{order.itemCount || 0} Items</Text>
+              <Text style={styles.itemsCardText}>
+                {order.items ? order.items.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0) : 0} Items
+              </Text>
             </View>
-            <TouchableOpacity activeOpacity={0.7}>
+            <TouchableOpacity 
+              activeOpacity={0.7}
+              onPress={() => setIsItemsModalOpen(true)}
+            >
               <Text style={styles.viewItemsText}>View Items &gt;</Text>
             </TouchableOpacity>
           </View>
@@ -2317,7 +2585,18 @@ export default function AppIndex() {
                   <Text style={styles.customerCardTitle}>{order.customerName || 'Customer'}</Text>
                   <Text style={styles.customerCardSub}>{order.deliveryAddress || 'Drop Area'}</Text>
                 </View>
-                <TouchableOpacity style={styles.customerCallBtn} activeOpacity={0.7}>
+                <TouchableOpacity 
+                  style={styles.customerCallBtn} 
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const phone = order.customerPhoneNumber;
+                    if (phone) {
+                      Linking.openURL(`tel:${phone}`);
+                    } else {
+                      Alert.alert('Phone Number Unavailable', 'No phone number stored for this customer.');
+                    }
+                  }}
+                >
                   <Ionicons name="call" size={18} color="#7C2D12" />
                 </TouchableOpacity>
               </View>
@@ -2762,6 +3041,8 @@ export default function AppIndex() {
               setViewingActiveOrder(false);
               changeDeliveryState('none');
               setActiveTab('earnings');
+              setIsOnline(true);
+              setIsAvailable(true);
             }}
             style={styles.completedViewEarningsBtn}
           >
@@ -5042,6 +5323,8 @@ export default function AppIndex() {
 
       {renderNotificationsModal()}
       {renderFullChartModal()}
+      {renderNavigationModal()}
+      {renderItemsModal()}
     </SafeAreaView>
   );
 }

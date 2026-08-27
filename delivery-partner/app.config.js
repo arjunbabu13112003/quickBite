@@ -15,12 +15,25 @@ function getLocalIp() {
 
 const localIp = getLocalIp();
 
-// Automatically write/update the .env file with the dynamic local IP address
+// Automatically write/update the .env file with the dynamic local IP address if not already present
 try {
-  fs.writeFileSync('.env', `EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000\n`, 'utf8');
-  console.log(`[AppConfig] Successfully wrote EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000 to .env`);
+  let existingUrl = '';
+  if (fs.existsSync('.env')) {
+    const content = fs.readFileSync('.env', 'utf8');
+    const match = content.match(/EXPO_PUBLIC_API_BASE_URL=(.+)/);
+    if (match && match[1] && match[1].trim() !== '') {
+      existingUrl = match[1].trim();
+    }
+  }
+  
+  if (existingUrl) {
+    console.log(`[AppConfig] Using existing EXPO_PUBLIC_API_BASE_URL=${existingUrl} from .env`);
+  } else {
+    fs.writeFileSync('.env', `EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000\n`, 'utf8');
+    console.log(`[AppConfig] Successfully wrote EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000 to .env`);
+  }
 } catch (e) {
-  console.error('[AppConfig] Failed to write .env file:', e);
+  console.error('[AppConfig] Failed to write/read .env file:', e);
 }
 
 module.exports = {

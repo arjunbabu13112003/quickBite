@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-import { getApiBaseUrl, resolveApiUrl } from './apiResolver';
+import { getApiBaseUrl, resolveApiUrl, startBaseUrlDetection } from './apiResolver';
 
 const TOKEN_KEY = 'deliveryPartnerAccessToken';
 
@@ -23,7 +23,7 @@ export const getAuthToken = async () => {
   }
 };
 
-export const api = {
+const apiMethods = {
   login: async (dto: any) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -561,3 +561,16 @@ export const api = {
     return await res.json();
   },
 };
+
+export const api = new Proxy(apiMethods, {
+  get(target, prop) {
+    const originalMethod = target[prop as keyof typeof target];
+    if (typeof originalMethod === 'function') {
+      return async (...args: any[]) => {
+        await startBaseUrlDetection();
+        return (originalMethod as Function)(...args);
+      };
+    }
+    return originalMethod;
+  }
+});

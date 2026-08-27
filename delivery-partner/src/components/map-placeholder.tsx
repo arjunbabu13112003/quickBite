@@ -213,20 +213,19 @@ export default function MapPlaceholder({
     if (!shouldRenderMap || !cameraRef.current) return;
 
     if (!hasFitInitialBounds && routeBounds) {
-      cameraRef.current.setCamera({
-        bounds: {
-          ne: routeBounds.ne,
-          sw: routeBounds.sw,
-          paddingLeft: 40,
-          paddingRight: 40,
-          paddingTop: 40,
-          paddingBottom: 40,
+      cameraRef.current.setStop({
+        bounds: [routeBounds.sw[0], routeBounds.sw[1], routeBounds.ne[0], routeBounds.ne[1]],
+        padding: {
+          left: 40,
+          right: 40,
+          top: 40,
+          bottom: 40,
         },
         duration: 1500,
       });
       setHasFitInitialBounds(true);
     } else if (isCameraFollowing) {
-      cameraRef.current.setCamera({
+      cameraRef.current.setStop({
         centerCoordinate: [riderCoords!.longitude, riderCoords!.latitude],
         zoomLevel: 15.5,
         heading: riderCoords!.heading || 0,

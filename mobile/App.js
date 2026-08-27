@@ -92,7 +92,7 @@ import {
   DRIVER_PROFILES
 } from './src/data/mockData';
 
-import { getApiBaseUrl, resolveApiUrl } from './src/services/apiResolver';
+import { getApiBaseUrl, resolveApiUrl, startBaseUrlDetection } from './src/services/apiResolver';
 
 // Helper to dynamically extract current PC IP address from Expo Metro
 const getExpoHostIp = () => {
@@ -315,13 +315,13 @@ const FloatingCartBar = ({
         toValue: 1,
         friction: 6,
         tension: 40,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }).start();
     } else if (count === 0 && prevCount > 0) {
       Animated.timing(entranceAnim, {
         toValue: 0,
         duration: 250,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }).start(() => {
         setShouldRender(false);
       });
@@ -487,7 +487,10 @@ function MainApp() {
   const resolveImage = (imgStr) => resolveProductImage(imgStr, resolvedBackendUrl);
 
   // Helper to get backend endpoint — delegates to dynamic resolver (no stale cache)
-  const getActiveBackend = async () => getApiBaseUrl();
+  const getActiveBackend = async () => {
+    await startBaseUrlDetection();
+    return getApiBaseUrl();
+  };
 
   // Dynamic restaurant category classifier based on food items / categories sold
   const mapBackendRestaurantCategory = (dbCategories, dbFoods) => {
@@ -839,7 +842,7 @@ function MainApp() {
         Animated.timing(bottomControlsAnim, {
           toValue: 0,
           duration: 250,
-          useNativeDriver: false,
+          useNativeDriver: true,
         }).start();
       }
       return;
@@ -853,7 +856,7 @@ function MainApp() {
         Animated.timing(bottomControlsAnim, {
           toValue: 1,
           duration: 250,
-          useNativeDriver: false,
+          useNativeDriver: true,
         }).start();
       }
     } else if (scrollDirectionRef.current === 'up') {
@@ -862,7 +865,7 @@ function MainApp() {
         Animated.timing(bottomControlsAnim, {
           toValue: 0,
           duration: 250,
-          useNativeDriver: false,
+          useNativeDriver: true,
         }).start();
       }
     }
@@ -1679,7 +1682,7 @@ function MainApp() {
   const [checkoutLoadingText, setCheckoutLoadingText] = useState('');
   const [checkoutLayoutKey, setCheckoutLayoutKey] = useState(0);
   const [lastPlacedOrder, setLastPlacedOrder] = useState(null);
-  const [paymentFailedModal, setPaymentFailedModal] = useState({ visible: false, title: 'Payment Failed', message: '' });
+  const [paymentFailedModal, setPaymentFailedModal] = useState({ visible: false, title: 'Payment Failed', message: '', isSessionExpired: false });
 
   // User Review & Rating States (Starts at 2 Stars)
   const [productReviews, setProductReviews] = useState({});
@@ -1919,12 +1922,12 @@ function MainApp() {
       Animated.timing(cartAnim, {
         toValue: 1.2,
         duration: 150,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }),
       Animated.spring(cartAnim, {
         toValue: 1,
         friction: 4,
-        useNativeDriver: false,
+        useNativeDriver: true,
       })
     ]).start();
 
@@ -1934,13 +1937,13 @@ function MainApp() {
       Animated.timing(cartBounceAnim, {
         toValue: -15,
         duration: 150,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }),
       Animated.spring(cartBounceAnim, {
         toValue: 0,
         friction: 4,
         tension: 40,
-        useNativeDriver: false,
+        useNativeDriver: true,
       })
     ]).start();
   };
@@ -3447,13 +3450,13 @@ function MainApp() {
           }).start();
         } catch (e) {
           console.error('Payment verification error:', e);
-          setPaymentFailedModal({ visible: true, title: 'Payment Failed', message: "We couldn't verify your payment. Please contact support if the amount was deducted." });
+          setPaymentFailedModal({ visible: true, title: 'Payment Failed', message: "We couldn't verify your payment. Please contact support if the amount was deducted.", isSessionExpired: false });
         } finally {
           setIsProcessingCheckout(false);
         }
       }).catch((error) => {
         console.warn('Razorpay checkout error:', error);
-        setPaymentFailedModal({ visible: true, title: 'Payment Failed', message: "We couldn't complete your payment. Please try again or choose another payment method." });
+        setPaymentFailedModal({ visible: true, title: 'Payment Failed', message: "We couldn't complete your payment. Please try again or choose another payment method.", isSessionExpired: false });
         setIsProcessingCheckout(false);
       });
 
@@ -3465,7 +3468,8 @@ function MainApp() {
         title: 'Order Failed',
         message: isUnauthorized 
           ? "Your login session has expired. Please log out and log back in to place your order."
-          : `We couldn't place your order. ${err.message || 'Please check your connection and try again.'}`
+          : `We couldn't place your order. ${err.message || 'Please check your connection and try again.'}`,
+        isSessionExpired: isUnauthorized
       });
       setIsProcessingCheckout(false);
     }
@@ -7706,7 +7710,14 @@ function MainApp() {
 
                 {/* Try Again Button */}
                 <TouchableOpacity
-                  onPress={() => setPaymentFailedModal(prev => ({ ...prev, visible: false }))}
+                  onPress={async () => {
+                    setPaymentFailedModal(prev => ({ ...prev, visible: false }));
+                    if (paymentFailedModal.isSessionExpired) {
+                      setIsCheckoutOpen(false);
+                      setIsCartOpen(false);
+                      await handleLogout();
+                    }
+                  }}
                   style={{
                     backgroundColor: '#059669',
                     borderRadius: 14,
@@ -7721,7 +7732,9 @@ function MainApp() {
                     elevation: 4,
                   }}
                 >
-                  <Text style={{ fontSize: 15, fontWeight: '800', color: '#ffffff' }}>Try Again</Text>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: '#ffffff' }}>
+                    {paymentFailedModal.isSessionExpired ? 'Log In Again' : 'Try Again'}
+                  </Text>
                 </TouchableOpacity>
 
                 {/* Cancel Button */}
@@ -8129,7 +8142,14 @@ function MainApp() {
                         </View>
                         <TouchableOpacity 
                           style={styles.callDriverBtn} 
-                          onPress={() => Alert.alert('Calling Driver', `Dialing ${activeOrderDetail.activeAssignment.deliveryPartner.phoneNumber}...`)}
+                          onPress={() => {
+                            const phone = activeOrderDetail?.activeAssignment?.deliveryPartner?.phoneNumber;
+                            if (phone) {
+                              Linking.openURL(`tel:${phone}`);
+                            } else {
+                              Alert.alert('Phone Number Unavailable', 'No phone number stored for this delivery partner.');
+                            }
+                          }}
                         >
                           <Phone size={18} color="#ffffff" />
                         </TouchableOpacity>

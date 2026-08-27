@@ -86,8 +86,8 @@ export default function ProgressTimeline({
         let showCheck = false;
 
         if (state === 'completed') {
-          iconBgColor = '#D1FAE5';
-          iconColor = '#10B981';
+          iconBgColor = '#A7F3D0'; // darker/more visible green background
+          iconColor = '#047857';   // darker green checkmark/icon
           titleColor = '#94A3B8'; // completed items are slightly muted as per screen 2
           showCheck = true;
         } else if (state === 'active') {
@@ -102,7 +102,7 @@ export default function ProgressTimeline({
             <View style={styles.indicatorContainer}>
               <View style={[styles.iconWrapper, { backgroundColor: iconBgColor }, state === 'active' && styles.activeIconBorder]}>
                 {showCheck ? (
-                  <Ionicons name="checkmark-sharp" size={16} color="#10B981" />
+                  <Ionicons name="checkmark-sharp" size={16} color={iconColor} />
                 ) : (
                   <Ionicons name={step.icon as any} size={15} color={iconColor} />
                 )}

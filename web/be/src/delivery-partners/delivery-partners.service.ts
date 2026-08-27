@@ -85,7 +85,20 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
       where: { isOnline: true },
     });
 
+    // Find partners who currently have active assignments to avoid marking them offline during delivery
+    const activeAssignments = await this.assignmentRepository.find({
+      where: { isActive: true },
+    });
+    const partnersWithActiveDelivery = new Set(
+      activeAssignments.map((a) => a.deliveryPartnerId),
+    );
+
     for (const partner of onlinePartners) {
+      // Bypass heartbeat timeout if partner is actively delivering an order
+      if (partnersWithActiveDelivery.has(partner.id)) {
+        continue;
+      }
+
       const lastHeartbeat = partner.lastHeartbeatAt;
       if (!lastHeartbeat || lastHeartbeat < staleTime) {
         await this.processStalePartner(partner);
@@ -1414,12 +1427,10 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
         if (
           freshPartner &&
           freshPartner.isActive &&
-          freshPartner.isVerified &&
-          freshPartner.isOnline
+          freshPartner.isVerified
         ) {
+          freshPartner.isOnline = true;
           freshPartner.isAvailable = true;
-        } else if (freshPartner) {
-          freshPartner.isAvailable = false;
         }
 
         await manager.save(Order, order);
@@ -2545,17 +2556,28 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
           orderNumber: order.orderNumber,
           orderStatus: order.orderStatus,
           restaurantName: order.hotel?.name || 'QuickBite Kitchen',
+          restaurantPhoneNumber: order.hotel?.phoneNumber || null,
           pickupAddress: order.hotel?.address || 'Near Fort Road, Kannur',
           deliveryAddress: `${order.deliveryAddressLine1}${order.deliveryAddressLine2 ? ', ' + order.deliveryAddressLine2 : ''}`,
           customerName: order.deliveryRecipientName,
+          customerPhoneNumber: order.deliveryPhoneNumber || null,
           customerPhoneMaskedOrSafe: order.deliveryPhoneNumber ? (order.deliveryPhoneNumber.slice(0, 5) + '*****') : '*****',
           paymentMethod: order.paymentMethod,
           amount: Number(order.totalAmount),
           itemCount,
           cashCollectedAt: order.cashCollectedAt,
           paymentStatus: order.paymentStatus,
+          restaurantLatitude: order.hotel?.latitude ? parseFloat(order.hotel.latitude.toString()) : null,
+          restaurantLongitude: order.hotel?.longitude ? parseFloat(order.hotel.longitude.toString()) : null,
+          deliveryLatitude: order.deliveryLatitude ? parseFloat(order.deliveryLatitude.toString()) : null,
+          deliveryLongitude: order.deliveryLongitude ? parseFloat(order.deliveryLongitude.toString()) : null,
           deliveryPinRequired: !!order.deliveryPinHash,
           deliveryPinVerified: !!order.deliveryPinVerifiedAt,
+          items: order.items ? order.items.map(item => ({
+            id: item.id,
+            foodName: item.foodName,
+            quantity: item.quantity,
+          })) : [],
         }
       }
     };

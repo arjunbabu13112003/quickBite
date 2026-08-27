@@ -1,19 +1,21 @@
 import { Platform, NativeModules } from 'react-native';
 import Constants from 'expo-constants';
 
+let resolvedBaseUrl = null;
 let hasLogged = false;
 
-export const getApiBaseUrl = () => {
+// 1. Synchronous helper to get the default/configured API URL based on Expo build metadata
+const getDefaultApiBaseUrl = () => {
   let hostname = null;
 
   if (__DEV__) {
-    // 1. Primary: app.config.js injects PC LAN IP at bundling time via extra.backendIp
+    // Try to get hostname from Expo config extra.backendIp (dynamic host IP injected at build/bundling time)
     const backendIp = Constants.expoConfig?.extra?.backendIp || Constants.manifest?.extra?.backendIp;
     if (backendIp && backendIp !== 'localhost' && backendIp !== '127.0.0.1') {
       hostname = backendIp;
     }
 
-    // 2. Fallback: Parse hostname from React Native NativeModules scriptURL
+    // Fallback: Parse hostname from React Native NativeModules scriptURL
     if (!hostname) {
       try {
         let scriptURL = NativeModules.SourceCode?.scriptURL;
@@ -34,7 +36,7 @@ export const getApiBaseUrl = () => {
       }
     }
 
-    // 3. Fallback: Expo experienceUrl
+    // Fallback: Expo experienceUrl
     if (!hostname && Constants.experienceUrl) {
       try {
         const match = Constants.experienceUrl.match(/^[a-z]+:\/\/([^:/]+)/);
@@ -47,7 +49,7 @@ export const getApiBaseUrl = () => {
       } catch (e) {}
     }
 
-    // 4. Fallback: Expo config hostUri / debuggerHost
+    // Fallback: Expo config hostUri / debuggerHost
     if (!hostname) {
       const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.hostUri || Constants.manifest?.debuggerHost;
       if (hostUri) {
@@ -62,15 +64,10 @@ export const getApiBaseUrl = () => {
   let url;
   if (hostname) {
     url = `http://${hostname}:5000`;
-    if (__DEV__ && !hasLogged) {
-      console.log(`[API] Runtime host: ${hostname}`);
-      console.log(`[API] Base URL: ${url}`);
-      hasLogged = true;
-    }
     return url;
   }
 
-  // 5. Last resort: EXPO_PUBLIC_API_BASE_URL env var (auto-written by app.config.js)
+  // Last resort: EXPO_PUBLIC_API_BASE_URL env var (auto-written by app.config.js)
   url = process.env.EXPO_PUBLIC_API_BASE_URL || '';
 
   if (!url) {
@@ -81,12 +78,87 @@ export const getApiBaseUrl = () => {
     url = url.replace(/(localhost|127\.0\.0\.1)/g, '10.0.2.2');
   }
 
-  if (__DEV__ && !hasLogged) {
-    console.log(`[API] Fallback Base URL: ${url}`);
-    hasLogged = true;
+  return url;
+};
+
+// 2. Perform connection checks to candidate URLs and cache the active one
+export const startBaseUrlDetection = () => {
+  if (resolvedBaseUrl) return Promise.resolve(resolvedBaseUrl);
+
+  if (!__DEV__) {
+    resolvedBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || '';
+    return Promise.resolve(resolvedBaseUrl);
   }
 
-  return url;
+  return new Promise((resolve) => {
+    const defaultUrl = getDefaultApiBaseUrl();
+    const localhostUrl = 'http://localhost:5000';
+    const emulatorUrl = 'http://10.0.2.2:5000';
+
+    const candidates = [];
+    // Only include LAN IP if it's not localhost/127.0.0.1/10.0.2.2
+    if (defaultUrl && !defaultUrl.includes('localhost') && !defaultUrl.includes('127.0.0.1') && !defaultUrl.includes('10.0.2.2')) {
+      candidates.push(defaultUrl);
+    }
+    candidates.push(localhostUrl);
+    if (Platform.OS === 'android') {
+      candidates.push(emulatorUrl);
+    }
+
+    const testUrl = async (url) => {
+      try {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), 600); // 600ms timeout
+        const res = await fetch(`${url}/health`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+        clearTimeout(id);
+        if (res.status === 200) {
+          return url;
+        }
+      } catch (e) {
+        // ignore
+      }
+      throw new Error('failed');
+    };
+
+    let resolved = false;
+    let failedCount = 0;
+
+    candidates.forEach((url) => {
+      testUrl(url)
+        .then((successfulUrl) => {
+          if (!resolved) {
+            resolved = true;
+            resolvedBaseUrl = successfulUrl;
+            console.log(`[API Base Resolver] Active backend detected: ${resolvedBaseUrl}`);
+            resolve(resolvedBaseUrl);
+          }
+        })
+        .catch(() => {
+          failedCount++;
+          if (failedCount === candidates.length && !resolved) {
+            resolved = true;
+            resolvedBaseUrl = defaultUrl;
+            console.log(`[API Base Resolver] No active backend detected. Falling back to default URL: ${resolvedBaseUrl}`);
+            resolve(resolvedBaseUrl);
+          }
+        });
+    });
+  });
+};
+
+// Start background detection immediately in DEV mode
+if (__DEV__) {
+  startBaseUrlDetection();
+}
+
+export const getApiBaseUrl = () => {
+  if (resolvedBaseUrl) {
+    return resolvedBaseUrl;
+  }
+  return getDefaultApiBaseUrl();
 };
 
 export const resolveApiUrl = (path) => {
@@ -100,3 +172,4 @@ export const resolveApiUrl = (path) => {
   }
   return fullUrl;
 };
+
