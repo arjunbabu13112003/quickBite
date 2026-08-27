@@ -2397,7 +2397,9 @@ function MainApp() {
           label: `📍 ${street}`,
           address: `${street}, ${place.district || ''}`,
           city: `${city}, ${place.country || 'India'}`,
-          isLive: true
+          isLive: true,
+          latitude,
+          longitude,
         };
         setSelectedAddress(liveAddressObj);
         setAddressesList(prev => [liveAddressObj, ...prev.filter(a => !a.isLive)]);
@@ -2409,7 +2411,9 @@ function MainApp() {
           label: `📍 Live Location`,
           address: `GPS: ${latitude.toFixed(3)}, ${longitude.toFixed(3)}`,
           city: 'Current Area',
-          isLive: true
+          isLive: true,
+          latitude,
+          longitude,
         };
         setSelectedAddress(fallbackLive);
         setIsAddressModalOpen(false);

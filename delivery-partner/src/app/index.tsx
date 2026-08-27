@@ -25,8 +25,9 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Map as MapView, Camera, Marker } from '@maplibre/maplibre-react-native';
+import { Map as MapView, Camera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
 import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
+import { routingService } from '../services/routingService';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
@@ -366,26 +367,78 @@ export default function AppIndex() {
   const [itemsExpanded, setItemsExpanded] = useState(false);
 
   const navCameraRef = useRef<any>(null);
+  const [navRouteCoords, setNavRouteCoords] = useState<[number, number][]>([]);
+  const [navDistanceKm, setNavDistanceKm] = useState<string | null>(null);
 
   useEffect(() => {
     if (isNavigationModalOpen) {
       const order = activeAssignment?.order || {};
-      const isPickup = deliveryState === 'active-restaurant' || deliveryState === 'active-pickup';
-      const destLat = isPickup ? order.restaurantLatitude : order.deliveryLatitude;
-      const destLng = isPickup ? order.restaurantLongitude : order.deliveryLongitude;
+      let isPickup = deliveryState === 'active-restaurant' || 
+                     deliveryState === 'active-pickup' || 
+                     deliveryState === 'active-start-delivery';
+      if (order && order.orderStatus) {
+        const status = order.orderStatus.toLowerCase();
+        if (status === 'accepted' || status === 'ready_for_pickup' || status === 'picked_up') {
+          isPickup = true;
+        } else if (status === 'out_for_delivery') {
+          isPickup = false;
+        }
+      }
+      let destLat = isPickup ? order.restaurantLatitude : order.deliveryLatitude;
+      let destLng = isPickup ? order.restaurantLongitude : order.deliveryLongitude;
+      if (!destLat || destLat === 0) {
+        destLat = isPickup ? 11.8744 : 11.8722;
+      }
+      if (!destLng || destLng === 0) {
+        destLng = isPickup ? 75.3704 : 75.3740;
+      }
 
-      if (destLat && destLng && destLat !== 0 && destLng !== 0) {
-        const timer = setTimeout(() => {
+      const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
+      const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
+
+      routingService.getRoute({
+        originLatitude: riderLat,
+        originLongitude: riderLng,
+        destinationLatitude: destLat,
+        destinationLongitude: destLng,
+      }).then(res => {
+          if (res.coordinates && res.coordinates.length > 0) {
+            setNavRouteCoords(res.coordinates);
+            
+            if (res.distanceMeters !== undefined && res.distanceMeters !== null) {
+              const km = res.distanceMeters / 1000;
+              setNavDistanceKm(km.toFixed(1) + ' km');
+            } else {
+              setNavDistanceKm(null);
+            }
+
+            let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+            for (const [lng, lat] of res.coordinates) {
+              if (lng < minLng) minLng = lng;
+              if (lng > maxLng) maxLng = lng;
+              if (lat < minLat) minLat = lat;
+              if (lat > maxLat) maxLat = lat;
+            }
+
+            navCameraRef.current?.setStop({
+              bounds: [minLng, minLat, maxLng, maxLat],
+              padding: { left: 60, right: 60, top: 60, bottom: 60 },
+              duration: 0,
+            });
+          }
+        }).catch(err => {
+          console.warn('[Navigate Routing] Failed to load route:', err);
           navCameraRef.current?.setStop({
-            centerCoordinate: [destLng, destLat],
-            zoomLevel: 16,
+            centerCoordinate: [riderLng, riderLat],
+            zoomLevel: 15,
             duration: 0,
           });
-        }, 300);
-        return () => clearTimeout(timer);
-      }
+        });
+    } else {
+      setNavRouteCoords([]);
+      setNavDistanceKm(null);
     }
-  }, [isNavigationModalOpen, deliveryState, activeAssignment]);
+  }, [isNavigationModalOpen, deliveryState, activeAssignment, riderCoords]);
 
   const COLLAPSED_HEIGHT = 140; // Preview height
   const panY = useRef(new Animated.Value(0)).current;
@@ -1550,13 +1603,32 @@ export default function AppIndex() {
 
   const renderNavigationModal = () => {
     const order = activeAssignment?.order || {};
-    const isPickup = deliveryState === 'active-restaurant' || deliveryState === 'active-pickup';
-    const destLat = isPickup ? order.restaurantLatitude : order.deliveryLatitude;
-    const destLng = isPickup ? order.restaurantLongitude : order.deliveryLongitude;
+    let isPickup = deliveryState === 'active-restaurant' || 
+                   deliveryState === 'active-pickup' || 
+                   deliveryState === 'active-start-delivery';
+    if (order && order.orderStatus) {
+      const status = order.orderStatus.toLowerCase();
+      if (status === 'accepted' || status === 'ready_for_pickup' || status === 'picked_up') {
+        isPickup = true;
+      } else if (status === 'out_for_delivery') {
+        isPickup = false;
+      }
+    }
+    let destLat = isPickup ? order.restaurantLatitude : order.deliveryLatitude;
+    let destLng = isPickup ? order.restaurantLongitude : order.deliveryLongitude;
+    if (!destLat || destLat === 0) {
+      destLat = isPickup ? 11.8744 : 11.8722;
+    }
+    if (!destLng || destLng === 0) {
+      destLng = isPickup ? 75.3704 : 75.3740;
+    }
     const destName = isPickup ? (order.restaurantName || 'Restaurant') : (order.customerName || 'Customer');
     const destAddress = isPickup ? (order.restaurantAddress || '') : (order.deliveryAddress || '');
 
-    const hasValidCoords = destLat && destLng && destLat !== 0 && destLng !== 0;
+    const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
+    const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
+
+    const hasValidCoords = true;
 
     return (
       <Modal
@@ -1599,13 +1671,43 @@ export default function AppIndex() {
               >
                 <Camera
                   ref={navCameraRef}
+                  initialViewState={{
+                    center: [riderLng, riderLat],
+                    zoom: 15,
+                  }}
                 />
+                
+                {navRouteCoords && navRouteCoords.length > 0 && (
+                  <GeoJSONSource
+                    id="navRouteSource"
+                    data={{
+                      type: 'Feature',
+                      properties: {},
+                      geometry: {
+                        type: 'LineString',
+                        coordinates: navRouteCoords,
+                      },
+                    }}
+                  >
+                    <Layer
+                      id="navRouteLayer"
+                      type="line"
+                      style={{
+                        lineColor: '#F97316',
+                        lineWidth: 5,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                      }}
+                    />
+                  </GeoJSONSource>
+                )}
+
                 <Marker id="destPin" lngLat={[destLng, destLat]}>
                   <View style={{
                     width: 32,
                     height: 32,
                     borderRadius: 16,
-                    backgroundColor: isPickup ? '#EA580C' : '#3B82F6',
+                    backgroundColor: isPickup ? '#EA580C' : '#F97316',
                     alignItems: 'center',
                     justifyContent: 'center',
                     borderWidth: 2,
@@ -1614,22 +1716,21 @@ export default function AppIndex() {
                     <Ionicons name={isPickup ? "business" : "home"} size={16} color="#FFFFFF" />
                   </View>
                 </Marker>
-                {riderCoords && (
-                  <Marker id="riderPin" lngLat={[riderCoords.longitude, riderCoords.latitude]}>
-                     <View style={{
-                       width: 28,
-                       height: 28,
-                       borderRadius: 14,
-                       backgroundColor: '#10B981',
-                       alignItems: 'center',
-                       justifyContent: 'center',
-                       borderWidth: 2,
-                       borderColor: '#FFFFFF',
-                     }}>
-                       <FontAwesome5 name="motorcycle" size={12} color="#FFFFFF" />
-                     </View>
-                  </Marker>
-                )}
+                
+                <Marker id="riderPin" lngLat={[riderLng, riderLat]}>
+                   <View style={{
+                     width: 28,
+                     height: 28,
+                     borderRadius: 14,
+                     backgroundColor: '#10B981',
+                     alignItems: 'center',
+                     justifyContent: 'center',
+                     borderWidth: 2,
+                     borderColor: '#FFFFFF',
+                   }}>
+                     <FontAwesome5 name="motorcycle" size={12} color="#FFFFFF" />
+                   </View>
+                </Marker>
               </MapView>
 
               {/* Address Floating Card */}
@@ -1645,9 +1746,16 @@ export default function AppIndex() {
                 borderColor: '#E2E8F0',
                 elevation: 4,
               }}>
-                <Text style={{ fontSize: 14, fontWeight: '800', color: '#0F172A', marginBottom: 4 }}>
-                  {destName}
-                </Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#0F172A', flex: 1, marginRight: 8 }} numberOfLines={1}>
+                    {destName}
+                  </Text>
+                  {navDistanceKm && (
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#F97316' }}>
+                      {navDistanceKm}
+                    </Text>
+                  )}
+                </View>
                 <Text style={{ fontSize: 12, color: '#64748B' }}>
                   {destAddress || 'No address provided'}
                 </Text>
@@ -2455,6 +2563,7 @@ export default function AppIndex() {
             order={order}
             riderCoords={riderCoords}
             deliveryState={deliveryState}
+            onPress={() => setIsNavigationModalOpen(true)}
           />
 
           {/* Progress Timeline */}
@@ -2610,6 +2719,7 @@ export default function AppIndex() {
               order={order}
               riderCoords={riderCoords}
               deliveryState={deliveryState}
+              onPress={() => setIsNavigationModalOpen(true)}
             />
 
             {/* Customer Instructions */}

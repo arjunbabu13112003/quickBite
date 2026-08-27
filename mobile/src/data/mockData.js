@@ -21,13 +21,13 @@ export const PROMO_CODES = [
 ];
 
 export const PRESET_ADDRESSES = [
-  { id: 'kannur', label: 'Fort Road, Kannur', address: 'Near Railway Station, Fort Road', city: 'Kannur, Kerala', default: true },
-  { id: 'kozhikode', label: 'Mavoor Road, Kozhikode', address: 'Focus Mall Area, Mavoor Road', city: 'Kozhikode, Kerala', default: false },
-  { id: 'kollam', label: 'Chinnakada, Kollam', address: 'Near Clock Tower, Chinnakada', city: 'Kollam, Kerala', default: false },
-  { id: 'kochi', label: 'MG Road, Kochi', address: 'Marine Drive, MG Road, Ernakulam', city: 'Kochi, Kerala', default: false },
-  { id: 'trivandrum', label: 'Technopark, Trivandrum', address: 'Phase 3, Technopark Campus, Kazhakkoottam', city: 'Trivandrum, Kerala', default: false },
-  { id: 'thrissur', label: 'Swaraj Round, Thrissur', address: 'Round North, City Center', city: 'Thrissur, Kerala', default: false },
-  { id: 'kottayam', label: 'Kanjikuzhy, Kottayam', address: 'Kottayam Kumarakom Rd', city: 'Kottayam, Kerala', default: false }
+  { id: 'kannur', label: 'Fort Road, Kannur', address: 'Near Railway Station, Fort Road', city: 'Kannur, Kerala', default: true, latitude: 11.8722, longitude: 75.3740 },
+  { id: 'kozhikode', label: 'Mavoor Road, Kozhikode', address: 'Focus Mall Area, Mavoor Road', city: 'Kozhikode, Kerala', default: false, latitude: 11.2588, longitude: 75.7804 },
+  { id: 'kollam', label: 'Chinnakada, Kollam', address: 'Near Clock Tower, Chinnakada', city: 'Kollam, Kerala', default: false, latitude: 8.8932, longitude: 76.6141 },
+  { id: 'kochi', label: 'MG Road, Kochi', address: 'Marine Drive, MG Road, Ernakulam', city: 'Kochi, Kerala', default: false, latitude: 9.9816, longitude: 76.2999 },
+  { id: 'trivandrum', label: 'Technopark, Trivandrum', address: 'Phase 3, Technopark Campus, Kazhakkoottam', city: 'Trivandrum, Kerala', default: false, latitude: 8.5241, longitude: 76.9366 },
+  { id: 'thrissur', label: 'Swaraj Round, Thrissur', address: 'Round North, City Center', city: 'Thrissur, Kerala', default: false, latitude: 10.5276, longitude: 76.2144 },
+  { id: 'kottayam', label: 'Kanjikuzhy, Kottayam', address: 'Kottayam Kumarakom Rd', city: 'Kottayam, Kerala', default: false, latitude: 9.5916, longitude: 76.5222 }
 ];
 
 export const DRIVER_PROFILES = [

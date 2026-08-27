@@ -11,6 +11,7 @@ interface MapPlaceholderProps {
   order?: any;
   riderCoords?: { latitude: number; longitude: number; heading?: number | null } | null;
   deliveryState?: string;
+  onPress?: () => void;
 }
 
 // Helper: Haversine distance in meters
@@ -51,17 +52,18 @@ export default function MapPlaceholder({
   destinationName,
   order,
   riderCoords,
-  deliveryState
+  deliveryState,
+  onPress
 }: MapPlaceholderProps) {
   // Determine lifecycle stage & coordinates
   const isPickupStage = useMemo(() => {
     // If backend status is available, use it as the authoritative source
     if (order && order.orderStatus) {
       const status = order.orderStatus.toLowerCase();
-      if (status === 'accepted' || status === 'ready_for_pickup') {
+      if (status === 'accepted' || status === 'ready_for_pickup' || status === 'picked_up') {
         return true;
       }
-      if (status === 'picked_up' || status === 'out_for_delivery') {
+      if (status === 'out_for_delivery') {
         return false;
       }
     }
@@ -69,18 +71,23 @@ export default function MapPlaceholder({
     // Fallback to deliveryState client representation
     return (
       deliveryState === 'active-restaurant' ||
-      deliveryState === 'active-pickup'
+      deliveryState === 'active-pickup' ||
+      deliveryState === 'active-start-delivery'
     );
   }, [order?.orderStatus, deliveryState]);
 
   const destLat = useMemo(() => {
     if (!order) return null;
-    return isPickupStage ? order.restaurantLatitude : order.deliveryLatitude;
+    const val = isPickupStage ? order.restaurantLatitude : order.deliveryLatitude;
+    if (val && val !== 0) return val;
+    return isPickupStage ? 11.8744 : 11.8722;
   }, [order, isPickupStage]);
 
   const destLng = useMemo(() => {
     if (!order) return null;
-    return isPickupStage ? order.restaurantLongitude : order.deliveryLongitude;
+    const val = isPickupStage ? order.restaurantLongitude : order.deliveryLongitude;
+    if (val && val !== 0) return val;
+    return isPickupStage ? 75.3704 : 75.3740;
   }, [order, isPickupStage]);
 
   const destType = isPickupStage ? 'pickup' : 'dropoff';
@@ -250,7 +257,7 @@ export default function MapPlaceholder({
   // Render MapLibre Live Navigation Map
   if (shouldRenderMap) {
     return (
-      <View style={styles.container}>
+      <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={styles.container}>
         <MapView
           style={styles.map}
           mapStyle="https://tiles.openfreemap.org/styles/liberty"
@@ -355,13 +362,13 @@ export default function MapPlaceholder({
             )}
           </View>
         )}
-      </View>
+      </TouchableOpacity>
     );
   }
 
   // Render original static styled layout fallback if coordinates are missing/loading
   return (
-    <View style={styles.container}>
+    <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={styles.container}>
       <View style={styles.seaBg} />
       <View style={styles.landBg} />
 
@@ -408,7 +415,7 @@ export default function MapPlaceholder({
           </View>
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 }
 
