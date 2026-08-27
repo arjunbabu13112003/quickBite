@@ -369,6 +369,11 @@ export default function AppIndex() {
   const navCameraRef = useRef<any>(null);
   const [navRouteCoords, setNavRouteCoords] = useState<[number, number][]>([]);
   const [navDistanceKm, setNavDistanceKm] = useState<string | null>(null);
+  const [isNavigatingLive, setIsNavigatingLive] = useState(false);
+  const [navRouteSteps, setNavRouteSteps] = useState<any[]>([]);
+  const lastRiderCoordsRef = useRef<{ latitude: number, longitude: number } | null>(null);
+  const [calculatedBearing, setCalculatedBearing] = useState(0);
+  const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
 
   useEffect(() => {
     if (isNavigationModalOpen) {
@@ -404,6 +409,7 @@ export default function AppIndex() {
       }).then(res => {
           if (res.coordinates && res.coordinates.length > 0) {
             setNavRouteCoords(res.coordinates);
+            setNavRouteSteps(res.steps || []);
             
             if (res.distanceMeters !== undefined && res.distanceMeters !== null) {
               const km = res.distanceMeters / 1000;
@@ -420,25 +426,135 @@ export default function AppIndex() {
               if (lat > maxLat) maxLat = lat;
             }
 
-            navCameraRef.current?.setStop({
-              bounds: [minLng, minLat, maxLng, maxLat],
-              padding: { left: 60, right: 60, top: 60, bottom: 60 },
-              duration: 0,
-            });
+            if (!isNavigatingLive) {
+              navCameraRef.current?.setStop({
+                bounds: [minLng, minLat, maxLng, maxLat],
+                padding: { left: 60, right: 60, top: 60, bottom: 60 },
+                duration: 0,
+              });
+            }
           }
         }).catch(err => {
           console.warn('[Navigate Routing] Failed to load route:', err);
           navCameraRef.current?.setStop({
-            centerCoordinate: [riderLng, riderLat],
-            zoomLevel: 15,
+            center: [riderLng, riderLat],
+            zoom: 15,
             duration: 0,
           });
         });
     } else {
       setNavRouteCoords([]);
       setNavDistanceKm(null);
+      setNavRouteSteps([]);
+      setIsNavigatingLive(false);
     }
-  }, [isNavigationModalOpen, deliveryState, activeAssignment, riderCoords]);
+  }, [isNavigationModalOpen, deliveryState, activeAssignment, riderCoords, isNavigatingLive]);
+
+  useEffect(() => {
+    const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
+    const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
+
+    const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371e3; // meters
+      const phi1 = (lat1 * Math.PI) / 180;
+      const phi2 = (lat2 * Math.PI) / 180;
+      const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+      const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+      const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    const getCoordsBearing = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const lat1Rad = lat1 * Math.PI / 180;
+      const lat2Rad = lat2 * Math.PI / 180;
+      const y = Math.sin(dLon) * Math.cos(lat2Rad);
+      const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+      const brng = Math.atan2(y, x) * 180 / Math.PI;
+      return (brng + 360) % 360;
+    };
+
+    if (isNavigatingLive && navRouteCoords && navRouteCoords.length > 1) {
+      let targetPt = navRouteCoords[1];
+      for (let i = 1; i < navRouteCoords.length; i++) {
+        const pt = navRouteCoords[i];
+        if (getDistanceMeters(riderLat, riderLng, pt[1], pt[0]) > 15) {
+          targetPt = pt;
+          break;
+        }
+      }
+      const routeBrng = getCoordsBearing(riderLat, riderLng, targetPt[1], targetPt[0]);
+      setCalculatedBearing(routeBrng);
+    } else if (riderCoords) {
+      if (riderCoords.heading !== undefined && riderCoords.heading !== null && riderCoords.heading !== 0) {
+        setCalculatedBearing(riderCoords.heading);
+      } else if (lastRiderCoordsRef.current) {
+        const prev = lastRiderCoordsRef.current;
+        const dist = getDistanceMeters(prev.latitude, prev.longitude, riderCoords.latitude, riderCoords.longitude);
+        if (dist > 1.5) {
+          const deltaBrng = getCoordsBearing(prev.latitude, prev.longitude, riderCoords.latitude, riderCoords.longitude);
+          setCalculatedBearing(deltaBrng);
+        }
+      }
+    }
+
+    if (riderCoords) {
+      lastRiderCoordsRef.current = { latitude: riderCoords.latitude, longitude: riderCoords.longitude };
+    }
+  }, [riderCoords, isNavigatingLive, navRouteCoords]);
+
+  useEffect(() => {
+    let headingSubscription: any = null;
+    let lastHeading = 0;
+    
+    const startHeadingWatcher = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        
+        headingSubscription = await Location.watchHeadingAsync((data) => {
+          const headingVal = data.trueHeading >= 0 ? data.trueHeading : data.magHeading;
+          if (Math.abs(headingVal - lastHeading) > 1.5) {
+            lastHeading = headingVal;
+            setDeviceHeading(headingVal);
+          }
+        });
+      } catch (err) {
+        console.warn('[Heading Watcher] Failed to watch heading:', err);
+      }
+    };
+
+    if (isNavigationModalOpen && isNavigatingLive) {
+      startHeadingWatcher();
+    } else {
+      setDeviceHeading(null);
+    }
+
+    return () => {
+      if (headingSubscription) {
+        headingSubscription.remove();
+      }
+    };
+  }, [isNavigationModalOpen, isNavigatingLive]);
+
+  useEffect(() => {
+    if (isNavigationModalOpen && isNavigatingLive) {
+      const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
+      const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
+      const targetBearing = deviceHeading !== null ? deviceHeading : calculatedBearing;
+      navCameraRef.current?.setStop({
+        center: [riderLng, riderLat],
+        zoom: 17,
+        pitch: 60,
+        bearing: targetBearing,
+        padding: { top: 0, bottom: 220, left: 0, right: 0 },
+        duration: 400,
+      });
+    }
+  }, [riderCoords, isNavigatingLive, isNavigationModalOpen, calculatedBearing, deviceHeading]);
 
   const COLLAPSED_HEIGHT = 140; // Preview height
   const panY = useRef(new Animated.Value(0)).current;
@@ -1630,6 +1746,85 @@ export default function AppIndex() {
 
     const hasValidCoords = true;
 
+    const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371e3; // meters
+      const phi1 = (lat1 * Math.PI) / 180;
+      const phi2 = (lat2 * Math.PI) / 180;
+      const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+      const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+      const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    let activeStep: any = null;
+    let upcomingTurnStep: any = null;
+    let distanceToTurn: number | null = null;
+    if (isNavigatingLive && navRouteSteps && navRouteSteps.length > 0) {
+      let minDistance = Infinity;
+      let closestIndex = 0;
+      navRouteSteps.forEach((step, idx) => {
+        const [lng, lat] = step.location;
+        const dist = getDistance(riderLat, riderLng, lat, lng);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestIndex = idx;
+        }
+      });
+      activeStep = navRouteSteps[closestIndex];
+
+      for (let i = closestIndex + 1; i < navRouteSteps.length; i++) {
+        const step = navRouteSteps[i];
+        const type = step.maneuverType?.toLowerCase() || '';
+        const modifier = step.maneuverModifier?.toLowerCase() || '';
+        if (type.includes('turn') || modifier.includes('left') || modifier.includes('right')) {
+          upcomingTurnStep = step;
+          const [turnLng, turnLat] = step.location;
+          distanceToTurn = getDistance(riderLat, riderLng, turnLat, turnLng);
+          break;
+        }
+      }
+    }
+
+    const getStepInstructionText = (step: any, fallbackName: string) => {
+      if (!step) return `Head towards ${fallbackName}`;
+      const type = step.maneuverType?.toLowerCase() || '';
+      const modifier = step.maneuverModifier?.toLowerCase() || '';
+      const roadName = step.name || '';
+
+      if (type === 'depart') {
+        return `Head towards ${fallbackName}${roadName ? ' on ' + roadName : ''}`;
+      }
+      if (type === 'arrive') {
+        return `You have arrived at ${fallbackName}!`;
+      }
+      
+      let turnDir = '';
+      if (modifier.includes('left')) turnDir = 'left';
+      else if (modifier.includes('right')) turnDir = 'right';
+      else if (modifier === 'uturn') turnDir = 'around (U-Turn)';
+      else turnDir = 'straight';
+
+      if (turnDir === 'straight') {
+        return `Continue straight${roadName ? ' onto ' + roadName : ''}`;
+      }
+      return `Turn ${turnDir}${roadName ? ' onto ' + roadName : ''}`;
+    };
+
+    const getStepIcon = (step: any) => {
+      if (!step) return 'arrow-up';
+      const type = step.maneuverType?.toLowerCase() || '';
+      const modifier = step.maneuverModifier?.toLowerCase() || '';
+      if (type === 'arrive') return 'flag';
+      
+      if (modifier.includes('left')) return 'arrow-back';
+      if (modifier.includes('right')) return 'arrow-forward';
+      if (modifier === 'uturn') return 'refresh';
+      return 'arrow-up';
+    };
+
     return (
       <Modal
         visible={isNavigationModalOpen}
@@ -1638,27 +1833,62 @@ export default function AppIndex() {
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
           {/* Header */}
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: 16,
-            paddingVertical: 14,
-            borderBottomWidth: 1,
-            borderBottomColor: '#E2E8F0',
-            backgroundColor: '#FFFFFF',
-          }}>
-            <TouchableOpacity onPress={() => setIsNavigationModalOpen(false)}>
-              <Ionicons name="arrow-back" size={24} color="#0F172A" />
-            </TouchableOpacity>
-            <View style={{ marginLeft: 16, flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
-                Location Pin
-              </Text>
-              <Text style={{ fontSize: 12, color: '#64748B' }} numberOfLines={1}>
-                {destName}
-              </Text>
+          {isNavigatingLive ? (
+            <View style={{
+              backgroundColor: '#065F46',
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              elevation: 6,
+            }}>
+              <View style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: '#FFFFFF',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 12,
+              }}>
+                <Ionicons 
+                  name={getStepIcon(activeStep) as any} 
+                  size={22} 
+                  color="#065F46" 
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#A7F3D0', letterSpacing: 0.5 }}>
+                  {activeStep?.distance ? `IN ${(activeStep.distance).toFixed(0)}m` : 'NAVIGATING'}
+                </Text>
+                <Text style={{ fontSize: 15, fontWeight: '800', color: '#FFFFFF' }} numberOfLines={1}>
+                  {getStepInstructionText(activeStep, destName)}
+                </Text>
+              </View>
             </View>
-          </View>
+          ) : (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              borderBottomWidth: 1,
+              borderBottomColor: '#E2E8F0',
+              backgroundColor: '#FFFFFF',
+            }}>
+              <TouchableOpacity onPress={() => setIsNavigationModalOpen(false)}>
+                <Ionicons name="arrow-back" size={24} color="#0F172A" />
+              </TouchableOpacity>
+              <View style={{ marginLeft: 16, flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                  Location Pin
+                </Text>
+                <Text style={{ fontSize: 12, color: '#64748B' }} numberOfLines={1}>
+                  {destName}
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Map or Fallback */}
           {hasValidCoords ? (
@@ -1693,7 +1923,7 @@ export default function AppIndex() {
                       id="navRouteLayer"
                       type="line"
                       style={{
-                        lineColor: '#F97316',
+                        lineColor: '#2563EB',
                         lineWidth: 5,
                         lineCap: 'round',
                         lineJoin: 'round',
@@ -1733,33 +1963,137 @@ export default function AppIndex() {
                 </Marker>
               </MapView>
 
-              {/* Address Floating Card */}
-              <View style={{
-                position: 'absolute',
-                bottom: 24,
-                left: 16,
-                right: 16,
-                backgroundColor: '#FFFFFF',
-                borderRadius: 12,
-                padding: 16,
-                borderWidth: 1,
-                borderColor: '#E2E8F0',
-                elevation: 4,
-              }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#0F172A', flex: 1, marginRight: 8 }} numberOfLines={1}>
-                    {destName}
+              {/* Turn Proximity Popup (within 100 meters of upcoming turn) */}
+              {upcomingTurnStep && distanceToTurn !== null && distanceToTurn <= 100 && (
+                <View style={{
+                  position: 'absolute',
+                  top: 24,
+                  alignSelf: 'center',
+                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                  borderRadius: 20,
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                  elevation: 6,
+                  shadowColor: '#000000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 6,
+                }}>
+                  <Ionicons 
+                    name={getStepIcon(upcomingTurnStep) as any} 
+                    size={16} 
+                    color="#2563EB" 
+                    style={{ marginRight: 8 }} 
+                  />
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#0F172A' }}>
+                    Turn {upcomingTurnStep.maneuverModifier?.charAt(0).toUpperCase() + upcomingTurnStep.maneuverModifier?.slice(1)} in {distanceToTurn.toFixed(0)}m
                   </Text>
-                  {navDistanceKm && (
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#F97316' }}>
-                      {navDistanceKm}
-                    </Text>
-                  )}
                 </View>
-                <Text style={{ fontSize: 12, color: '#64748B' }}>
-                  {destAddress || 'No address provided'}
-                </Text>
-              </View>
+              )}
+
+              {/* Address or Navigation Floating Card */}
+              {isNavigatingLive ? (
+                <View style={{
+                  position: 'absolute',
+                  bottom: 24,
+                  left: 16,
+                  right: 16,
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 16,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                  elevation: 6,
+                  shadowColor: '#000000',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 10,
+                }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View>
+                      <Text style={{ fontSize: 20, fontWeight: '900', color: '#059669' }}>
+                        {navDistanceKm || '—'}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 2 }}>
+                        Remaining to {isPickup ? 'hotel' : 'customer'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setIsNavigatingLive(false)}
+                      style={{
+                        backgroundColor: '#EF4444',
+                        paddingHorizontal: 20,
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                      }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>
+                        Exit
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={{
+                  position: 'absolute',
+                  bottom: 24,
+                  left: 16,
+                  right: 16,
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 12,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                  elevation: 4,
+                }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#0F172A', flex: 1, marginRight: 8 }} numberOfLines={1}>
+                      {destName}
+                    </Text>
+                    {navDistanceKm && (
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#F97316' }}>
+                        {navDistanceKm}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>
+                    {destAddress || 'No address provided'}
+                  </Text>
+                  
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setIsNavigatingLive(true);
+                      navCameraRef.current?.setStop({
+                        center: [riderLng, riderLat],
+                        zoom: 17,
+                        pitch: 60,
+                        bearing: riderCoords?.heading || 0,
+                        padding: { top: 0, bottom: 220, left: 0, right: 0 },
+                        duration: 1000,
+                      });
+                    }}
+                    style={{
+                      backgroundColor: '#F97316',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      paddingVertical: 12,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <Ionicons name="navigate" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                      Start Navigation
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           ) : (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>

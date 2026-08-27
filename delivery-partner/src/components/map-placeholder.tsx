@@ -233,9 +233,9 @@ export default function MapPlaceholder({
       setHasFitInitialBounds(true);
     } else if (isCameraFollowing) {
       cameraRef.current.setStop({
-        centerCoordinate: [riderCoords!.longitude, riderCoords!.latitude],
-        zoomLevel: 15.5,
-        heading: riderCoords!.heading || 0,
+        center: [riderCoords!.longitude, riderCoords!.latitude],
+        zoom: 15.5,
+        bearing: riderCoords!.heading || 0,
         pitch: 45,
         duration: 1000,
       });
