@@ -111,6 +111,33 @@ export class Order {
   })
   deliveryLongitude?: number;
 
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  deliveryBypassLatitude?: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  deliveryBypassLongitude?: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
+  deliveryBypassDistance?: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deliveryBypassTimestamp?: Date;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   placedAt: Date;
 

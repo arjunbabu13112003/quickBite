@@ -235,7 +235,14 @@ export class DeliveryPartnersController {
     if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
       throw new ForbiddenException('Forbidden resource');
     }
-    return this.partnersService.verifyActiveDeliveryPin(req.user.userId, dto.pin);
+    return this.partnersService.verifyActiveDeliveryPin(
+      req.user.userId,
+      dto.pin,
+      dto.bypassLatitude,
+      dto.bypassLongitude,
+      dto.bypassDistance,
+      dto.bypassTimestamp
+    );
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)

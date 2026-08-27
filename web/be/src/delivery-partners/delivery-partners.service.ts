@@ -2583,7 +2583,14 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async verifyActiveDeliveryPin(userId: number, pin: string): Promise<any> {
+  async verifyActiveDeliveryPin(
+    userId: number,
+    pin: string,
+    bypassLatitude?: number,
+    bypassLongitude?: number,
+    bypassDistance?: number,
+    bypassTimestamp?: string
+  ): Promise<any> {
     const partner = await this.partnerRepository.findOne({ where: { userId } });
     if (!partner) {
       throw new NotFoundException('Delivery partner not found.');
@@ -2647,6 +2654,14 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
     order.deliveryPinAttemptCount = 0;
     order.deliveryPinLockedUntil = null;
     order.deliveryPinVerifiedAt = new Date();
+
+    if (bypassLatitude !== undefined && bypassLongitude !== undefined) {
+      order.deliveryBypassLatitude = bypassLatitude;
+      order.deliveryBypassLongitude = bypassLongitude;
+      order.deliveryBypassDistance = bypassDistance;
+      order.deliveryBypassTimestamp = bypassTimestamp ? new Date(bypassTimestamp) : new Date();
+    }
+
     await this.orderRepository.save(order);
 
     return {

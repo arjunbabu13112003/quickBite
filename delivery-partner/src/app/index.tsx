@@ -371,9 +371,93 @@ export default function AppIndex() {
   const [navDistanceKm, setNavDistanceKm] = useState<string | null>(null);
   const [isNavigatingLive, setIsNavigatingLive] = useState(false);
   const [navRouteSteps, setNavRouteSteps] = useState<any[]>([]);
+  const [hasReachedCustomer, setHasReachedCustomer] = useState(false);
+  const hasReachedCustomerRef = useRef(false);
+  const alertShownRef = useRef(false);
+  const bypassDetailsRef = useRef<{
+    latitude: number;
+    longitude: number;
+    distance: number;
+    timestamp: string;
+  } | null>(null);
   const lastRiderCoordsRef = useRef<{ latitude: number, longitude: number } | null>(null);
   const [calculatedBearing, setCalculatedBearing] = useState(0);
-  const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
+  const deviceHeadingRef = useRef<number | null>(null);
+
+  const updateHasReachedCustomer = (val: boolean) => {
+    setHasReachedCustomer(val);
+    hasReachedCustomerRef.current = val;
+  };
+
+  useEffect(() => {
+    if (deliveryState !== 'active-delivery') {
+      updateHasReachedCustomer(false);
+      alertShownRef.current = false;
+      bypassDetailsRef.current = null;
+    }
+  }, [deliveryState]);
+
+  const handleVerifyDeliveryPress = () => {
+    const riderLat = riderCoords?.latitude || 11.8744;
+    const riderLng = riderCoords?.longitude || 75.3704;
+    const order = activeAssignment?.order || {};
+    let destLat = order.deliveryLatitude;
+    let destLng = order.deliveryLongitude;
+    if (!destLat || destLat === 0) {
+      destLat = 11.8722;
+    }
+    if (!destLng || destLng === 0) {
+      destLng = 75.3740;
+    }
+
+    const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371e3; // meters
+      const phi1 = (lat1 * Math.PI) / 180;
+      const phi2 = (lat2 * Math.PI) / 180;
+      const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+      const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+      const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    const dist = getDistance(riderLat, riderLng, destLat, destLng);
+    if (dist <= 100) {
+      alertShownRef.current = true;
+      updateHasReachedCustomer(true);
+      setIsNavigationModalOpen(false);
+      setIsNavigatingLive(false);
+      Alert.alert(
+        "Arrival",
+        "You have reached the delivery location.",
+        [{ text: "OK" }]
+      );
+    } else {
+      Alert.alert(
+        "Warning",
+        "Customer is at a different location. Do you want to verify delivery here?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Continue",
+            onPress: () => {
+              bypassDetailsRef.current = {
+                latitude: riderLat,
+                longitude: riderLng,
+                distance: parseFloat((dist / 1000).toFixed(3)), // distance in km
+                timestamp: new Date().toISOString()
+              };
+              updateHasReachedCustomer(true);
+              setIsNavigationModalOpen(false);
+              setIsNavigatingLive(false);
+            }
+          }
+        ]
+      );
+    }
+  };
 
   useEffect(() => {
     if (isNavigationModalOpen) {
@@ -517,9 +601,23 @@ export default function AppIndex() {
         
         headingSubscription = await Location.watchHeadingAsync((data) => {
           const headingVal = data.trueHeading >= 0 ? data.trueHeading : data.magHeading;
-          if (Math.abs(headingVal - lastHeading) > 1.5) {
+          if (Math.abs(headingVal - lastHeading) > 1.0) {
             lastHeading = headingVal;
-            setDeviceHeading(headingVal);
+            deviceHeadingRef.current = headingVal;
+            
+            // Perform direct imperative MapLibre camera rotation update on the native thread
+            if (navCameraRef.current && isNavigatingLive) {
+              const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
+              const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
+              navCameraRef.current.setStop({
+                center: [riderLng, riderLat],
+                zoom: 17,
+                pitch: 60,
+                bearing: headingVal,
+                padding: { top: 0, bottom: 220, left: 0, right: 0 },
+                duration: 200, // Butter-smooth high-frequency native updates
+              });
+            }
           }
         });
       } catch (err) {
@@ -530,7 +628,7 @@ export default function AppIndex() {
     if (isNavigationModalOpen && isNavigatingLive) {
       startHeadingWatcher();
     } else {
-      setDeviceHeading(null);
+      deviceHeadingRef.current = null;
     }
 
     return () => {
@@ -538,23 +636,23 @@ export default function AppIndex() {
         headingSubscription.remove();
       }
     };
-  }, [isNavigationModalOpen, isNavigatingLive]);
+  }, [isNavigationModalOpen, isNavigatingLive, riderCoords]);
 
   useEffect(() => {
     if (isNavigationModalOpen && isNavigatingLive) {
       const riderLat = (riderCoords && riderCoords.latitude) ? riderCoords.latitude : 11.8744;
       const riderLng = (riderCoords && riderCoords.longitude) ? riderCoords.longitude : 75.3704;
-      const targetBearing = deviceHeading !== null ? deviceHeading : calculatedBearing;
+      const targetBearing = deviceHeadingRef.current !== null ? deviceHeadingRef.current : calculatedBearing;
       navCameraRef.current?.setStop({
         center: [riderLng, riderLat],
         zoom: 17,
         pitch: 60,
         bearing: targetBearing,
         padding: { top: 0, bottom: 220, left: 0, right: 0 },
-        duration: 400,
+        duration: 500, // Smooth position panning interpolation
       });
     }
-  }, [riderCoords, isNavigatingLive, isNavigationModalOpen, calculatedBearing, deviceHeading]);
+  }, [riderCoords, isNavigatingLive, isNavigationModalOpen, calculatedBearing]);
 
   const COLLAPSED_HEIGHT = 140; // Preview height
   const panY = useRef(new Animated.Value(0)).current;
@@ -968,7 +1066,13 @@ export default function AppIndex() {
     setPartnerPinError('');
     setIsVerifyingPartnerPin(true);
     try {
-      const res = await api.verifyActiveDeliveryPin(partnerPinInput);
+      const res = await api.verifyActiveDeliveryPin(
+        partnerPinInput,
+        bypassDetailsRef.current?.latitude,
+        bypassDetailsRef.current?.longitude,
+        bypassDetailsRef.current?.distance,
+        bypassDetailsRef.current?.timestamp
+      );
       if (res.verified) {
         // Update local activeAssignment state to mark it verified
         setActiveAssignment((prev: any) => {
@@ -1246,6 +1350,50 @@ export default function AppIndex() {
               longitude: loc.coords.longitude,
               heading: loc.coords.heading,
             });
+
+            // 2. Check for customer arrival (30 meters radius) if out for delivery
+            if (active && deliveryState === 'active-delivery' && !hasReachedCustomerRef.current) {
+              const order = activeAssignment?.order || {};
+              let destLat = order.deliveryLatitude;
+              let destLng = order.deliveryLongitude;
+              if (!destLat || destLat === 0) {
+                destLat = 11.8722;
+              }
+              if (!destLng || destLng === 0) {
+                destLng = 75.3740;
+              }
+
+              const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+                const R = 6371e3; // meters
+                const phi1 = (lat1 * Math.PI) / 180;
+                const phi2 = (lat2 * Math.PI) / 180;
+                const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+                const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+                const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                          Math.cos(phi1) * Math.cos(phi2) *
+                          Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
+              };
+
+              const dist = getDistance(loc.coords.latitude, loc.coords.longitude, destLat, destLng);
+              if (dist <= 100 && !alertShownRef.current) {
+                alertShownRef.current = true;
+                updateHasReachedCustomer(true);
+                setIsNavigationModalOpen(false);
+                setIsNavigatingLive(false);
+                Alert.alert(
+                  "Arrival",
+                  "You have reached the delivery location.",
+                  [
+                    {
+                      text: "OK",
+                      onPress: () => {}
+                    }
+                  ]
+                );
+              }
+            }
 
             // 2. Only send location updates to backend if background task (Phase 6B) is inactive
             if (!isBackgroundTrackingActive) {
@@ -2022,20 +2170,38 @@ export default function AppIndex() {
                         Remaining to {isPickup ? 'hotel' : 'customer'}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      activeOpacity={0.8}
-                      onPress={() => setIsNavigatingLive(false)}
-                      style={{
-                        backgroundColor: '#EF4444',
-                        paddingHorizontal: 20,
-                        paddingVertical: 10,
-                        borderRadius: 10,
-                      }}
-                    >
-                      <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>
-                        Exit
-                      </Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {!isPickup && (
+                        <TouchableOpacity
+                          activeOpacity={0.8}
+                          onPress={handleVerifyDeliveryPress}
+                          style={{
+                            backgroundColor: '#EA580C',
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                          }}
+                        >
+                          <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>
+                            Verify Delivery
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => setIsNavigatingLive(false)}
+                        style={{
+                          backgroundColor: '#EF4444',
+                          paddingHorizontal: 20,
+                          paddingVertical: 10,
+                          borderRadius: 10,
+                        }}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>
+                          Exit
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
               ) : (
@@ -2065,33 +2231,57 @@ export default function AppIndex() {
                     {destAddress || 'No address provided'}
                   </Text>
                   
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      setIsNavigatingLive(true);
-                      navCameraRef.current?.setStop({
-                        center: [riderLng, riderLat],
-                        zoom: 17,
-                        pitch: 60,
-                        bearing: riderCoords?.heading || 0,
-                        padding: { top: 0, bottom: 220, left: 0, right: 0 },
-                        duration: 1000,
-                      });
-                    }}
-                    style={{
-                      backgroundColor: '#F97316',
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      paddingVertical: 12,
-                      borderRadius: 8,
-                    }}
-                  >
-                    <Ionicons name="navigate" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                    <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                      Start Navigation
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        setIsNavigatingLive(true);
+                        navCameraRef.current?.setStop({
+                          center: [riderLng, riderLat],
+                          zoom: 17,
+                          pitch: 60,
+                          bearing: riderCoords?.heading || 0,
+                          padding: { top: 0, bottom: 220, left: 0, right: 0 },
+                          duration: 1000,
+                        });
+                      }}
+                      style={{
+                        backgroundColor: '#F97316',
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        paddingVertical: 12,
+                        borderRadius: 8,
+                      }}
+                    >
+                      <Ionicons name="navigate" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                        Start Navigation
+                      </Text>
+                    </TouchableOpacity>
+
+                    {!isPickup && (
+                      <TouchableOpacity
+                        activeOpacity={0.9}
+                        onPress={handleVerifyDeliveryPress}
+                        style={{
+                          backgroundColor: '#EA580C',
+                          flex: 1,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Ionicons name="checkmark-circle-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                          Verify Delivery
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               )}
             </View>
@@ -2846,7 +3036,7 @@ export default function AppIndex() {
             console.warn('First location update call failed, continuing status change:', updateErr);
           }
 
-          const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'out_for_delivery');
+           const result = await api.updateDeliveryOrderStatus(activeAssignment.order.id, 'out_for_delivery');
           await startTrackingCoordinator(activeAssignment.order.id, useBackground);
           
           setActiveAssignment((prev: any) => {
@@ -2856,6 +3046,8 @@ export default function AppIndex() {
               order: { ...prev.order, orderStatus: result.orderStatus || 'out_for_delivery' }
             };
           });
+          setIsNavigationModalOpen(true);
+          setIsNavigatingLive(true);
           changeDeliveryState('active-delivery');
         }
       } catch (err: any) {
@@ -3113,7 +3305,7 @@ export default function AppIndex() {
             </View>
 
             {/* CUSTOMER PIN VERIFICATION BOX */}
-            {order.deliveryPinRequired && (
+            {hasReachedCustomer && order.deliveryPinRequired && (
               <View style={[
                 styles.pinVerificationBox,
                 { backgroundColor: themedBoxBg, borderColor: themedBoxBorder },
@@ -3221,7 +3413,18 @@ export default function AppIndex() {
 
           {/* Sticky Action Button Container */}
           <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
-            {order.paymentMethod?.toUpperCase() === 'COD' && !isCashCollected ? (
+            {!hasReachedCustomer ? (
+              <TouchableOpacity 
+                activeOpacity={0.8}
+                onPress={() => {
+                  setIsNavigationModalOpen(true);
+                  setIsNavigatingLive(true);
+                }}
+                style={styles.stickyFooterButton}
+              >
+                <Text style={styles.stickyFooterButtonText}>Navigate to Customer</Text>
+              </TouchableOpacity>
+            ) : order.paymentMethod?.toUpperCase() === 'COD' && !isCashCollected ? (
               <TouchableOpacity 
                 activeOpacity={0.8}
                 onPress={handleCollectCod}

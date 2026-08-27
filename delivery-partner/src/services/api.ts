@@ -382,7 +382,13 @@ const apiMethods = {
     return await res.json();
   },
 
-  verifyActiveDeliveryPin: async (pin: string) => {
+  verifyActiveDeliveryPin: async (
+    pin: string,
+    bypassLatitude?: number,
+    bypassLongitude?: number,
+    bypassDistance?: number,
+    bypassTimestamp?: string
+  ) => {
     const token = await getAuthToken();
     if (!token) throw new Error('No token found');
 
@@ -392,7 +398,13 @@ const apiMethods = {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({
+        pin,
+        bypassLatitude,
+        bypassLongitude,
+        bypassDistance,
+        bypassTimestamp
+      }),
     });
 
     if (res.status === 401) {
