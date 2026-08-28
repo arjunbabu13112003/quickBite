@@ -17,23 +17,10 @@ const localIp = getLocalIp();
 
 // Automatically write/update the .env file with the dynamic local IP address if not already present
 try {
-  let existingUrl = '';
-  if (fs.existsSync('.env')) {
-    const content = fs.readFileSync('.env', 'utf8');
-    const match = content.match(/EXPO_PUBLIC_API_BASE_URL=(.+)/);
-    if (match && match[1] && match[1].trim() !== '') {
-      existingUrl = match[1].trim();
-    }
-  }
-
-  if (existingUrl) {
-    console.log(`[AppConfig] Using existing EXPO_PUBLIC_API_BASE_URL=${existingUrl} from .env`);
-  } else {
-    fs.writeFileSync('.env', `EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000\n`, 'utf8');
-    console.log(`[AppConfig] Successfully wrote EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000 to .env`);
-  }
+  fs.writeFileSync('.env', `EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000\n`, 'utf8');
+  console.log(`[AppConfig] Successfully wrote EXPO_PUBLIC_API_BASE_URL=http://${localIp}:5000 to .env`);
 } catch (e) {
-  console.error('[AppConfig] Failed to write/read .env file:', e);
+  console.error('[AppConfig] Failed to write .env file:', e);
 }
 
 module.exports = {
@@ -49,6 +36,7 @@ module.exports = {
   },
   android: {
     package: "com.quickbite.deliverypartner",
+    googleServicesFile: "./google-services.json",
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -90,7 +78,8 @@ module.exports = {
         isAndroidBackgroundLocationEnabled: true
       }
     ],
-    "@maplibre/maplibre-react-native"
+    "@maplibre/maplibre-react-native",
+    "expo-notifications"
   ],
   experiments: {
     typedRoutes: true,

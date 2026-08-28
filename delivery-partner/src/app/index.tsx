@@ -27,6 +27,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Map as MapView, Camera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
 import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
+import { startBaseUrlDetection } from '../services/apiResolver';
 import { routingService } from '../services/routingService';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
@@ -1348,12 +1349,23 @@ export default function AppIndex() {
       return null;
     }
     let token;
+    
+    // Expo Go vs Dev Client check
+    const isExpoGo = Constants.executionEnvironment === 'storeClient';
+    if (isExpoGo) {
+      console.warn('[PUSH] WARNING: Running in Expo Go! Custom EAS Project push notifications will not work correctly in Expo Go. You must use the custom Development Build (Dev Client).');
+    } else {
+      console.log('[PUSH] Running in custom Development Build (Dev Client) - OK!');
+    }
+
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
         name: 'default',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#FF231F7C',
+        bypassDnd: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     }
 
@@ -1369,9 +1381,10 @@ export default function AppIndex() {
     }
     
     try {
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId || 'babb9a3e-3f0e-4387-ab2b-2da011752f04';
+      console.log('[PUSH] Using EAS Project ID for push token registration:', projectId);
       token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-      console.log('[PUSH] Expo token retrieved:', token);
+      console.log('[PUSH] Expo token generated:', token);
     } catch (error) {
       console.warn('[PUSH] Failed to retrieve Expo push token:', error);
     }
@@ -1384,11 +1397,16 @@ export default function AppIndex() {
       const pushToken = await registerForPushNotificationsAsync();
       if (!pushToken) return;
 
-      console.log('[PUSH] Registering push token with backend:', pushToken);
       const token = await getAuthToken();
       if (!token) return;
 
-      const endpoint = resolveApiUrl('/users/push-token');
+      const endpointBase = await startBaseUrlDetection();
+      const endpoint = `${endpointBase}/users/push-token`;
+
+      console.log('[PUSH] Registering token');
+      console.log(`[PUSH] User/Partner ID: ${currentPartner?.id || currentPartner?.userId}`);
+      console.log(`[PUSH] Token: ${pushToken}`);
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {

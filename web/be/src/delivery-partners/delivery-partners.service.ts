@@ -80,7 +80,7 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async checkStalePartners() {
-    const staleTime = new Date(Date.now() - 75000); // 75 seconds ago
+    const staleTime = new Date(Date.now() - 300000); // 300,000 ms = 5 minutes ago
     const onlinePartners = await this.partnerRepository.find({
       where: { isOnline: true },
     });
@@ -1134,13 +1134,6 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
       orderId,
       saved.id
     ).catch(err => console.error('[Notification Offer Error]:', err));
-
-    this.notificationsService.sendPartnerPush(
-      partnerId,
-      'New Delivery Assigned',
-      `You have been offered a new delivery request (Order #${orderNo}).`,
-      { orderId, type: 'new_assignment' }
-    );
 
     return saved;
   }
@@ -2799,5 +2792,19 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const d = R * c; // Distance in km
     return Math.round(d * 10) / 10; // Round to 1 decimal place
+  }
+
+  async sendTestPushNotification(userId: number, title: string, bodyText: string, data?: any) {
+    const partner = await this.partnerRepository.findOne({
+      where: { userId },
+      relations: ['user'],
+    });
+
+    if (!partner) {
+      throw new NotFoundException(`Delivery partner profile not found.`);
+    }
+
+    await this.notificationsService.sendPartnerPush(partner.id, title, bodyText, data);
+    return { success: true, message: `Test push sent to Partner #${partner.id}` };
   }
 }

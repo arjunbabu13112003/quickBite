@@ -36,7 +36,8 @@ module.exports = {
   },
   android: {
     backgroundColor: "#ffffff",
-    package: "com.anonymous.quickbitemobileapp"
+    package: "com.anonymous.quickbitemobileapp",
+    googleServicesFile: "./google-services.json"
   },
   plugins: [
     "@maplibre/maplibre-react-native"

@@ -322,6 +322,9 @@ export class UsersService {
   }
 
   async registerPushToken(userId: number, pushToken: string) {
+    console.log('[PUSH] Registering token');
+    console.log(`[PUSH] User/Partner ID: ${userId}`);
+    console.log(`[PUSH] Token: ${pushToken}`);
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found');

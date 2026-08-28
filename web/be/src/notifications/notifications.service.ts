@@ -129,7 +129,14 @@ export class NotificationsService {
       assignmentId,
     });
 
-    return await this.partnerNotificationRepository.save(notification);
+    const saved = await this.partnerNotificationRepository.save(notification);
+
+    // Automatically trigger push notification to partner device
+    this.sendPartnerPush(deliveryPartnerId, title, message, { orderId, type }).catch(err => {
+      console.error(`[PUSH] Failed to send partner push during notification creation:`, err);
+    });
+
+    return saved;
   }
 
   async getPartnerNotifications(userId: number): Promise<DeliveryPartnerNotification[]> {
@@ -245,7 +252,17 @@ export class NotificationsService {
   private sendExpoPush(pushToken: string, userId: number, title: string, body: string, data?: any) {
     (async () => {
       try {
-        console.log(`[PUSH] Sending push to User #${userId} (${pushToken}): ${title}`);
+        const payload = {
+          to: pushToken,
+          sound: 'default',
+          title,
+          body,
+          data: data || {},
+        };
+        console.log(`[PUSH SEND] recipient: User #${userId}`);
+        console.log(`[PUSH SEND] token: ${pushToken}`);
+        console.log(`[PUSH SEND] payload: ${JSON.stringify(payload)}`);
+
         const response = await fetch('https://exp.host/--/api/v2/push/send', {
           method: 'POST',
           headers: {
@@ -253,36 +270,48 @@ export class NotificationsService {
             'Accept-Encoding': 'gzip, deflate',
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            to: pushToken,
-            sound: 'default',
-            title,
-            body,
-            data: data || {},
-          }),
+          body: JSON.stringify(payload),
         });
 
         if (!response.ok) {
-          console.warn(`[PUSH] Expo push API returned status ${response.status} for User #${userId}`);
+          console.warn(`[PUSH SEND] Expo push API returned status ${response.status} for User #${userId}`);
           return;
         }
 
         const resBody = await response.json();
-        console.log('[PUSH] Expo push ticket response:', JSON.stringify(resBody));
+        console.log(`[PUSH SEND] Expo response: ${JSON.stringify(resBody)}`);
         const ticket = Array.isArray(resBody?.data) ? resBody.data[0] : resBody?.data;
 
         if (ticket) {
           if (ticket.status === 'error') {
-            console.warn(`[PUSH] Expo ticket error for User #${userId}: ${ticket.message}`);
-            if (ticket.details?.error === 'DeviceNotRegistered') {
-              console.log(`[PUSH] Clearing invalid/expired token for User #${userId}`);
-              await this.userRepository.update(userId, { pushToken: null });
+            console.error(`[PUSH TICKET ERROR] Recipient: User #${userId}`);
+            console.error(`[PUSH TICKET ERROR] Error message: ${ticket.message}`);
+            if (ticket.details?.error) {
+              const errCode = ticket.details.error;
+              console.error(`[PUSH TICKET ERROR] Error code: ${errCode}`);
+              
+              if (errCode === 'InvalidCredentials') {
+                console.error(`[PUSH ERROR: FCM CONFIG] InvalidCredentials: The FCM credentials uploaded to EAS for this project are invalid or not configured.`);
+              } else if (errCode === 'MismatchSenderId') {
+                console.error(`[PUSH ERROR: FCM CONFIG] MismatchSenderId: The sender ID in the push token does not match the FCM credentials on EAS. Verify google-services.json matches EAS credentials.`);
+              } else if (errCode === 'DeviceNotRegistered') {
+                console.error(`[PUSH ERROR: FCM CONFIG] DeviceNotRegistered: The device token is invalid or expired. Nullifying the token.`);
+                const user = await this.userRepository.findOne({ where: { id: userId } });
+                if (user && user.pushToken === pushToken) {
+                  console.log(`[PUSH] Nullifying invalid token: ${pushToken}`);
+                  await this.userRepository.update(userId, { pushToken: null });
+                }
+              } else if (errCode === 'MessageTooBig') {
+                console.error(`[PUSH ERROR: PAYLOAD] MessageTooBig: The message payload is too large.`);
+              } else if (errCode === 'MessageRateExceeded') {
+                console.error(`[PUSH ERROR: RATE] MessageRateExceeded: The push sending rate limit has been exceeded.`);
+              }
             }
           } else if (ticket.status === 'ok' && ticket.id) {
-            console.log(`[PUSH] Expo ticket generated: ${ticket.id}. Scheduling receipt check...`);
+            console.log(`[PUSH] Expo ticket generated: ${ticket.id}. Scheduling receipt check in 15 seconds...`);
             setTimeout(() => {
-              this.checkExpoReceipt(ticket.id, userId);
-            }, 900000);
+              this.checkExpoReceipt(ticket.id, userId, pushToken, 0);
+            }, 15000);
           }
         }
       } catch (err: any) {
@@ -291,10 +320,10 @@ export class NotificationsService {
     })();
   }
 
-  private checkExpoReceipt(ticketId: string, userId: number) {
+  private checkExpoReceipt(ticketId: string, userId: number, pushToken: string, retryCount = 0) {
     (async () => {
       try {
-        console.log(`[PUSH] Checking receipt for ticket ${ticketId} (User #${userId})...`);
+        console.log(`[PUSH] Checking receipt for ticket ${ticketId} (User #${userId}), try #${retryCount + 1}...`);
         const response = await fetch('https://exp.host/--/api/v2/push/getReceipts', {
           method: 'POST',
           headers: {
@@ -313,17 +342,47 @@ export class NotificationsService {
         }
 
         const resBody = await response.json();
+        console.log(`[PUSH RECEIPT] Expo response: ${JSON.stringify(resBody)}`);
         const receipt = resBody?.data && resBody.data[ticketId];
 
         if (receipt) {
           if (receipt.status === 'error') {
-            console.warn(`[PUSH] Receipt error for User #${userId}: ${receipt.message}`);
-            if (receipt.details?.error === 'DeviceNotRegistered') {
-              console.log(`[PUSH] Clearing invalid/expired token on receipt check for User #${userId}`);
-              await this.userRepository.update(userId, { pushToken: null });
+            console.error(`[PUSH RECEIPT ERROR] Recipient: User #${userId}`);
+            console.error(`[PUSH RECEIPT ERROR] Error message: ${receipt.message}`);
+            if (receipt.details?.error) {
+              const errCode = receipt.details.error;
+              console.error(`[PUSH RECEIPT ERROR] Error code: ${errCode}`);
+              
+              if (errCode === 'InvalidCredentials') {
+                console.error(`[PUSH ERROR: FCM CONFIG] InvalidCredentials: The FCM credentials uploaded to EAS for this project are invalid or not configured.`);
+              } else if (errCode === 'MismatchSenderId') {
+                console.error(`[PUSH ERROR: FCM CONFIG] MismatchSenderId: The sender ID in the push token does not match the FCM credentials on EAS. Verify google-services.json matches EAS credentials.`);
+              } else if (errCode === 'DeviceNotRegistered') {
+                console.error(`[PUSH ERROR: FCM CONFIG] DeviceNotRegistered: The device token is invalid or expired. Nullifying the token.`);
+                const user = await this.userRepository.findOne({ where: { id: userId } });
+                if (user && user.pushToken === pushToken) {
+                  console.log(`[PUSH] Nullifying invalid token: ${pushToken}`);
+                  await this.userRepository.update(userId, { pushToken: null });
+                }
+              } else if (errCode === 'MessageTooBig') {
+                console.error(`[PUSH ERROR: PAYLOAD] MessageTooBig: The message payload is too large.`);
+              } else if (errCode === 'MessageRateExceeded') {
+                console.error(`[PUSH ERROR: RATE] MessageRateExceeded: The push sending rate limit has been exceeded.`);
+              }
             }
           } else if (receipt.status === 'ok') {
-            console.log(`[PUSH] Receipt check success for User #${userId}`);
+            console.log(`[PUSH RECEIPT] Success for User #${userId}`);
+          }
+        } else {
+          // Receipt not available yet - schedule retry
+          if (retryCount < 3) {
+            const delay = retryCount === 0 ? 60000 : 300000; // 1 minute for 2nd try, 5 minutes for subsequent
+            console.log(`[PUSH RECEIPT] Receipt not available yet for ticket ${ticketId}. Retrying in ${delay / 1000}s...`);
+            setTimeout(() => {
+              this.checkExpoReceipt(ticketId, userId, pushToken, retryCount + 1);
+            }, delay);
+          } else {
+            console.log(`[PUSH RECEIPT] Reached max retries for ticket ${ticketId}. Giving up.`);
           }
         }
       } catch (err: any) {

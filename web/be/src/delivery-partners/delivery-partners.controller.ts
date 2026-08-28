@@ -201,6 +201,20 @@ export class DeliveryPartnersController {
     }
     return this.partnersService.getActiveDelivery(req.user.userId);
   }
+  
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/test-push')
+  async testPush(@Request() req, @Body() body: { title?: string; body?: string; data?: any }) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.sendTestPushNotification(
+      req.user.userId,
+      body.title || 'Test Notification',
+      body.body || 'This is a test notification from QuickBite.',
+      body.data
+    );
+  }
 
   @Roles(UserRole.DELIVERY_PARTNER)
   @Patch('delivery-partners/me/status')

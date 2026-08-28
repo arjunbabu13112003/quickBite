@@ -96,19 +96,27 @@ export const startBaseUrlDetection = () => {
     const emulatorUrl = 'http://10.0.2.2:5000';
 
     const candidates = [];
-    // Only include LAN IP if it's not localhost/127.0.0.1/10.0.2.2
-    if (defaultUrl && !defaultUrl.includes('localhost') && !defaultUrl.includes('127.0.0.1') && !defaultUrl.includes('10.0.2.2')) {
+    candidates.push(localhostUrl); // Try localhost first for adb reverse
+    
+    // Add env url if configured
+    const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+    if (envUrl && !candidates.includes(envUrl)) {
+      candidates.push(envUrl);
+    }
+
+    if (defaultUrl && !candidates.includes(defaultUrl) && !defaultUrl.includes('localhost') && !defaultUrl.includes('127.0.0.1') && !defaultUrl.includes('10.0.2.2')) {
       candidates.push(defaultUrl);
     }
-    candidates.push(localhostUrl);
-    if (Platform.OS === 'android') {
+    if (Platform.OS === 'android' && !candidates.includes(emulatorUrl)) {
       candidates.push(emulatorUrl);
     }
+
+    console.log(`[API Base Resolver] Testing candidate URLs: ${candidates.join(', ')}`);
 
     const testUrl = async (url) => {
       try {
         const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), 600); // 600ms timeout
+        const id = setTimeout(() => controller.abort(), 3000); // 3000ms timeout for wireless debugging latency
         const res = await fetch(`${url}/health`, {
           method: 'GET',
           signal: controller.signal,
