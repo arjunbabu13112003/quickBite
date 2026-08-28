@@ -28,7 +28,7 @@ module.exports = {
   slug: "quickbite-partner",
   version: "1.0.0",
   orientation: "portrait",
-  icon: "./assets/images/icon.png",
+  icon: "./assets/delivery-partner-logo.png",
   scheme: "deliverypartner",
   userInterfaceStyle: "automatic",
   ios: {
@@ -38,9 +38,8 @@ module.exports = {
     package: "com.quickbite.deliverypartner",
     googleServicesFile: "./google-services.json",
     adaptiveIcon: {
-      backgroundColor: "#E6F4FE",
-      foregroundImage: "./assets/images/android-icon-foreground.png",
-      backgroundImage: "./assets/images/android-icon-background.png",
+      foregroundImage: "./assets/delivery-partner-logo.png",
+      backgroundColor: "#FFFFFF",
       monochromeImage: "./assets/images/android-icon-monochrome.png"
     },
     predictiveBackGestureEnabled: false,
@@ -82,6 +81,8 @@ module.exports = {
     [
       "expo-notifications",
       {
+        icon: "./assets/notifications/notification-icon.png",
+        color: "#FF7A00",
         sounds: ["./assets/sounds/quickbite_alert.wav"]
       }
     ]
