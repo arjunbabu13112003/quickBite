@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "892621074343",
+    "project_id": "food-app-56c61",
+    "storage_bucket": "food-app-56c61.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:892621074343:android:bee190a7b27082e103d082",
+        "android_client_info": {
+          "package_name": "com.anonymous.quickbitemobileapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0I58oyiyvfnATK1YxJbrCYCoi6sKExdE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:892621074343:android:86e8784ff401c02203d082",
+        "android_client_info": {
+          "package_name": "com.quickbite.deliverypartner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0I58oyiyvfnATK1YxJbrCYCoi6sKExdE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

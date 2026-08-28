@@ -26,6 +26,7 @@ try {
 module.exports = {
   name: "QuickBite Mobile App",
   slug: "quickbite-mobile-app",
+  icon: "./assets/quickbite-logo.png",
   scheme: "quickbitemobile",
   version: "1.0.0",
   orientation: "portrait",
@@ -37,15 +38,25 @@ module.exports = {
   android: {
     backgroundColor: "#ffffff",
     package: "com.anonymous.quickbitemobileapp",
-    googleServicesFile: "./google-services.json"
+    googleServicesFile: "./google-services.json",
+    adaptiveIcon: {
+      foregroundImage: "./assets/quickbite-logo.png",
+      backgroundColor: "#FFFFFF"
+    }
   },
   plugins: [
-    "@maplibre/maplibre-react-native"
+    "@maplibre/maplibre-react-native",
+    [
+      "expo-notifications",
+      {
+        sounds: ["./assets/sounds/quickbite_alert.wav"]
+      }
+    ]
   ],
   extra: {
     backendIp: localIp,
     eas: {
-      projectId: "86b6a378-0cb9-470f-aa16-1f6cc79e6f3d"
+      projectId: "cc5a8d68-fc76-4dd6-8ae2-a1e134f091aa"
     }
   }
 };

@@ -104,9 +104,12 @@ import Constants from 'expo-constants';
 if (Notifications) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
       shouldShowAlert: true,
       shouldPlaySound: true,
-      shouldShowBadge: true,
+      shouldSetBadge: false,
+      priority: Notifications.AndroidNotificationPriority.MAX,
     }),
   });
 }
@@ -1985,66 +1988,76 @@ function MainApp() {
   ]);
 
   // ─── PUSH NOTIFICATIONS REGISTRATION ──────────────────────────────────────
+  const lastRegisteredTokenRef = useRef(null);
+
   const registerForPushNotificationsAsync = async () => {
     if (!Notifications) {
-      console.log('[PUSH] Notifications module is not available (native module missing)');
+      console.log('[PUSH ERROR] Notifications module is not available (native module missing)');
       return null;
     }
-    let token;
-    
-    // Expo Go vs Dev Client check
-    const isExpoGo = Constants.executionEnvironment === 'storeClient';
-    if (isExpoGo) {
-      console.warn('[PUSH] WARNING: Running in Expo Go! Custom EAS Project push notifications will not work correctly in Expo Go. You must use the custom Development Build (Dev Client).');
-    } else {
-      console.log('[PUSH] Running in custom Development Build (Dev Client) - OK!');
-    }
 
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF231F7C',
-        bypassDnd: true,
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-      });
-    }
-
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== 'granted') {
-      console.log('[PUSH] Failed to get push token: permission not granted');
-      return null;
-    }
-    
     try {
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId || '86b6a378-0cb9-470f-aa16-1f6cc79e6f3d';
-      console.log('[PUSH] Using EAS Project ID for push token registration:', projectId);
-      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-      console.log('[PUSH] Expo token generated:', token);
-    } catch (error) {
-      console.warn('[PUSH] Failed to retrieve Expo push token:', error);
-    }
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('quickbite-alerts-v5', {
+          name: 'QuickBite Alerts',
+          importance: Notifications.AndroidImportance.MAX,
+          sound: 'quickbite_alert.wav',
+          vibrationPattern: [0, 250, 250, 250],
+          enableVibrate: true,
+          enableLights: true,
+          lightColor: '#FF231F7C',
+          bypassDnd: true,
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        });
+      }
 
-    return token;
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      console.log(`[PUSH] Notification permission status: ${finalStatus}`);
+
+      if (finalStatus !== 'granted') {
+        console.log('[PUSH ERROR] Failed to get push token: permission not granted');
+        return null;
+      }
+
+      const projectId = "cc5a8d68-fc76-4dd6-8ae2-a1e134f091aa";
+      console.log(`[PUSH] Using EAS Project ID: ${projectId}`);
+
+      const tokenObj = await Notifications.getExpoPushTokenAsync({
+        projectId: projectId
+      });
+      const token = tokenObj.data;
+      console.log(`[PUSH] Expo token generated: ${token}`);
+      return token;
+    } catch (error) {
+      console.log(`[PUSH ERROR] ${error?.stack || error?.message || error}`);
+      return null;
+    }
   };
 
-  const registerPushTokenForUser = async (userToken) => {
+  const registerPushTokenForUser = async (userToken, userIdForLog) => {
     try {
+      console.log('[PUSH] Starting customer push registration');
       const pushToken = await registerForPushNotificationsAsync();
       if (!pushToken) return;
 
+      const activeUserId = userIdForLog || currentUser?.id;
+      const cacheKey = `${activeUserId}:${pushToken}`;
+      if (lastRegisteredTokenRef.current === cacheKey) {
+        console.log('[PUSH] Token already registered for this user session. Skipping duplicate registration.');
+        return;
+      }
+
+      console.log('[PUSH] Registering token');
+      console.log(`[PUSH] User ID: ${activeUserId}`);
+      console.log(`[PUSH] Token: ${pushToken}`);
+
       const endpointBase = await startBaseUrlDetection();
       const endpoint = `${endpointBase}/users/push-token`;
-      
-      console.log('[PUSH] Registering token');
-      console.log(`[PUSH] User/Partner ID: ${currentUser?.id}`);
-      console.log(`[PUSH] Token: ${pushToken}`);
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -2055,20 +2068,22 @@ function MainApp() {
         body: JSON.stringify({ pushToken }),
       });
       if (res.ok) {
+        lastRegisteredTokenRef.current = cacheKey;
         console.log('[PUSH] Push token successfully registered on backend');
       } else {
-        console.warn('[PUSH] Failed to register push token on backend:', res.status);
+        const errorText = await res.text().catch(() => '');
+        console.log(`[PUSH ERROR] Failed to register push token on backend: status ${res.status}, body: ${errorText}`);
       }
     } catch (error) {
-      console.warn('[PUSH] Error during push token registration:', error);
+      console.log(`[PUSH ERROR] ${error?.stack || error?.message || error}`);
     }
   };
 
   useEffect(() => {
     if (currentUser?.token) {
-      registerPushTokenForUser(currentUser.token);
+      registerPushTokenForUser(currentUser.token, currentUser.id);
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.token]);
 
   useEffect(() => {
     if (!Notifications) return;
@@ -2098,6 +2113,9 @@ function MainApp() {
           const savedAvatar = await AsyncStorage.getItem(`qb_avatar_${user.id}`);
           if (savedAvatar) user.avatar = savedAvatar;
           setCurrentUser(user);
+          if (user.token) {
+            registerPushTokenForUser(user.token, user.id);
+          }
           // Load user-specific cart, favorites, avatar
           const savedCart = await AsyncStorage.getItem(`qb_cart_${user.id}`);
           const savedFavs = await AsyncStorage.getItem(`qb_favs_${user.id}`);
@@ -2856,6 +2874,9 @@ function MainApp() {
           setActiveTab('home');
           setIsLoadingAuth(false);
           triggerToastNotification(`🎉 Welcome back, ${userObj.name}!`);
+          if (userObj.token) {
+            registerPushTokenForUser(userObj.token, userObj.id);
+          }
           return;
         } else {
           // STRICT BACKEND VERIFICATION: Wrong email or password -> SHOW ERROR & DO NOT LOG IN!

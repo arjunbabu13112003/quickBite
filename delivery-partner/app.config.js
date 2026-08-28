@@ -79,7 +79,12 @@ module.exports = {
       }
     ],
     "@maplibre/maplibre-react-native",
-    "expo-notifications"
+    [
+      "expo-notifications",
+      {
+        sounds: ["./assets/sounds/quickbite_alert.wav"]
+      }
+    ]
   ],
   experiments: {
     typedRoutes: true,

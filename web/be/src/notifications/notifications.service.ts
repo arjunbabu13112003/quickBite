@@ -254,9 +254,11 @@ export class NotificationsService {
       try {
         const payload = {
           to: pushToken,
-          sound: 'default',
           title,
           body,
+          sound: "quickbite_alert.wav",
+          priority: "high",
+          channelId: "quickbite-alerts-v5",
           data: data || {},
         };
         console.log(`[PUSH SEND] recipient: User #${userId}`);

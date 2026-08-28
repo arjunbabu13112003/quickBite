@@ -45,11 +45,12 @@ import Constants from 'expo-constants';
 if (Notifications) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
       shouldShowBanner: true,
       shouldShowList: true,
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      priority: Notifications.AndroidNotificationPriority.MAX,
     }),
   });
 }
@@ -1359,10 +1360,13 @@ export default function AppIndex() {
     }
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
+      await Notifications.setNotificationChannelAsync('quickbite-alerts-v5', {
+        name: 'QuickBite Alerts',
         importance: Notifications.AndroidImportance.MAX,
+        sound: 'quickbite_alert.wav',
         vibrationPattern: [0, 250, 250, 250],
+        enableVibrate: true,
+        enableLights: true,
         lightColor: '#FF231F7C',
         bypassDnd: true,
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
