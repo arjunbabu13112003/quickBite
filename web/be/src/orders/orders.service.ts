@@ -1182,9 +1182,8 @@ export class OrdersService {
 
     const metricsQuery = `
       SELECT 
-        COALESCE(SUM(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
+        COALESCE(SUM(CASE WHEN o."orderStatus" = 'delivered' THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
         COUNT(o.id) as "ordersCount",
-        COALESCE(AVG(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE NULL END), 0) as "avgOrderValue",
         COUNT(CASE WHEN o."orderStatus" = 'delivered' THEN 1 ELSE NULL END) as "completedOrders"
       FROM orders o
       WHERE o."placedAt" >= $1 AND o."placedAt" <= $2
@@ -1229,13 +1228,14 @@ export class OrdersService {
     const prevRevenue = parseFloat(prev.revenue || 0);
     const ordersCount = parseInt(curr.ordersCount || 0, 10);
     const prevOrdersCount = parseInt(prev.ordersCount || 0, 10);
-    const avgOrderValue = parseFloat(curr.avgOrderValue || 0);
-    const prevAvgOrderValue = parseFloat(prev.avgOrderValue || 0);
     const completedOrders = parseInt(curr.completedOrders || 0, 10);
     const prevCompletedOrders = parseInt(prev.completedOrders || 0, 10);
 
+    const avgOrderValue = completedOrders > 0 ? (revenue / completedOrders) : 0;
+    const prevAvgOrderValue = prevCompletedOrders > 0 ? (prevRevenue / prevCompletedOrders) : 0;
+
     const calcChange = (c: number, p: number) => {
-      if (p === 0) return c > 0 ? 100 : 0;
+      if (p === 0) return c > 0 ? null : 0;
       return parseFloat((((c - p) / p) * 100).toFixed(1));
     };
 
@@ -1255,7 +1255,7 @@ export class OrdersService {
     const trendQuery = `
       SELECT 
         DATE(o."placedAt") as "dateStr",
-        COALESCE(SUM(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
+        COALESCE(SUM(CASE WHEN o."orderStatus" = 'delivered' THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
         COUNT(o.id) as "ordersCount"
       FROM orders o
       WHERE o."placedAt" >= $1 AND o."placedAt" <= $2
@@ -1285,8 +1285,8 @@ export class OrdersService {
         oi."foodName" as "name",
         oi."foodImage" as "image",
         h.name as "restaurantName",
-        SUM(oi.quantity) as "soldCount",
-        SUM(oi."lineTotal") as "revenue"
+        SUM(CASE WHEN o."orderStatus" = 'delivered' THEN oi.quantity ELSE 0 END) as "soldCount",
+        SUM(CASE WHEN o."orderStatus" = 'delivered' THEN oi."lineTotal" ELSE 0 END) as "revenue"
       FROM order_items oi
       JOIN orders o ON oi."orderId" = o.id
       LEFT JOIN hotels h ON o."hotelId" = h.id
@@ -1308,23 +1308,32 @@ export class OrdersService {
           h.name as "name",
           COALESCE(u.name, 'No Admin Assigned') as "managerName",
           COUNT(o.id) as "ordersCount",
-          COALESCE(SUM(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
-          COALESCE(AVG(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE NULL END), 0) as "avgOrderValue",
-          COALESCE(AVG(r.rating), 4.5) as "rating",
+          COALESCE(SUM(CASE WHEN o."orderStatus" = 'delivered' THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
           COUNT(CASE WHEN o."orderStatus" = 'delivered' THEN 1 ELSE NULL END) as "completedOrdersCount"
         FROM hotels h
         LEFT JOIN orders o ON o."hotelId" = h.id AND o."placedAt" >= $1 AND o."placedAt" <= $2
         LEFT JOIN hotel_admins ha ON ha."hotelId" = h.id AND ha."isActive" = true
         LEFT JOIN users u ON u.id = ha."userId"
-        LEFT JOIN hotel_reviews r ON r."hotelId" = h.id AND r."createdAt" >= $1 AND r."createdAt" <= $2
         GROUP BY h.id, h.name, u.name
         ORDER BY "revenue" DESC
       `;
-      const perfRaw = await this.dataSource.query(performanceQuery, [start, end]);
+      const [perfRaw, ratingsRaw] = await Promise.all([
+        this.dataSource.query(performanceQuery, [start, end]),
+        this.dataSource.query(`
+          SELECT r."hotelId", COALESCE(AVG(r.rating), 4.5) as "avgRating"
+          FROM hotel_reviews r
+          GROUP BY r."hotelId"
+        `)
+      ]);
       performanceData = perfRaw.map((p: any) => {
         const total = parseInt(p.ordersCount || 0, 10);
         const comp = parseInt(p.completedOrdersCount || 0, 10);
+        const rev = parseFloat(p.revenue || 0);
         const rate = total > 0 ? Math.round((comp / total) * 100) : 0;
+        const avgVal = comp > 0 ? (rev / comp) : 0;
+        const ratingItem = ratingsRaw.find((r: any) => r.hotelId === p.hotelId);
+        const ratingVal = parseFloat(parseFloat(ratingItem?.avgRating || 4.5).toFixed(1));
+
         let status = 'STABLE';
         if (rate >= 90) status = 'EXCELLENT';
         else if (rate < 70) status = 'NEEDS ATTN';
@@ -1333,9 +1342,9 @@ export class OrdersService {
           name: p.name,
           managerName: p.managerName,
           orders: total,
-          revenue: parseFloat(p.revenue || 0),
-          avgOrderValue: parseFloat(p.avgOrderValue || 0),
-          rating: parseFloat(parseFloat(p.rating || 4.5).toFixed(1)),
+          revenue: rev,
+          avgOrderValue: avgVal,
+          rating: ratingVal,
           completionRate: rate,
           status,
         };

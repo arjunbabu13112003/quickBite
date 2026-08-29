@@ -38,6 +38,8 @@ export default function App() {
   const [isAdminValidating, setIsAdminValidating] = useState(false);
   const [adminAssignedHotels, setAdminAssignedHotels] = useState([]);
 
+  const [hasValidated, setHasValidated] = useState(false);
+
   // Session User state
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -84,75 +86,87 @@ export default function App() {
 
   // Session validation and active branch checking
   useEffect(() => {
-    if (currentPath !== '/login') {
-      const token = getStoredToken();
-      const storedUser = localStorage.getItem('qb_admin_user');
-
-      if (!token || !storedUser) {
-        navigateTo('/login');
-        return;
-      }
-
-      setIsAdminValidating(true);
-
-      const payload = verifyJwtToken(token);
-      if (!payload || (payload.role !== 'super_admin' && payload.role !== 'hotel_admin')) {
-        setIsAdminValidating(false);
-        clearSession();
-        navigateTo('/login');
-        return;
-      }
-
-      // Restore session details
-      if (payload.role === 'super_admin') {
-        api.getProfile()
-          .then(profile => {
-            if (profile.role !== 'super_admin') throw new Error('Not authorized');
-            const fullUser = { ...profile, token, accessToken: token };
-            setCurrentUser(fullUser);
-            localStorage.setItem('qb_admin_user', JSON.stringify(fullUser));
-            setIsAdminValidating(false);
-          })
-          .catch((err) => {
-            console.warn('Revalidation check failed:', err);
-            clearSession();
-            setIsAdminValidating(false);
-            navigateTo('/login?expired=true');
-          });
-      } else if (payload.role === 'hotel_admin') {
-        api.getMyHotels()
-          .then(hotels => {
-            const activeHotels = (hotels || []).filter(h => h.isActive);
-            setAdminAssignedHotels(activeHotels);
-
-            if (activeHotels.length === 0) {
-              setCurrentHotel(null);
-              localStorage.removeItem('qb_admin_hotel');
-            } else {
-              const stillAssigned = activeHotels.find(h => h.id === currentHotel?.id);
-              if (stillAssigned) {
-                setCurrentHotel(stillAssigned);
-                localStorage.setItem('qb_admin_hotel', JSON.stringify(stillAssigned));
-              } else {
-                const defaultHotel = activeHotels[0];
-                setCurrentHotel(defaultHotel);
-                localStorage.setItem('qb_admin_hotel', JSON.stringify(defaultHotel));
-              }
-            }
-            setIsAdminValidating(false);
-          })
-          .catch((err) => {
-            console.warn('Revalidation check failed:', err);
-            clearSession();
-            setIsAdminValidating(false);
-            navigateTo('/login?expired=true');
-          });
-      }
+    if (currentPath === '/login') {
+      return;
     }
-  }, [currentPath]);
+
+    const token = getStoredToken();
+    const storedUser = localStorage.getItem('qb_admin_user');
+
+    if (!token || !storedUser) {
+      navigateTo('/login');
+      return;
+    }
+
+    // Skip validation calls if state has already been initialized and checked once
+    if (currentUser && hasValidated) {
+      return;
+    }
+
+    setIsAdminValidating(true);
+
+    const payload = verifyJwtToken(token);
+    if (!payload || (payload.role !== 'super_admin' && payload.role !== 'hotel_admin')) {
+      setIsAdminValidating(false);
+      clearSession();
+      navigateTo('/login');
+      return;
+    }
+
+    // Restore session details
+    if (payload.role === 'super_admin') {
+      api.getProfile()
+        .then(profile => {
+          if (profile.role !== 'super_admin') throw new Error('Not authorized');
+          const fullUser = { ...profile, token, accessToken: token };
+          setCurrentUser(fullUser);
+          localStorage.setItem('qb_admin_user', JSON.stringify(fullUser));
+          setIsAdminValidating(false);
+          setHasValidated(true);
+        })
+        .catch((err) => {
+          console.warn('Revalidation check failed:', err);
+          clearSession();
+          setIsAdminValidating(false);
+          navigateTo('/login?expired=true');
+        });
+    } else if (payload.role === 'hotel_admin') {
+      api.getMyHotels()
+        .then(hotels => {
+          const activeHotels = (hotels || []).filter(h => h.isActive);
+          setAdminAssignedHotels(activeHotels);
+
+          if (activeHotels.length === 0) {
+            setCurrentHotel(null);
+            localStorage.removeItem('qb_admin_hotel');
+          } else {
+            const stillAssigned = activeHotels.find(h => h.id === currentHotel?.id);
+            if (stillAssigned) {
+              setCurrentHotel(stillAssigned);
+              localStorage.setItem('qb_admin_hotel', JSON.stringify(stillAssigned));
+            } else {
+              const defaultHotel = activeHotels[0];
+              setCurrentHotel(defaultHotel);
+              localStorage.setItem('qb_admin_hotel', JSON.stringify(defaultHotel));
+            }
+          }
+          const fullUser = JSON.parse(storedUser);
+          setCurrentUser(fullUser);
+          setIsAdminValidating(false);
+          setHasValidated(true);
+        })
+        .catch((err) => {
+          console.warn('Revalidation check failed:', err);
+          clearSession();
+          setIsAdminValidating(false);
+          navigateTo('/login?expired=true');
+        });
+    }
+  }, [currentPath, currentUser, hasValidated]);
 
   const handleLogout = () => {
     clearSession();
+    setHasValidated(false);
     navigateTo('/login');
   };
 
@@ -166,6 +180,7 @@ export default function App() {
         initialSessionExpired={isExpired}
         onLoginSuccess={(userData, hotelData) => {
           setCurrentUser(userData);
+          setHasValidated(true);
           if (hotelData) {
             setCurrentHotel(hotelData);
             navigateTo('/hotel-admin/dashboard');

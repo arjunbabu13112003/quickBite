@@ -839,4 +839,23 @@ input[type="datetime-local"].premium-form-control::-webkit-calendar-picker-indic
   appearance: textfield;
 }
 
+/* ==========================================================================
+   Smooth Scrolling & GPU Acceleration Optimizations
+   ========================================================================== */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Force hardware acceleration for smooth transitions */
+.hover-card,
+.btn-primary,
+.btn-secondary,
+button,
+a,
+input,
+select {
+  backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
+}
+
 

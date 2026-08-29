@@ -7,6 +7,7 @@ import { Order } from '../orders/order.entity';
 import { DeliveryPartner } from '../delivery-partners/delivery-partner.entity';
 import { OrderStatus } from '../orders/enums/order-status.enum';
 import { User } from '../users/user.entity';
+import { UserRole } from '../users/user-role.enum';
 
 @Injectable()
 export class NotificationsService {
@@ -212,6 +213,40 @@ export class NotificationsService {
       return;
     }
     this.sendExpoPush(user.pushToken, user.id, title, body, data);
+  }
+
+  async broadcastCustomerPush(title: string, body: string, data?: any) {
+    try {
+      const customers = await this.userRepository.find({
+        where: { role: UserRole.CUSTOMER },
+        select: ['id', 'pushToken'],
+      });
+
+      const uniqueTokens = new Set<string>();
+      const recipients: { id: number; token: string }[] = [];
+
+      for (const customer of customers) {
+        if (customer.pushToken && customer.pushToken.trim() !== '') {
+          const token = customer.pushToken.trim();
+          if (!uniqueTokens.has(token)) {
+            uniqueTokens.add(token);
+            recipients.push({ id: customer.id, token });
+          }
+        }
+      }
+
+      console.log(`[PUSH BROADCAST] Broadcasting to ${recipients.length} unique customer devices.`);
+
+      for (const recipient of recipients) {
+        try {
+          this.sendExpoPush(recipient.token, recipient.id, title, body, data);
+        } catch (err: any) {
+          console.error(`[PUSH BROADCAST ERROR] Failed to send push to User #${recipient.id}:`, err.message || err);
+        }
+      }
+    } catch (error: any) {
+      console.error('[PUSH BROADCAST ERROR] Failed in broadcastCustomerPush:', error.message || error);
+    }
   }
 
   async sendPartnerPush(partnerId: number, title: string, body: string, data?: any) {

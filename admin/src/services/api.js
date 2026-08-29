@@ -33,11 +33,16 @@ const getAuthHeaders = () => {
 
 // ─── Response Handler ────────────────────────────────────────────────────────
 
-const handleResponse = async (res) => {
+const handleResponse = async (res, isLoginRequest = false) => {
   if (res.status === 401) {
-    clearSession();
-    window.location.href = '/login?expired=true';
-    throw new Error('Session Expired');
+    if (!isLoginRequest) {
+      clearSession();
+      window.location.href = '/login?expired=true';
+      throw new Error('Session Expired');
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Invalid email or password');
+    }
   }
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
@@ -77,7 +82,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    return handleResponse(res);
+    return handleResponse(res, true);
   },
 
   // Get current logged-in user profile — used for session restoration

@@ -13,7 +13,7 @@ export default function Analytics({ onNavigate }) {
   // Filters State
   const [hotels, setHotels] = useState([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState({ id: '', name: 'All Restaurants' });
-  const [dateFilter, setDateFilter] = useState('7days'); // 'today', '7days', '30days', 'thisMonth', 'custom'
+  const [dateFilter, setDateFilter] = useState('today'); // 'today', '7days', '30days', 'thisMonth', 'custom'
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
   
   // Dropdown States
@@ -23,6 +23,30 @@ export default function Analytics({ onNavigate }) {
 
   // Analytics Data State
   const [data, setData] = useState(null);
+
+  const renderChangeIndicator = (change) => {
+    if (change === null) {
+      return (
+        <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+          New
+        </span>
+      );
+    }
+    const isPositive = change >= 0;
+    return (
+      <span style={{ 
+        display: 'inline-flex', 
+        alignItems: 'center', 
+        gap: '0.1rem', 
+        fontSize: '0.72rem', 
+        fontWeight: '800', 
+        color: isPositive ? '#10b981' : '#ef4444' 
+      }}>
+        {isPositive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+        {Math.abs(change)}%
+      </span>
+    );
+  };
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -366,41 +390,32 @@ export default function Analytics({ onNavigate }) {
       ) : (
         <>
           {/* ── TOP METRIC CARDS ── */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem' }}>
             
             {/* 1. Total Revenue */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem', boxShadow: 'var(--shadow-sm)' }}>
               <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Revenue</span>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.25rem 0.5rem' }}>
                 <span style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--text-main)' }}>₹{data.metrics.totalRevenue.value.toLocaleString('en-IN')}</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.72rem', fontWeight: '800', color: data.metrics.totalRevenue.change >= 0 ? '#10b981' : '#ef4444' }}>
-                  {data.metrics.totalRevenue.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                  {Math.abs(data.metrics.totalRevenue.change)}%
-                </span>
+                {renderChangeIndicator(data.metrics.totalRevenue.change)}
               </div>
             </div>
 
             {/* 2. Total Orders */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem', boxShadow: 'var(--shadow-sm)' }}>
               <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Orders</span>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.25rem 0.5rem' }}>
                 <span style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--text-main)' }}>{data.metrics.totalOrders.value.toLocaleString('en-IN')}</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.72rem', fontWeight: '800', color: data.metrics.totalOrders.change >= 0 ? '#10b981' : '#ef4444' }}>
-                  {data.metrics.totalOrders.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                  {Math.abs(data.metrics.totalOrders.change)}%
-                </span>
+                {renderChangeIndicator(data.metrics.totalOrders.change)}
               </div>
             </div>
 
             {/* 3. Avg Order Value */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem', boxShadow: 'var(--shadow-sm)' }}>
               <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Avg Order Value</span>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.25rem 0.5rem' }}>
                 <span style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--text-main)' }}>₹{Math.round(data.metrics.avgOrderValue.value)}</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.72rem', fontWeight: '800', color: data.metrics.avgOrderValue.change >= 0 ? '#10b981' : '#ef4444' }}>
-                  {data.metrics.avgOrderValue.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                  {Math.abs(data.metrics.avgOrderValue.change)}%
-                </span>
+                {renderChangeIndicator(data.metrics.avgOrderValue.change)}
               </div>
             </div>
 
@@ -408,9 +423,9 @@ export default function Analytics({ onNavigate }) {
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem', boxShadow: 'var(--shadow-sm)' }}>
               <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Completed Orders</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.25rem 0.5rem' }}>
                   <span style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--text-main)' }}>{data.metrics.completedOrders.value.toLocaleString('en-IN')}</span>
-                  <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-muted)' }}>{data.metrics.completedOrders.rate}% rate</span>
+                  {renderChangeIndicator(data.metrics.completedOrders.change)}
                 </div>
                 {/* Visual completion progress bar */}
                 <div style={{ width: '100%', height: '4px', background: 'var(--bg-hover)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.2rem' }}>
@@ -422,14 +437,11 @@ export default function Analytics({ onNavigate }) {
             {/* 5. Customer Rating */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem', boxShadow: 'var(--shadow-sm)' }}>
               <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Customer Rating</span>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.25rem 0.5rem' }}>
                 <span style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
                   {data.metrics.customerRating.value} <Star size={20} fill="#f59e0b" color="#f59e0b" />
                 </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.72rem', fontWeight: '800', color: data.metrics.customerRating.change >= 0 ? '#10b981' : '#ef4444' }}>
-                  {data.metrics.customerRating.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                  {Math.abs(data.metrics.customerRating.change)}%
-                </span>
+                {renderChangeIndicator(data.metrics.customerRating.change)}
               </div>
             </div>
 

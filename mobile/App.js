@@ -1774,7 +1774,7 @@ function MainApp() {
     if (currentUser) {
       fetchMyOrders();
     }
-  }, [activeTab, currentUser]);
+  }, [activeTab, currentUser, resolvedBackendUrl]);
 
   useEffect(() => {
     if (isCartOpen || isCouponModalOpen || isCheckoutOpen) {
@@ -2927,6 +2927,8 @@ function MainApp() {
     setCartItems([]);
     setCurrentOrder(null);
     setFavorites([]);
+    setMyOrdersList([]);
+    setOrderStepMap({});
     await AsyncStorage.removeItem('qb_user').catch(() => { });
     triggerToastNotification('👋 Logged out successfully');
   };

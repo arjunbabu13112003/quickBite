@@ -20,7 +20,8 @@ import {
   Animated,
   PanResponder,
   useColorScheme,
-  Linking
+  Linking,
+  Keyboard
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -282,6 +283,37 @@ export default function AppIndex() {
   const partnerPinInputRef = useRef<TextInput>(null);
   const [lockoutCountdown, setLockoutCountdown] = useState(0);
   const activeDeliveryScrollRef = useRef<ScrollView>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [verifyCardY, setVerifyCardY] = useState(0);
+
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      (e) => {
+        setIsKeyboardVisible(true);
+        setKeyboardHeight(e.endCoordinates.height);
+        if (partnerPinInputRef.current?.isFocused() && verifyCardY > 0) {
+          setTimeout(() => {
+            activeDeliveryScrollRef.current?.scrollTo({ y: Math.max(0, verifyCardY - 10), animated: true });
+          }, 80);
+        }
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setIsKeyboardVisible(false);
+        setKeyboardHeight(0);
+      }
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
+  }, [verifyCardY]);
+
   const [liveOnlineSeconds, setLiveOnlineSeconds] = useState(0);
   const [currentIstDateKey, setCurrentIstDateKey] = useState('');
   const [activeProfileSubScreen, setActiveProfileSubScreen] = useState<'main' | 'personal' | 'vehicle' | 'bank' | 'documents' | 'preferences'>('main');
@@ -1116,9 +1148,11 @@ export default function AppIndex() {
   };
 
   const handleInputFocus = () => {
-    setTimeout(() => {
-      activeDeliveryScrollRef.current?.scrollToEnd({ animated: true });
-    }, 150);
+    if (verifyCardY > 0) {
+      setTimeout(() => {
+        activeDeliveryScrollRef.current?.scrollTo({ y: Math.max(0, verifyCardY - 10), animated: true });
+      }, 150);
+    }
   };
 
   const handlePartnerVerifyPin = async () => {
@@ -2170,7 +2204,10 @@ export default function AppIndex() {
       <Modal
         visible={isNavigationModalOpen}
         animationType="slide"
-        onRequestClose={() => setIsNavigationModalOpen(false)}
+        onRequestClose={() => {
+          setIsNavigationModalOpen(false);
+          setIsNavigatingLive(false);
+        }}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
           {/* Header */}
@@ -2217,7 +2254,10 @@ export default function AppIndex() {
               borderBottomColor: '#E2E8F0',
               backgroundColor: '#FFFFFF',
             }}>
-              <TouchableOpacity onPress={() => setIsNavigationModalOpen(false)}>
+              <TouchableOpacity onPress={() => {
+                setIsNavigationModalOpen(false);
+                setIsNavigatingLive(false);
+              }}>
                 <Ionicons name="arrow-back" size={24} color="#0F172A" />
               </TouchableOpacity>
               <View style={{ marginLeft: 16, flex: 1 }}>
@@ -3354,20 +3394,22 @@ export default function AppIndex() {
         </ScrollView>
 
         {/* Reached Restaurant / Next CTA Button (Fixed bottom block) */}
-        <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
-          <TouchableOpacity 
-            activeOpacity={0.8}
-            onPress={handleStepCtaPress}
-            disabled={isAcceptingDeclining}
-            style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
-          >
-            {isAcceptingDeclining ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.stickyFooterButtonText}>{currentCtaText}</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+        {!isKeyboardVisible && (
+          <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
+            <TouchableOpacity 
+              activeOpacity={0.8}
+              onPress={handleStepCtaPress}
+              disabled={isAcceptingDeclining}
+              style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
+            >
+              {isAcceptingDeclining ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.stickyFooterButtonText}>{currentCtaText}</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
@@ -3386,7 +3428,7 @@ export default function AppIndex() {
 
     return (
       <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
         <View style={styles.tabContentContainer}>
@@ -3402,7 +3444,10 @@ export default function AppIndex() {
             ref={activeDeliveryScrollRef}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.scrollPaddingActive}
+            contentContainerStyle={[
+              styles.scrollPaddingActive,
+              isKeyboardVisible && { paddingBottom: keyboardHeight + 80 }
+            ]}
             style={styles.screenBg}
           >
             {/* Deliver To Card */}
@@ -3499,11 +3544,19 @@ export default function AppIndex() {
 
             {/* CUSTOMER PIN VERIFICATION BOX */}
             {hasReachedCustomer && order.deliveryPinRequired && (
-              <View style={[
-                styles.pinVerificationBox,
-                { backgroundColor: themedBoxBg, borderColor: themedBoxBorder },
-                order.deliveryPinVerified && styles.pinVerificationBoxSuccess
-              ]}>
+              <View 
+                onLayout={(e) => {
+                  const { y } = e.nativeEvent.layout;
+                  if (y > 0) {
+                    setVerifyCardY(y);
+                  }
+                }}
+                style={[
+                  styles.pinVerificationBox,
+                  { backgroundColor: themedBoxBg, borderColor: themedBoxBorder },
+                  order.deliveryPinVerified && styles.pinVerificationBoxSuccess
+                ]}
+              >
                 <View style={styles.pinVerificationBoxHeader}>
                   <Ionicons 
                     name={order.deliveryPinVerified ? "checkmark-circle" : "shield-outline"} 
@@ -3605,63 +3658,65 @@ export default function AppIndex() {
           </ScrollView>
 
           {/* Sticky Action Button Container */}
-          <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
-            {!hasReachedCustomer ? (
-              <TouchableOpacity 
-                activeOpacity={0.8}
-                onPress={() => {
-                  setIsNavigationModalOpen(true);
-                  setIsNavigatingLive(true);
-                }}
-                style={styles.stickyFooterButton}
-              >
-                <Text style={styles.stickyFooterButtonText}>Navigate to Customer</Text>
-              </TouchableOpacity>
-            ) : order.paymentMethod?.toUpperCase() === 'COD' && !isCashCollected ? (
-              <TouchableOpacity 
-                activeOpacity={0.8}
-                onPress={handleCollectCod}
-                disabled={isAcceptingDeclining}
-                style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
-              >
-                {isAcceptingDeclining ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.stickyFooterButtonText}>Confirm ₹{order.amount || 0} Cash Collected</Text>
-                )}
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity 
-                activeOpacity={0.8}
-                onPress={() => {
-                  if (order.deliveryPinRequired && !order.deliveryPinVerified) {
-                    alert("Please verify the customer's PIN first.");
-                  } else {
-                    completeActiveOrder();
-                  }
-                }}
-                disabled={isAcceptingDeclining || (order.deliveryPinRequired && !order.deliveryPinVerified)}
-                style={[
-                  styles.stickyFooterButton, 
-                  styles.successButton, 
-                  (isAcceptingDeclining || (order.deliveryPinRequired && !order.deliveryPinVerified)) && { opacity: 0.5 }
-                ]}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {!isKeyboardVisible && (
+            <View style={[styles.stickyFooterContainer, { bottom: bottomNavHeight + 14 }]}>
+              {!hasReachedCustomer ? (
+                <TouchableOpacity 
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setIsNavigationModalOpen(true);
+                    setIsNavigatingLive(true);
+                  }}
+                  style={styles.stickyFooterButton}
+                >
+                  <Text style={styles.stickyFooterButtonText}>Navigate to Customer</Text>
+                </TouchableOpacity>
+              ) : order.paymentMethod?.toUpperCase() === 'COD' && !isCashCollected ? (
+                <TouchableOpacity 
+                  activeOpacity={0.8}
+                  onPress={handleCollectCod}
+                  disabled={isAcceptingDeclining}
+                  style={[styles.stickyFooterButton, isAcceptingDeclining && { opacity: 0.7 }]}
+                >
                   {isAcceptingDeclining ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <>
-                      <Text style={styles.stickyFooterButtonText}>
-                        {order.deliveryPinRequired && !order.deliveryPinVerified ? 'Verify PIN to Deliver' : 'Mark as Delivered'}
-                      </Text>
-                      <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
-                    </>
+                    <Text style={styles.stickyFooterButtonText}>Confirm ₹{order.amount || 0} Cash Collected</Text>
                   )}
-                </View>
-              </TouchableOpacity>
-            )}
-          </View>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity 
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    if (order.deliveryPinRequired && !order.deliveryPinVerified) {
+                      alert("Please verify the customer's PIN first.");
+                    } else {
+                      completeActiveOrder();
+                    }
+                  }}
+                  disabled={isAcceptingDeclining || (order.deliveryPinRequired && !order.deliveryPinVerified)}
+                  style={[
+                    styles.stickyFooterButton, 
+                    styles.successButton, 
+                    (isAcceptingDeclining || (order.deliveryPinRequired && !order.deliveryPinVerified)) && { opacity: 0.5 }
+                  ]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {isAcceptingDeclining ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Text style={styles.stickyFooterButtonText}>
+                          {order.deliveryPinRequired && !order.deliveryPinVerified ? 'Verify PIN to Deliver' : 'Mark as Delivered'}
+                        </Text>
+                        <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                      </>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
     );

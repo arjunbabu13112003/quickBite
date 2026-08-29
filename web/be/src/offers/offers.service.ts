@@ -20,6 +20,7 @@ import { CreateOfferDto } from './dto/create-offer.dto';
 import { UpdateOfferDto } from './dto/update-offer.dto';
 import { resolveHotelOfferForFood } from './offer-pricing.helper';
 import { Order } from '../orders/order.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class OffersService implements OnModuleInit {
@@ -41,6 +42,7 @@ export class OffersService implements OnModuleInit {
     @InjectRepository(HotelCampaignParticipation)
     private readonly participationRepository: Repository<HotelCampaignParticipation>,
     private readonly dataSource: DataSource,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async onModuleInit() {
@@ -126,7 +128,13 @@ export class OffersService implements OnModuleInit {
       }
     }
 
-    return await this.offerRepository.save(offer);
+    const saved = await this.offerRepository.save(offer);
+    if (this.isValidForBroadcast(saved)) {
+      this.broadcastOfferNotification(saved).catch(err => {
+        console.error('[OffersService] Failed to broadcast new offer notification:', err);
+      });
+    }
+    return saved;
   }
 
   async updateOffer(id: number, hotelId: number | null, dto: UpdateOfferDto): Promise<Offer> {
@@ -178,6 +186,8 @@ export class OffersService implements OnModuleInit {
       offer.applicableFoods = [];
     }
 
+    const wasActiveAndValid = this.isValidForBroadcast(offer);
+
     // Merge other fields
     const { code, startAt, endAt, applicableCategoryIds, applicableFoodIds, ...rest } = dto;
     Object.assign(offer, rest);
@@ -191,7 +201,15 @@ export class OffersService implements OnModuleInit {
       }
     }
 
-    return await this.offerRepository.save(offer);
+    const saved = await this.offerRepository.save(offer);
+    const isActiveAndValidNow = this.isValidForBroadcast(saved);
+    if (!wasActiveAndValid && isActiveAndValidNow) {
+      this.broadcastOfferNotification(saved).catch(err => {
+        console.error('[OffersService] Failed to broadcast updated offer notification:', err);
+      });
+    }
+
+    return saved;
   }
 
   async deleteOffer(id: number, hotelId: number | null): Promise<any> {
@@ -1016,6 +1034,11 @@ export class OffersService implements OnModuleInit {
 
     const saved = await this.campaignRepository.save(campaign);
     await this.saveCampaignInvitations(saved.id, dto.hotelIds || []);
+    if (this.isValidForBroadcast(saved)) {
+      this.broadcastCampaignNotification(saved).catch(err => {
+        console.error('[OffersService] Failed to broadcast new campaign notification:', err);
+      });
+    }
     return saved;
   }
 
@@ -1058,10 +1081,18 @@ export class OffersService implements OnModuleInit {
     if (dto.endAt !== undefined) campaign.endAt = new Date(dto.endAt);
     if (dto.isActive !== undefined) campaign.isActive = dto.isActive;
 
+    const wasActiveAndValid = this.isValidForBroadcast(campaign);
     const saved = await this.campaignRepository.save(campaign);
 
     if (dto.hotelIds !== undefined) {
       await this.saveCampaignInvitations(id, dto.hotelIds);
+    }
+
+    const isActiveAndValidNow = this.isValidForBroadcast(saved);
+    if (!wasActiveAndValid && isActiveAndValidNow) {
+      this.broadcastCampaignNotification(saved).catch(err => {
+        console.error('[OffersService] Failed to broadcast updated campaign notification:', err);
+      });
     }
 
     return saved;
@@ -1086,8 +1117,18 @@ export class OffersService implements OnModuleInit {
       throw new NotFoundException(`Campaign with ID ${id} not found`);
     }
 
+    const wasActiveAndValid = this.isValidForBroadcast(campaign);
     campaign.isActive = !campaign.isActive;
-    return await this.campaignRepository.save(campaign);
+    const saved = await this.campaignRepository.save(campaign);
+
+    const isActiveAndValidNow = this.isValidForBroadcast(saved);
+    if (!wasActiveAndValid && isActiveAndValidNow) {
+      this.broadcastCampaignNotification(saved).catch(err => {
+        console.error('[OffersService] Failed to broadcast toggled campaign notification:', err);
+      });
+    }
+
+    return saved;
   }
 
   private async saveCampaignInvitations(campaignId: number, hotelIds: number[]) {
@@ -1125,5 +1166,106 @@ export class OffersService implements OnModuleInit {
         }
       }
     });
+  }
+
+  private isValidForBroadcast(entity: { isActive: boolean; startAt?: Date; endAt?: Date }): boolean {
+    if (!entity.isActive) return false;
+    const now = new Date();
+    if (entity.startAt && new Date(entity.startAt) > now) return false;
+    if (entity.endAt && new Date(entity.endAt) < now) return false;
+    return true;
+  }
+
+  private generateOfferBody(offer: Offer): string {
+    let body = '';
+    if (offer.discountType === 'percentage') {
+      body = `Get ${offer.discountValue}% OFF`;
+      if (offer.maxDiscount) {
+        body += ` up to ₹${offer.maxDiscount}`;
+      }
+    } else if (offer.discountType === 'flat') {
+      body = `Get ₹${offer.discountValue} OFF`;
+    } else if (offer.discountType === 'free_delivery') {
+      body = `Enjoy free delivery`;
+    } else {
+      return 'A new QuickBite offer is now available.';
+    }
+
+    if (offer.minimumOrderValue && Number(offer.minimumOrderValue) > 0) {
+      body += ` on orders above ₹${offer.minimumOrderValue}`;
+    } else {
+      body += ` on eligible orders`;
+    }
+
+    if (offer.code) {
+      body += `. Use code: ${offer.code}`;
+    }
+
+    return body + '.';
+  }
+
+  private generateCampaignBody(campaign: Store99Campaign): string {
+    if (campaign.description && campaign.description.trim() !== '') {
+      return campaign.description.trim();
+    }
+
+    let body = '';
+    if (campaign.offerType === 'FIXED_PRICE') {
+      body = `Enjoy delicious items at a fixed price of ₹${campaign.price}`;
+    } else if (campaign.offerType === 'FLAT_DISCOUNT' && campaign.flatDiscountAmount) {
+      body = `Get a flat ₹${campaign.flatDiscountAmount} discount`;
+    } else if (campaign.offerType === 'PERCENTAGE_DISCOUNT' && campaign.percentageDiscount) {
+      body = `Get a ${campaign.percentageDiscount}% discount`;
+      if (campaign.maxDiscount) {
+        body += ` up to ₹${campaign.maxDiscount}`;
+      }
+    } else if (campaign.offerType === 'FREE_DELIVERY') {
+      body = `Get free delivery on your orders`;
+    } else {
+      return 'A new QuickBite platform campaign is now active!';
+    }
+
+    if (campaign.minimumOrder) {
+      body += ` on orders above ₹${campaign.minimumOrder}`;
+    } else {
+      body += ` on eligible orders`;
+    }
+
+    return body + '!';
+  }
+
+  private async broadcastOfferNotification(offer: Offer) {
+    try {
+      const title = '🎉 New QuickBite Offer!';
+      const body = this.generateOfferBody(offer);
+      const data = {
+        type: 'offer',
+        offerId: String(offer.id),
+        hotelId: offer.hotelId ? String(offer.hotelId) : null,
+      };
+      
+      this.notificationsService.broadcastCustomerPush(title, body, data).catch(err => {
+        console.error(`[OffersService] Failed to broadcast customer push for Offer #${offer.id}:`, err);
+      });
+    } catch (err) {
+      console.error(`[OffersService] Error preparing push for Offer #${offer.id}:`, err);
+    }
+  }
+
+  private async broadcastCampaignNotification(campaign: Store99Campaign) {
+    try {
+      const title = `🔥 ${campaign.name}`;
+      const body = this.generateCampaignBody(campaign);
+      const data = {
+        type: 'campaign',
+        campaignId: String(campaign.id),
+      };
+      
+      this.notificationsService.broadcastCustomerPush(title, body, data).catch(err => {
+        console.error(`[OffersService] Failed to broadcast customer push for Campaign #${campaign.id}:`, err);
+      });
+    } catch (err) {
+      console.error(`[OffersService] Error preparing push for Campaign #${campaign.id}:`, err);
+    }
   }
 }
