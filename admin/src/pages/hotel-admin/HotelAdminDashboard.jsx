@@ -52,6 +52,25 @@ function timeAgo(dateStr) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+const formatUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+  const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${cleanBase}${cleanPath}`;
+};
+
+const getOrderSummary = (order) => {
+  if (!order.items || order.items.length === 0) {
+    return `${order.itemCount || 0} items`;
+  }
+  if (order.items.length === 1) {
+    return `${order.items[0].quantity}× ${order.items[0].foodName}`;
+  }
+  return `${order.items[0].quantity}× ${order.items[0].foodName} + ${order.items.length - 1} more`;
+};
+
 // ─── Orders Page ──────────────────────────────────────────────────────────────
 function OrdersPage({ hotel }) {
   const [orders, setOrders] = useState([]);
@@ -3270,6 +3289,7 @@ export default function HotelAdminDashboard({
   const [foods, setFoods] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [selectedDetailsOrder, setSelectedDetailsOrder] = useState(null);
 
   // Notifications State
   const [notifications, setNotifications] = useState([]);
@@ -3401,11 +3421,13 @@ export default function HotelAdminDashboard({
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     try {
+      setErrorMsg('');
       await api.updateOrderStatus(hotel.id, orderId, newStatus);
       const ordersData = await api.getHotelOrders(hotel.id);
       setOrders(ordersData);
     } catch (err) {
-      alert(err.message || 'Failed to update order status');
+      setErrorMsg(err.message || 'Failed to update order status');
+      setTimeout(() => setErrorMsg(''), 5000);
     }
   };
 
@@ -3712,46 +3734,308 @@ export default function HotelAdminDashboard({
                 {/* Live orders + stats split */}
                 <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
                   {/* Live orders panel */}
-                  <div style={{ flex: 1.5, minWidth: '320px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-                      <h2 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)' }}>Live Orders</h2>
-                      <button onClick={() => setActiveTab('orders')} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: '800', fontSize: '0.85rem', cursor: 'pointer' }}>View All</button>
+                  <div style={{
+                    flex: 1.5,
+                    minWidth: '320px',
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-xl)',
+                    padding: '1.5rem',
+                    boxShadow: 'var(--shadow-sm)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1.25rem'
+                  }}>
+                    {/* Header Row */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.75rem'
+                    }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <h2 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)', margin: 0 }}>Live Orders</h2>
+                          <span style={{
+                            background: 'var(--bg-hover)',
+                            color: 'var(--primary)',
+                            borderRadius: '100px',
+                            padding: '0.2rem 0.6rem',
+                            fontSize: '0.72rem',
+                            fontWeight: '800',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            border: '1px solid var(--border-color)'
+                          }}>
+                            <span style={{
+                              width: '6px',
+                              height: '6px',
+                              borderRadius: '50%',
+                              background: '#22c55e',
+                              display: 'inline-block'
+                            }} />
+                            Live
+                          </span>
+                        </div>
+                        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                          Orders requiring your attention
+                        </p>
+                      </div>
+
+                      {/* Summary pills */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span style={{ background: 'rgba(255,107,26,0.1)', color: '#FF6B1A', padding: '0.3rem 0.65rem', borderRadius: '100px', fontSize: '0.7rem', fontWeight: '800', border: '1px solid rgba(255,107,26,0.2)' }}>
+                          {orders.filter(o => ['placed', 'accepted', 'preparing'].includes(o.orderStatus)).length} Active
+                        </span>
+                        <span style={{ background: 'rgba(124,58,237,0.1)', color: '#8B5CF6', padding: '0.3rem 0.65rem', borderRadius: '100px', fontSize: '0.7rem', fontWeight: '800', border: '1px solid rgba(124,58,237,0.2)' }}>
+                          {orders.filter(o => o.orderStatus === 'ready_for_pickup').length} Ready
+                        </span>
+                        <span style={{ background: 'rgba(2,132,199,0.1)', color: '#0284C7', padding: '0.3rem 0.65rem', borderRadius: '100px', fontSize: '0.7rem', fontWeight: '800', border: '1px solid rgba(2,132,199,0.2)' }}>
+                          {orders.filter(o => ['picked_up', 'out_for_delivery'].includes(o.orderStatus)).length} Out for Delivery
+                        </span>
+                        <button 
+                          onClick={() => setActiveTab('orders')} 
+                          style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: '800', fontSize: '0.85rem', cursor: 'pointer', marginLeft: '0.25rem' }}
+                        >
+                          View All
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Orders List */}
                     {liveOrders.length === 0 ? (
                       <div style={{ textAlign: 'center', padding: '3.5rem 1.5rem', color: 'var(--text-muted)' }}>
                         <ClipboardList size={32} style={{ color: 'var(--text-subtle)', marginBottom: '0.75rem' }} />
                         <p style={{ fontSize: '0.9rem', fontWeight: '700' }}>No active orders right now.</p>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        {liveOrders.map(order => (
-                          <div key={order.id} style={{ borderLeft: `4px solid ${STATUS_CONFIG[order.orderStatus]?.color || '#ff5520'}`, background: 'var(--bg-main)', borderRadius: '0 var(--radius-md) var(--radius-md) 0', padding: '1.1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-muted)' }}>#{order.orderNumber}</span>
-                              <span style={{ background: STATUS_CONFIG[order.orderStatus]?.bg || 'rgba(255,85,32,0.1)', color: STATUS_CONFIG[order.orderStatus]?.badge || '#ff5520', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem', fontWeight: '800' }}>
-                                {STATUS_CONFIG[order.orderStatus]?.label || order.orderStatus}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: '0.95rem', fontWeight: '850', color: 'var(--text-main)' }}>
-                              {order.items && order.items.length > 0 ? order.items.map(i => `${i.quantity}x ${i.foodName}`).join(', ') : `${order.itemCount} items`}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '700' }}>
-                                {order.paymentMethod === 'cod' ? 'COD' : 'Online'} &bull; &#8377;{Number(order.totalAmount).toLocaleString('en-IN')}
-                              </span>
-                              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                {order.orderStatus === 'placed' && (
-                                  <>
-                                    <button onClick={() => handleUpdateOrderStatus(order.id, 'rejected')} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.35rem 0.75rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>Reject</button>
-                                    <button onClick={() => handleUpdateOrderStatus(order.id, 'accepted')} style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.35rem 0.75rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>Accept</button>
-                                  </>
-                                )}
-                                {order.orderStatus === 'accepted' && <button onClick={() => handleUpdateOrderStatus(order.id, 'preparing')} style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.35rem 0.75rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>Prepare</button>}
-                                {order.orderStatus === 'preparing' && <button onClick={() => handleUpdateOrderStatus(order.id, 'ready_for_pickup')} style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.35rem 0.75rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>Ready for Pickup</button>}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {liveOrders.map(order => {
+                          const firstItem = order.items && order.items[0];
+                          
+                          let statusColor = '#ff5520';
+                          let statusLabel = order.orderStatus;
+                          let statusBg = 'rgba(255,85,32,0.1)';
+                          let statusText = '#ff5520';
+
+                          if (order.orderStatus === 'placed') {
+                            statusColor = '#ff5520';
+                            statusLabel = 'PLACED';
+                            statusBg = 'rgba(255,85,32,0.08)';
+                            statusText = '#ff5520';
+                          } else if (order.orderStatus === 'accepted') {
+                            statusColor = '#3b82f6';
+                            statusLabel = 'ACCEPTED';
+                            statusBg = 'rgba(59,130,246,0.08)';
+                            statusText = '#3b82f6';
+                          } else if (order.orderStatus === 'preparing') {
+                            statusColor = '#f59e0b';
+                            statusLabel = 'PREPARING';
+                            statusBg = 'rgba(245,158,11,0.08)';
+                            statusText = '#f59e0b';
+                          } else if (order.orderStatus === 'ready_for_pickup') {
+                            statusColor = '#8b5cf6';
+                            statusLabel = 'READY FOR PICKUP';
+                            statusBg = 'rgba(139,92,246,0.08)';
+                            statusText = '#8b5cf6';
+                          } else if (order.orderStatus === 'picked_up' || order.orderStatus === 'out_for_delivery') {
+                            statusColor = '#0ea5e9';
+                            statusLabel = 'OUT FOR DELIVERY';
+                            statusBg = 'rgba(14,165,233,0.08)';
+                            statusText = '#0ea5e9';
+                          } else if (order.orderStatus === 'delivered') {
+                            statusColor = '#10b981';
+                            statusLabel = 'DELIVERED';
+                            statusBg = 'rgba(16,185,129,0.08)';
+                            statusText = '#10b981';
+                          }
+
+                          return (
+                            <div 
+                              key={order.id} 
+                              style={{ 
+                                display: 'flex',
+                                background: 'var(--bg-card)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: 'var(--radius-md)',
+                                overflow: 'hidden',
+                                transition: 'all var(--transition-fast)',
+                                position: 'relative'
+                              }}
+                              className="hover-card"
+                            >
+                              {/* Left status vertical line */}
+                              <div style={{
+                                width: '4px',
+                                backgroundColor: statusColor,
+                                flexShrink: 0
+                              }} />
+
+                              {/* Card Content Grid */}
+                              <div style={{
+                                flex: 1,
+                                padding: '1rem 1.25rem',
+                                display: 'grid',
+                                gridTemplateColumns: 'auto 1fr auto',
+                                alignItems: 'center',
+                                gap: '1rem'
+                              }}>
+                                {/* Food Image Thumbnail */}
+                                <div style={{
+                                  width: '48px',
+                                  height: '48px',
+                                  borderRadius: '8px',
+                                  border: '1px solid var(--border-color)',
+                                  background: 'var(--bg-subtle)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  overflow: 'hidden',
+                                  flexShrink: 0
+                                }}>
+                                  {firstItem?.foodImage ? (
+                                    <img 
+                                      src={formatUrl(firstItem.foodImage)} 
+                                      alt={firstItem.foodName}
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    />
+                                  ) : (
+                                    <Utensils size={18} style={{ color: 'var(--text-subtle)' }} />
+                                  )}
+                                </div>
+
+                                {/* Order details */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: 0 }}>
+                                  <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)' }}>
+                                    #{order.orderNumber}
+                                  </span>
+                                  <span style={{ fontSize: '0.92rem', fontWeight: '850', color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {getOrderSummary(order)}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '700' }}>
+                                    {order.paymentMethod === 'cod' ? 'COD' : 'Paid online'} &bull; &#8377;{Number(order.totalAmount).toLocaleString('en-IN')}
+                                  </span>
+                                </div>
+
+                                {/* Status badge and relative time */}
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+                                  <span style={{ 
+                                    background: statusBg, 
+                                    color: statusText, 
+                                    padding: '0.2rem 0.5rem', 
+                                    borderRadius: '4px', 
+                                    fontSize: '0.65rem', 
+                                    fontWeight: '800',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.2px'
+                                  }}>
+                                    {statusLabel}
+                                  </span>
+                                  <span style={{ fontSize: '0.68rem', color: 'var(--text-subtle)', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                                    <Clock size={10} /> {timeAgo(order.placedAt)}
+                                  </span>
+                                </div>
+
+                                {/* Actions & Details link */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                  {order.orderStatus === 'placed' && (
+                                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                      <button 
+                                        onClick={() => handleUpdateOrderStatus(order.id, 'rejected')} 
+                                        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.4rem 0.75rem', fontSize: '0.72rem', fontWeight: '800', cursor: 'pointer', color: 'var(--text-muted)' }}
+                                      >
+                                        Reject
+                                      </button>
+                                      <button 
+                                        onClick={() => handleUpdateOrderStatus(order.id, 'accepted')} 
+                                        style={{ background: 'var(--primary)', color: '#FFFFFF', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.4rem 0.75rem', fontSize: '0.72rem', fontWeight: '800', cursor: 'pointer' }}
+                                      >
+                                        Accept
+                                      </button>
+                                    </div>
+                                  )}
+                                  {order.orderStatus === 'accepted' && (
+                                    <button 
+                                      onClick={() => handleUpdateOrderStatus(order.id, 'preparing')} 
+                                      style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.45rem 1rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
+                                    >
+                                      Prepare
+                                    </button>
+                                  )}
+                                  {order.orderStatus === 'preparing' && (
+                                    <button 
+                                      onClick={() => handleUpdateOrderStatus(order.id, 'ready_for_pickup')} 
+                                      style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.45rem 1rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
+                                    >
+                                      Mark Ready
+                                    </button>
+                                  )}
+                                  {order.orderStatus === 'ready_for_pickup' && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.2rem' }}>
+                                      {order.activeAssignment ? (
+                                        <span style={{ 
+                                          background: 'rgba(16,185,129,0.1)', 
+                                          color: '#059669', 
+                                          padding: '0.35rem 0.75rem', 
+                                          borderRadius: 'var(--radius-sm)', 
+                                          fontSize: '0.72rem', 
+                                          fontWeight: '800',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '0.3rem',
+                                          border: '1px solid rgba(16,185,129,0.2)'
+                                        }}>
+                                          🛵 Rider Assigned
+                                          {order.activeAssignment.deliveryPartner?.user?.name && ` (${order.activeAssignment.deliveryPartner.user.name})`}
+                                        </span>
+                                      ) : (
+                                        <span style={{ 
+                                          background: 'rgba(245,158,11,0.1)', 
+                                          color: 'var(--text-warning)', 
+                                          padding: '0.35rem 0.75rem', 
+                                          borderRadius: 'var(--radius-sm)', 
+                                          fontSize: '0.72rem', 
+                                          fontWeight: '800',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '0.3rem',
+                                          border: '1px solid rgba(245,158,11,0.2)'
+                                        }}>
+                                          ⏳ Finding Rider...
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {(order.orderStatus === 'picked_up' || order.orderStatus === 'out_for_delivery') && (
+                                    <button 
+                                      onClick={() => {
+                                        setSelectedDetailsOrder(order);
+                                      }}
+                                      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-btn-secondary)', borderRadius: 'var(--radius-sm)', padding: '0.45rem 1rem', fontSize: '0.75rem', fontWeight: '800', color: 'var(--primary)', cursor: 'pointer' }}
+                                    >
+                                      Track
+                                    </button>
+                                  )}
+                                  {order.orderStatus === 'delivered' && (
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '700' }}>
+                                      Archive
+                                    </span>
+                                  )}
+
+                                  {/* Detail/Overflow dots menu */}
+                                  <button
+                                    onClick={() => setSelectedDetailsOrder(order)}
+                                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.25rem', display: 'flex', alignItems: 'center' }}
+                                  >
+                                    <MoreVertical size={16} />
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -3845,6 +4129,117 @@ export default function HotelAdminDashboard({
           )}
         </div>
       </main>
+
+      {/* ── Order Details Modal ── */}
+      {selectedDetailsOrder && (
+        <div className="modal-overlay" onClick={() => setSelectedDetailsOrder(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '550px' }}>
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: '850', color: 'var(--text-main)' }}>
+                Order Details: #{selectedDetailsOrder.orderNumber}
+              </h3>
+              <button onClick={() => setSelectedDetailsOrder(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Status & Timing */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-subtle)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                <div>
+                  <span style={{ fontSize: '0.68rem', fontWeight: '800', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', marginBottom: '0.15rem' }}>Status</span>
+                  <span style={{
+                    background: STATUS_CONFIG[selectedDetailsOrder.orderStatus]?.bg || 'rgba(255,85,32,0.1)',
+                    color: STATUS_CONFIG[selectedDetailsOrder.orderStatus]?.badge || '#ff5520',
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '4px',
+                    fontSize: '0.72rem',
+                    fontWeight: '800',
+                    textTransform: 'uppercase'
+                  }}>
+                    {STATUS_CONFIG[selectedDetailsOrder.orderStatus]?.label || selectedDetailsOrder.orderStatus}
+                  </span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: '800', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', marginBottom: '0.15rem' }}>Placed</span>
+                  <span style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--text-main)' }}>
+                    {formatTime(selectedDetailsOrder.placedAt)} ({timeAgo(selectedDetailsOrder.placedAt)})
+                  </span>
+                </div>
+              </div>
+
+              {/* Items Breakdown */}
+              <div>
+                <h4 style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.5rem' }}>Items</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {(selectedDetailsOrder.items || []).map((item, idx) => (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.88rem', paddingBottom: '0.4rem', borderBottom: '1px dashed var(--border-color)' }}>
+                      <div>
+                        <span style={{ fontWeight: '800', color: 'var(--primary)' }}>{item.quantity}×</span> {item.foodName}
+                      </div>
+                      <span style={{ fontWeight: '700', color: 'var(--text-main)' }}>
+                        &#8377;{Number(item.lineTotal || (item.unitPrice * item.quantity)).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Customer Info */}
+              <div>
+                <h4 style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.4rem' }}>Customer</h4>
+                <div style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-main)' }}>
+                  {selectedDetailsOrder.user?.name || 'Guest Customer'}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                  {selectedDetailsOrder.user?.email || 'No email recorded'}
+                </div>
+              </div>
+
+              {/* Delivery Address */}
+              <div>
+                <h4 style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.4rem' }}>Delivery Address</h4>
+                {selectedDetailsOrder.deliveryAddressLine1 ? (
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-main)', fontWeight: '600', lineHeight: '1.4' }}>
+                    {[selectedDetailsOrder.deliveryAddressLine1, selectedDetailsOrder.deliveryAddressLine2, selectedDetailsOrder.deliveryLandmark, selectedDetailsOrder.deliveryArea,
+                    `${selectedDetailsOrder.deliveryCity}, ${selectedDetailsOrder.deliveryState} - ${selectedDetailsOrder.deliveryPincode}`].filter(Boolean).join(', ')}
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Address not recorded</span>
+                )}
+              </div>
+
+              {/* Summary pricing */}
+              <div style={{ borderTop: '1.5px solid var(--border-color)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Payment Method</span>
+                  <span style={{ fontWeight: '800', color: 'var(--text-main)' }}>
+                    {selectedDetailsOrder.paymentMethod === 'cod' ? 'Cash on Delivery (COD)' : 'Paid Online'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Payment Status</span>
+                  <span style={{ background: selectedDetailsOrder.paymentStatus === 'paid' ? 'rgba(5,150,105,0.1)' : 'rgba(146,64,14,0.1)', color: selectedDetailsOrder.paymentStatus === 'paid' ? '#059669' : '#92400e', padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '800', textTransform: 'uppercase' }}>
+                    {selectedDetailsOrder.paymentStatus || 'pending'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: '900', borderTop: '1px solid var(--border-color)', marginTop: '0.5rem', paddingTop: '0.75rem' }}>
+                  <span style={{ color: 'var(--text-main)' }}>Total Paid</span>
+                  <span style={{ color: 'var(--primary)' }}>
+                    &#8377;{Number(selectedDetailsOrder.totalAmount).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', background: 'var(--bg-subtle)' }}>
+              <button onClick={() => setSelectedDetailsOrder(null)} className="btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.82rem' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

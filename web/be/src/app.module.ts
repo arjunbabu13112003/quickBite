@@ -20,6 +20,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { HomeFoodCategoriesModule } from './home-food-categories/home-food-categories.module';
 import { OffersModule } from './offers/offers.module';
 import { AppController } from './app.controller';
+import { BrandingModule } from './branding/branding.module';
 
 @Module({
   controllers: [AppController],
@@ -70,6 +71,7 @@ import { AppController } from './app.controller';
     NotificationsModule,
     HomeFoodCategoriesModule,
     OffersModule,
+    BrandingModule,
   ],
 })
 export class AppModule implements NestModule {

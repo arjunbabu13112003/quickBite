@@ -42,6 +42,16 @@ try {
 }
 import Constants from 'expo-constants';
 
+let appName = 'QuickBite Partner';
+try {
+  const branding = require('../../branding.generated.json');
+  if (branding && branding.appName) {
+    appName = branding.appName;
+  }
+} catch (e) {
+  console.warn('[App] Could not read branding.generated.json, using default name.');
+}
+
 if (Notifications) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -2619,7 +2629,7 @@ export default function AppIndex() {
     return (
       <View style={styles.tabContentContainer}>
         <Header 
-          title="QuickBite Partner" 
+          title={appName} 
           isOnline={isOnline} 
           isAvailable={isAvailable}
           profileImage={profileImageUri}
@@ -3243,7 +3253,7 @@ export default function AppIndex() {
     return (
       <View style={styles.tabContentContainer}>
         <Header 
-          title="QuickBite Partner" 
+          title={appName} 
           isOnline={isOnline} 
           isAvailable={isAvailable}
           showBack={true}
@@ -3381,7 +3391,7 @@ export default function AppIndex() {
       >
         <View style={styles.tabContentContainer}>
           <Header 
-            title="QuickBite Partner" 
+            title={appName} 
             isOnline={isOnline} 
             isAvailable={isAvailable}
             showBack={true}
@@ -5160,7 +5170,7 @@ export default function AppIndex() {
 
     return (
       <View style={styles.tabContentContainer}>
-        <Header title="QuickBite Partner" isOnline={isOnline} isAvailable={isAvailable} />
+        <Header title={appName} isOnline={isOnline} isAvailable={isAvailable} />
 
         <ScrollView 
           showsVerticalScrollIndicator={false}
@@ -5375,8 +5385,7 @@ export default function AppIndex() {
             {/* Logo container */}
             <View style={styles.logoCircleContainer}>
               <View style={styles.logoCircle}>
-                <Text style={styles.logoTextOrange}>QuickBite</Text>
-                <Text style={styles.logoTextBrown}>Partner</Text>
+                <Text style={[styles.logoTextOrange, { fontSize: 22, textAlign: 'center' }]} numberOfLines={2}>{appName}</Text>
               </View>
             </View>
 

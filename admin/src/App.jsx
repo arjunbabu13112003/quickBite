@@ -24,6 +24,8 @@ import OrdersList from './pages/super-admin/OrdersList';
 import OrderDetails from './pages/super-admin/OrderDetails';
 import HomeFoodCategoriesList from './pages/super-admin/HomeFoodCategoriesList';
 import { SuperAdminOffersList, SuperAdminCreateCampaign } from './pages/super-admin/OffersManagement';
+import BrandingAppIcons from './pages/super-admin/BrandingAppIcons';
+import Analytics from './pages/super-admin/Analytics';
 
 // Hotel Admin Pages
 import HotelAdminDashboard from './pages/hotel-admin/HotelAdminDashboard';
@@ -216,10 +218,15 @@ export default function App() {
     const isOrdersRoute = currentPath === '/super-admin/orders' || (currentPath.startsWith('/super-admin/orders/') && currentPath.split('/').length === 4);
     const isFoodCategoriesRoute = currentPath === '/super-admin/food-categories';
     const isOffersRoute = currentPath === '/super-admin/offers' || currentPath.startsWith('/super-admin/offers');
+    const isBrandingRoute = currentPath === '/super-admin/branding' || currentPath === '/super-admin/branding/app-icons';
+    const isAnalyticsRoute = currentPath === '/super-admin/analytics';
 
-    const currentTab = isOffersRoute ? 'offers' : (isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : 'dashboard')))));
+    const currentTab = isBrandingRoute ? 'branding' : (isOffersRoute ? 'offers' : (isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : (isAnalyticsRoute ? 'analytics' : 'dashboard')))))));
 
     const renderSuperAdminContent = () => {
+      if (currentPath === '/super-admin/branding' || currentPath === '/super-admin/branding/app-icons') {
+        return <BrandingAppIcons onNavigate={navigateTo} />;
+      }
       if (currentPath === '/super-admin/offers') {
         return <SuperAdminOffersList onNavigate={navigateTo} />;
       }
@@ -302,6 +309,9 @@ export default function App() {
             return <EditHotel id={id} onNavigate={navigateTo} />;
           }
         }
+      }
+      if (currentPath === '/super-admin/analytics') {
+        return <Analytics onNavigate={navigateTo} />;
       }
       return <Dashboard onNavigate={navigateTo} />;
     };

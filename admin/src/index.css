@@ -5,34 +5,68 @@
 :root {
   /* Color Palette - Vibrant Orange & Warm Accents */
   --primary-hue: 18;
-  --primary: hsl(var(--primary-hue), 95%, 54%);
-  --primary-hover: hsl(var(--primary-hue), 95%, 48%);
-  --primary-light: hsl(var(--primary-hue), 100%, 96%);
-  --primary-glow: hsla(var(--primary-hue), 95%, 54%, 0.25);
+  --primary: #FF6B1A;
+  --primary-hover: #E85C0D;
+  --primary-light: #FFF1E8;
+  --primary-glow: rgba(255, 107, 26, 0.10);
 
   --secondary-hue: 155;
   --secondary: hsl(var(--secondary-hue), 70%, 42%);
   --secondary-light: hsl(var(--secondary-hue), 70%, 95%);
 
   --accent-amber: #f59e0b;
-  --accent-rose: #f43f5e;
+  --accent-rose: #EF4444;
   --accent-blue: #3b82f6;
 
   /* Theme Dependent Variables - Light Mode Default */
-  --bg-main: #ffd582;
-  --bg-sidebar: #ffe5b4;
-  --bg-header: #ffe5b4;
-  --bg-card: #fff8ed;
-  --bg-glass: rgba(255, 248, 237, 0.85);
-  --bg-modal: #fff8ed;
-  --bg-subtle: #fff0db;
-  --bg-hover: #ffdca6;
+  --bg-main: #FFF8F1;
+  --bg-sidebar: #FFF4E8;
+  --bg-header: #FFFCF9;
+  --bg-card: #FFFFFF;
+  --bg-glass: rgba(255, 252, 249, 0.85);
+  --bg-modal: #FFFFFF;
+  --bg-subtle: #FFFAF6;
+  --bg-hover: #FFF0E5;
 
-  --text-main: #4e3629;
-  --text-muted: #8d6e63;
-  --text-subtle: #a1887f;
-  --border-color: #ebd5b0;
-  --border-focus: hsl(var(--primary-hue), 95%, 54%);
+  --text-main: #2D241F;
+  --text-muted: #746A64;
+  --text-subtle: #746A64;
+  --border-color: #EADFD6;
+  --border-focus: #FF6B1A;
+
+  /* Input and layout variables */
+  --border-input: #F0E6DE;
+  --bg-input: #FFFFFF;
+  --border-sidebar: #F0E6DE;
+  --bg-search-input: #FFFAF6;
+  --border-search-input: #F0E6DE;
+  --text-search-input: #403A36;
+  --icon-color: #6B625D;
+  --border-btn-secondary: #EADFD6;
+  --text-btn-secondary: #746A64;
+  --bg-btn-secondary-hover: #FFFAF6;
+
+  /* Warning Banners & Notices */
+  --bg-warning-subtle: #FFF4E8;
+  --border-warning-subtle: #F0E6DE;
+  --text-warning: #7C2D12;
+  --text-warning-heading: #9A3412;
+  --icon-warning: #EA580C;
+
+  /* Warning Status Badges & Pending Previews */
+  --bg-warning-badge: #FFF4E8;
+  --border-warning-badge: #EADFD6;
+  --text-warning-badge: #C2410C;
+  --icon-warning-badge: #F97316;
+  --bg-pending: #FFF4E8;
+  --border-pending: #EADFD6;
+
+  /* Sidebar States */
+  --sidebar-active-bg: #FFE8D8;
+  --sidebar-active-color: #EA580C;
+  --sidebar-hover-bg: #FFF0E5;
+  --sidebar-hover-color: #EA580C;
+  --sidebar-inactive-color: #746A64;
 
   /* Semantic Colors - Light Mode */
   --bg-danger-subtle: #fef2f2;
@@ -42,10 +76,6 @@
   --bg-success-subtle: #ecfdf5;
   --border-success-subtle: #d1fae5;
   --text-success: #059669;
-
-  --bg-warning-subtle: #fffbeb;
-  --border-warning-subtle: #fde68a;
-  --text-warning: #b45309;
 
   --bg-info-subtle: #eff6ff;
   --border-info-subtle: #dbeafe;
@@ -75,6 +105,11 @@
 /* Dark Mode Overrides */
 [data-theme="dark"] {
   /* Create a professional dark design system */
+  --primary: hsl(var(--primary-hue), 95%, 54%);
+  --primary-hover: hsl(var(--primary-hue), 95%, 48%);
+  --primary-light: hsla(var(--primary-hue), 95%, 54%, 0.15);
+  --primary-glow: hsla(var(--primary-hue), 95%, 54%, 0.25);
+
   --bg-main: #080b11;         /* very dark navy/black */
   --bg-sidebar: #0e1320;      /* slightly lighter dark navy */
   --bg-header: #0e1320;       /* slightly lighter dark navy */
@@ -88,8 +123,42 @@
   --text-muted: #8a99ad;      /* muted blue/gray */
   --text-subtle: #5c6b84;     /* darker muted gray */
   --border-color: #1e293b;
+  --border-focus: hsl(var(--primary-hue), 95%, 54%);
 
-  --primary-light: hsla(var(--primary-hue), 95%, 54%, 0.15);
+  /* Input and layout variables mapping to keep dark theme unchanged */
+  --border-input: #1e293b;
+  --bg-input: #0c101b;
+  --border-sidebar: #1e293b;
+  --bg-search-input: #0c101b;
+  --border-search-input: #1e293b;
+  --text-search-input: #e2e8f0;
+  --icon-color: #8a99ad;
+  --accent-rose: #f87171;
+  --border-btn-secondary: #1e293b;
+  --text-btn-secondary: #8a99ad;
+  --bg-btn-secondary-hover: #222d46;
+
+  /* Warning Banners & Notices mapping for dark theme */
+  --bg-warning-subtle: rgba(245, 158, 11, 0.15);
+  --border-warning-subtle: rgba(245, 158, 11, 0.3);
+  --text-warning: #fbbf24;
+  --text-warning-heading: #fbbf24;
+  --icon-warning: #fbbf24;
+
+  /* Warning Status Badges & Previews mapping for dark theme */
+  --bg-warning-badge: rgba(245, 158, 11, 0.15);
+  --border-warning-badge: rgba(245, 158, 11, 0.3);
+  --text-warning-badge: #fbbf24;
+  --icon-warning-badge: #fbbf24;
+  --bg-pending: #0c101b;
+  --border-pending: rgba(245, 158, 11, 0.3);
+
+  /* Sidebar States mapping for dark theme */
+  --sidebar-active-bg: hsla(var(--primary-hue), 95%, 54%, 0.15);
+  --sidebar-active-color: hsl(var(--primary-hue), 95%, 54%);
+  --sidebar-hover-bg: #0c101b;
+  --sidebar-hover-color: #e2e8f0;
+  --sidebar-inactive-color: #8a99ad;
 
   /* Semantic Colors - Dark Mode */
   --bg-danger-subtle: rgba(239, 68, 68, 0.15);
@@ -99,10 +168,6 @@
   --bg-success-subtle: rgba(16, 185, 129, 0.15);
   --border-success-subtle: rgba(16, 185, 129, 0.3);
   --text-success: #34d399;
-
-  --bg-warning-subtle: rgba(245, 158, 11, 0.15);
-  --border-warning-subtle: rgba(245, 158, 11, 0.3);
-  --text-warning: #fbbf24;
 
   --bg-info-subtle: rgba(59, 130, 246, 0.15);
   --border-info-subtle: rgba(59, 130, 246, 0.3);
@@ -158,9 +223,9 @@ textarea,
 select {
   font-family: var(--font-family);
   outline: none;
-  background-color: var(--bg-card) !important;
+  background-color: var(--bg-input) !important;
   color: var(--text-main) !important;
-  border-color: var(--border-color) !important;
+  border: 1px solid var(--border-input) !important;
   transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast);
 }
 
@@ -214,7 +279,7 @@ select:focus {
 
 /* Buttons */
 .btn-primary {
-  background: linear-gradient(135deg, var(--primary), #ff7a38);
+  background: var(--primary);
   color: #ffffff;
   font-weight: 600;
   padding: 0.75rem 1.5rem;
@@ -228,7 +293,7 @@ select:focus {
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, var(--primary-hover), #f05a10);
+  background: var(--primary-hover);
   transform: translateY(-1px);
   box-shadow: 0 6px 20px var(--primary-glow);
 }
@@ -238,8 +303,8 @@ select:focus {
 }
 
 .btn-secondary {
-  background: var(--bg-subtle);
-  color: var(--text-main);
+  background: var(--bg-card);
+  color: var(--text-btn-secondary);
   font-weight: 600;
   padding: 0.75rem 1.25rem;
   border-radius: var(--radius-full);
@@ -247,12 +312,12 @@ select:focus {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-btn-secondary);
   transition: all var(--transition-fast);
 }
 
 .btn-secondary:hover {
-  background: var(--bg-hover);
+  background: var(--bg-btn-secondary-hover);
   color: var(--primary);
 }
 
@@ -517,6 +582,7 @@ select:focus {
     font-size: 0.78rem !important;
     height: auto !important;
     -webkit-line-clamp: 2 !important;
+    line-clamp: 2 !important;
   }
 
   .hero-banner-img {
@@ -686,9 +752,9 @@ select:focus {
 /* Premium QuickBite Forms */
 .premium-form-control {
   height: 40px;
-  background-color: #0c101b !important;
-  color: #e2e8f0 !important;
-  border: 1px solid #1e293b !important;
+  background-color: var(--bg-input) !important;
+  color: var(--text-main) !important;
+  border: 1px solid var(--border-input) !important;
   border-radius: 8px !important;
   padding: 0 1rem;
   font-size: 0.85rem !important;
@@ -709,7 +775,7 @@ select:focus {
 
 .premium-form-control:focus {
   border-color: var(--primary) !important;
-  box-shadow: 0 0 0 3px rgba(255, 85, 32, 0.15) !important;
+  box-shadow: 0 0 0 3px var(--primary-glow) !important;
   outline: none !important;
 }
 
@@ -765,10 +831,12 @@ input[type="datetime-local"].premium-form-control::-webkit-calendar-picker-indic
 .premium-form-control[type="number"]::-webkit-inner-spin-button,
 .premium-form-control[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
+  appearance: none;
   margin: 0;
 }
 .premium-form-control[type="number"] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 

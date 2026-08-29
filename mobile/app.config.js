@@ -23,8 +23,21 @@ try {
   console.error('[AppConfig] Failed to write .env file:', e);
 }
 
+let appName = "QuickBite";
+try {
+  const brandingPath = './branding.generated.json';
+  if (fs.existsSync(brandingPath)) {
+    const branding = JSON.parse(fs.readFileSync(brandingPath, 'utf8'));
+    if (branding && branding.appName) {
+      appName = branding.appName;
+    }
+  }
+} catch (e) {
+  console.warn('[AppConfig] Could not read branding.generated.json, using default name.');
+}
+
 module.exports = {
-  name: "QuickBite Mobile App",
+  name: appName,
   slug: "quickbite-mobile-app",
   icon: "./assets/quickbite-logo.png",
   scheme: "quickbitemobile",
@@ -40,7 +53,7 @@ module.exports = {
     package: "com.anonymous.quickbitemobileapp",
     googleServicesFile: "./google-services.json",
     adaptiveIcon: {
-      foregroundImage: "./assets/quickbite-logo.png",
+      foregroundImage: "./assets/quickbite-icon-foreground.png",
       backgroundColor: "#FFFFFF"
     }
   },
@@ -49,6 +62,8 @@ module.exports = {
     [
       "expo-notifications",
       {
+        icon: "./assets/notifications/notification-icon.png",
+        color: "#FF5252",
         sounds: ["./assets/sounds/quickbite_alert.wav"]
       }
     ]

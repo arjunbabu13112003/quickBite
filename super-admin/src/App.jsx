@@ -17,6 +17,7 @@ import AddDeliveryPartner from './pages/AddDeliveryPartner';
 import DeliveryPartnerDetails from './pages/DeliveryPartnerDetails';
 import ManageDeliveryPartner from './pages/ManageDeliveryPartner';
 import OrdersList from './pages/OrdersList';
+import BrandingAppIcons from './pages/BrandingAppIcons';
 
 export default function App() {
   const [theme, setTheme] = useState('light');
@@ -161,9 +162,13 @@ export default function App() {
   const isHotelAdminsRoute = currentPath === '/hotel-admins' || currentPath === '/hotel-admins/new' || (currentPath.startsWith('/hotel-admins/') && (currentPath.split('/').length === 3 || (currentPath.split('/').length === 4 && currentPath.split('/')[3] === 'edit')));
   const isDeliveryPartnersRoute = currentPath === '/delivery-partners' || currentPath === '/delivery-partners/new' || (currentPath.startsWith('/delivery-partners/') && (currentPath.split('/').length === 3 || (currentPath.split('/').length === 4 && (currentPath.split('/')[3] === 'edit' || currentPath.split('/')[3] === 'manage'))));
   const isOrdersRoute = currentPath === '/orders' || (currentPath.startsWith('/orders/') && currentPath.split('/').length === 3);
-  const currentTab = isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : 'dashboard')));
+  const isBrandingRoute = currentPath === '/branding' || currentPath === '/branding/app-icons';
+  const currentTab = isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : (isBrandingRoute ? 'branding' : 'dashboard'))));
 
   const renderContent = () => {
+    if (currentPath === '/branding' || currentPath === '/branding/app-icons') {
+      return <BrandingAppIcons onNavigate={navigateTo} />;
+    }
     if (currentPath === '/orders') {
       return <OrdersList onNavigate={navigateTo} />;
     }

@@ -878,4 +878,94 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  getAppIcons: async () => {
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons`, {
+      headers: {
+        ...getAuthHeaders()
+      }
+    });
+    return handleResponse(res);
+  },
+
+  uploadAppIcon: async (appType, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/upload`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders()
+      },
+      body: formData
+    });
+    return handleResponse(res);
+  },
+
+  uploadNotificationIcon: async (appType, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/notification-icon/upload`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders()
+      },
+      body: formData
+    });
+    return handleResponse(res);
+  },
+
+  updateTransform: async (appType, scale, offsetX, offsetY, padding) => {
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/transform`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ scale, offsetX, offsetY, padding })
+    });
+    return handleResponse(res);
+  },
+
+  activateAppIconForNextUpdate: async (appType) => {
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/activate-for-next-update`, {
+      method: 'PUT',
+      headers: {
+        ...getAuthHeaders()
+      }
+    });
+    return handleResponse(res);
+  },
+
+  deletePendingAppIcon: async (appType) => {
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/pending`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeaders()
+      }
+    });
+    return handleResponse(res);
+  },
+
+  updateAppName: async (appType, appName) => {
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/app-name`, {
+      method: 'PUT',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ appName })
+    });
+    return handleResponse(res);
+  },
+
+  getPlatformAnalytics: async (restaurantId, startDate, endDate) => {
+    let url = `/orders/admin/analytics?`;
+    if (restaurantId) url += `restaurantId=${restaurantId}&`;
+    if (startDate) url += `startDate=${startDate}&`;
+    if (endDate) url += `endDate=${endDate}&`;
+    const res = await fetch(`${API_BASE_URL}${url}`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
 };

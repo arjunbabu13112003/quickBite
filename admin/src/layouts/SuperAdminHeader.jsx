@@ -33,16 +33,16 @@ export default function SuperAdminHeader({ currentUser, theme, setTheme }) {
         <form onSubmit={handleSearchSubmit} style={{ position: 'relative' }}>
           <Search size={16} style={{
             position: 'absolute', left: '12px', top: '50%',
-            transform: 'translateY(-50%)', color: 'var(--text-subtle)', pointerEvents: 'none',
+            transform: 'translateY(-50%)', color: 'var(--icon-color)', pointerEvents: 'none',
           }} />
           <input
             type="text"
             placeholder="Search platform..."
             style={{
               width: '240px', padding: '0.55rem 1rem 0.55rem 2.25rem',
-              borderRadius: 'var(--radius-full)', border: '1px solid var(--border-color)',
-              fontSize: '0.85rem', background: 'var(--bg-subtle)',
-              color: 'var(--text-main)',
+              borderRadius: 'var(--radius-full)', border: '1px solid var(--border-search-input)',
+              fontSize: '0.85rem', background: 'var(--bg-search-input)',
+              color: 'var(--text-search-input)',
               transition: 'all var(--transition-fast)',
             }}
             onFocus={(e) => {
@@ -51,8 +51,8 @@ export default function SuperAdminHeader({ currentUser, theme, setTheme }) {
               e.target.style.boxShadow = '0 0 0 3px var(--primary-glow)';
             }}
             onBlur={(e) => {
-              e.target.style.borderColor = 'var(--border-color)';
-              e.target.style.background = 'var(--bg-subtle)';
+              e.target.style.borderColor = 'var(--border-search-input)';
+              e.target.style.background = 'var(--bg-search-input)';
               e.target.style.boxShadow = 'none';
             }}
           />
@@ -69,7 +69,7 @@ export default function SuperAdminHeader({ currentUser, theme, setTheme }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--text-muted)',
+            color: 'var(--icon-color)',
             transition: 'transform var(--transition-fast)',
             outline: 'none',
           }}
@@ -85,7 +85,7 @@ export default function SuperAdminHeader({ currentUser, theme, setTheme }) {
           style={{ position: 'relative', cursor: 'pointer' }}
           onClick={() => alert('Notifications coming in a future release.')}
         >
-          <Bell size={20} style={{ color: 'var(--text-muted)' }} />
+          <Bell size={20} style={{ color: 'var(--icon-color)' }} />
           <span style={{
             position: 'absolute', top: '-2px', right: '-2px',
             width: '8px', height: '8px',
@@ -95,7 +95,7 @@ export default function SuperAdminHeader({ currentUser, theme, setTheme }) {
 
         {/* Store */}
         <div style={{ cursor: 'pointer' }} onClick={() => alert('Store console link not configured.')}>
-          <Store size={20} style={{ color: 'var(--text-muted)' }} />
+          <Store size={20} style={{ color: 'var(--icon-color)' }} />
         </div>
 
         {/* Avatar */}

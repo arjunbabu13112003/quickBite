@@ -11,6 +11,7 @@ import {
   LogOut,
   Pizza,
   Tag,
+  Palette,
 } from 'lucide-react';
 
 const NAVIGATION_ITEMS = [
@@ -23,10 +24,11 @@ const NAVIGATION_ITEMS = [
   { id: 'payments', name: 'Payments', icon: CreditCard, path: '/super-admin/payments' },
   { id: 'offers', name: 'Offers', icon: Tag, path: '/super-admin/offers' },
   { id: 'analytics', name: 'Analytics', icon: BarChart3, path: '/super-admin/analytics' },
+  { id: 'branding', name: 'Branding', icon: Palette, path: '/super-admin/branding/app-icons' },
   { id: 'settings', name: 'Settings', icon: Settings, path: '/super-admin/settings' },
 ];
 
-const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders', 'offers'];
+const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders', 'offers', 'analytics', 'branding'];
 
 export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate, onLogout }) {
   const handleItemClick = (e, item) => {
@@ -42,7 +44,7 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
     <aside style={{
       width: '260px',
       background: 'var(--bg-sidebar)',
-      borderRight: '1px solid var(--border-color)',
+      borderRight: '1px solid var(--border-sidebar)',
       display: 'flex',
       flexDirection: 'column',
       height: '100vh',
@@ -58,7 +60,7 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
         display: 'flex',
         flexDirection: 'column',
         gap: '0.2rem',
-        borderBottom: '1px solid var(--border-color)',
+        borderBottom: '1px solid var(--border-sidebar)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div style={{
@@ -85,6 +87,7 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
       <nav style={{
         flex: 1, padding: '1.5rem 0.75rem',
         display: 'flex', flexDirection: 'column', gap: '0.25rem',
+        overflowY: 'auto',
       }}>
         {NAVIGATION_ITEMS.map((item) => {
           const isActive = item.id === currentTab;
@@ -99,24 +102,24 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
                 padding: '0.8rem 1rem', borderRadius: 'var(--radius-md)',
                 textDecoration: 'none', fontSize: '0.9rem',
                 fontWeight: isActive ? '800' : '600',
-                color: isActive ? 'var(--primary)' : 'var(--text-muted)',
-                backgroundColor: isActive ? 'var(--primary-light)' : 'transparent',
+                color: isActive ? 'var(--sidebar-active-color)' : 'var(--sidebar-inactive-color)',
+                backgroundColor: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
                 transition: 'all var(--transition-fast)',
               }}
               onMouseEnter={(e) => {
                 if (!isActive) {
-                  e.currentTarget.style.backgroundColor = 'var(--bg-subtle)';
-                  e.currentTarget.style.color = 'var(--text-main)';
+                  e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)';
+                  e.currentTarget.style.color = 'var(--sidebar-hover-color)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (!isActive) {
                   e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--text-muted)';
+                  e.currentTarget.style.color = 'var(--sidebar-inactive-color)';
                 }
               }}
             >
-              <Icon size={18} color={isActive ? 'var(--primary)' : 'currentColor'} />
+              <Icon size={18} color={isActive ? 'var(--sidebar-active-color)' : 'currentColor'} />
               <span>{item.name}</span>
             </a>
           );
@@ -126,7 +129,7 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
       {/* Bottom Profile & Logout */}
       <div style={{
         padding: '1.25rem',
-        borderTop: '1px solid var(--border-color)',
+        borderTop: '1px solid var(--border-sidebar)',
         display: 'flex', flexDirection: 'column', gap: '1rem',
         background: 'var(--bg-sidebar)',
       }}>
@@ -168,8 +171,8 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
           style={{
             width: '100%', display: 'flex', alignItems: 'center',
             justifyContent: 'center', gap: '0.5rem', padding: '0.7rem',
-            borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)',
-            background: 'var(--bg-card)', color: 'var(--text-muted)',
+            borderRadius: 'var(--radius-md)', border: '1px solid var(--border-btn-secondary)',
+            background: 'var(--bg-card)', color: 'var(--text-btn-secondary)',
             fontSize: '0.85rem', fontWeight: '700',
             transition: 'all var(--transition-fast)',
           }}
@@ -179,8 +182,8 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
             e.currentTarget.style.backgroundColor = 'var(--bg-danger-subtle)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--border-color)';
-            e.currentTarget.style.color = 'var(--text-muted)';
+            e.currentTarget.style.borderColor = 'var(--border-btn-secondary)';
+            e.currentTarget.style.color = 'var(--text-btn-secondary)';
             e.currentTarget.style.backgroundColor = 'var(--bg-card)';
           }}
         >

@@ -23,8 +23,21 @@ try {
   console.error('[AppConfig] Failed to write .env file:', e);
 }
 
+let appName = "QuickBite Partner";
+try {
+  const brandingPath = './branding.generated.json';
+  if (fs.existsSync(brandingPath)) {
+    const branding = JSON.parse(fs.readFileSync(brandingPath, 'utf8'));
+    if (branding && branding.appName) {
+      appName = branding.appName;
+    }
+  }
+} catch (e) {
+  console.warn('[AppConfig] Could not read branding.generated.json, using default name.');
+}
+
 module.exports = {
-  name: "QuickBite Partner",
+  name: appName,
   slug: "quickbite-partner",
   version: "1.0.0",
   orientation: "portrait",
@@ -38,9 +51,9 @@ module.exports = {
     package: "com.quickbite.deliverypartner",
     googleServicesFile: "./google-services.json",
     adaptiveIcon: {
-      foregroundImage: "./assets/delivery-partner-logo.png",
+      foregroundImage: "./assets/delivery-partner-icon-foreground.png",
       backgroundColor: "#FFFFFF",
-      monochromeImage: "./assets/images/android-icon-monochrome.png"
+      monochromeImage: "./assets/delivery-partner-icon-monochrome.png"
     },
     predictiveBackGestureEnabled: false,
     permissions: [

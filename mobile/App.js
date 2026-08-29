@@ -28,6 +28,16 @@ import {
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import RazorpayCheckout from 'react-native-razorpay';
 import * as Location from 'expo-location';
+
+let appName = 'QuickBite';
+try {
+  const branding = require('./branding.generated.json');
+  if (branding && branding.appName) {
+    appName = branding.appName;
+  }
+} catch (e) {
+  console.warn('[App] Could not read branding.generated.json, using default name.');
+}
 import { Map as MapView, Camera as MapCamera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
 import {
   Sparkles,
@@ -2817,7 +2827,7 @@ function MainApp() {
           setCurrentUser(userObj);
           setActiveTab('home');
           setIsLoadingAuth(false);
-          triggerToastNotification('🎉 Registration successful! Welcome to QuickBite');
+          triggerToastNotification(`🎉 Registration successful! Welcome to ${appName}`);
           return;
         } else {
           const msg = Array.isArray(backendData?.message)
@@ -3879,7 +3889,7 @@ function MainApp() {
               <ScrollView contentContainerStyle={styles.authContainer} keyboardShouldPersistTaps="handled">
                 <View style={styles.authHeader}>
                   <Text style={styles.brandEmoji}>🛵</Text>
-                  <Text style={styles.brandTitle}>QuickBite Mobile</Text>
+                  <Text style={styles.brandTitle}>{appName}</Text>
                   <Text style={styles.brandSubtitle}>Delicious Meals Delivered to Your Doorstep</Text>
                 </View>
 
@@ -4040,7 +4050,7 @@ function MainApp() {
                 <View style={[styles.headerBrandBadge, { backgroundColor: darkMode ? '#2A181D' : '#FEF2F2', borderColor: darkMode ? '#5B212B' : '#FECDD3' }]}>
                   <Text style={styles.headerBrandIcon}>🍔</Text>
                   <Text style={[styles.headerBrandText, { color: D.text }]}>
-                    Quick<Text style={{ color: '#FF5252' }}>Bite</Text>
+                    {appName}
                   </Text>
                 </View>
 
@@ -4932,7 +4942,7 @@ function MainApp() {
                         <AlertTriangle size={24} color="#EF4444" />
                         <Text style={[styles.errorTitle, { color: darkMode ? '#FCA5A5' : '#991B1B' }]}>Connection Error</Text>
                         <Text style={[styles.errorText, { color: darkMode ? '#F87171' : '#B91C1C' }]}>
-                          Unable to connect to QuickBite server. Tap Retry.
+                          Unable to connect to {appName} server. Tap Retry.
                         </Text>
                         <TouchableOpacity
                           style={[styles.retryBtn, { backgroundColor: '#EF4444' }]}

@@ -5,6 +5,7 @@ import {
   UserCheck, 
   Bike, 
   ClipboardList, 
+  Palette,
   CreditCard, 
   BarChart3, 
   Settings, 
@@ -17,6 +18,7 @@ const NAVIGATION_ITEMS = [
   { id: 'hotel-admins', name: 'Hotel Admins', icon: UserCheck, path: '/hotel-admins' },
   { id: 'delivery-partners', name: 'Delivery Partners', icon: Bike, path: '/delivery-partners' },
   { id: 'orders', name: 'Orders', icon: ClipboardList, path: '/orders' },
+  { id: 'branding', name: 'Branding', icon: Palette, path: '/branding/app-icons' },
   { id: 'payments', name: 'Payments', icon: CreditCard, path: '/payments' },
   { id: 'analytics', name: 'Analytics', icon: BarChart3, path: '/analytics' },
   { id: 'settings', name: 'Settings', icon: Settings, path: '/settings' }
@@ -27,7 +29,7 @@ export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate,
   // Custom toast notification when users click unbuilt features
   const handleItemClick = (e, item) => {
     e.preventDefault();
-    if (item.id === 'dashboard' || item.id === 'hotels' || item.id === 'hotel-admins' || item.id === 'delivery-partners' || item.id === 'orders') {
+    if (item.id === 'dashboard' || item.id === 'hotels' || item.id === 'hotel-admins' || item.id === 'delivery-partners' || item.id === 'orders' || item.id === 'branding') {
       onNavigate(item.path);
     } else {
       alert(`"${item.name}" management screen is coming in the next release.`);

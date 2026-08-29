@@ -34,6 +34,20 @@ export class OrdersController {
   }
 
   @Roles(UserRole.SUPER_ADMIN)
+  @Get('orders/admin/analytics')
+  getPlatformAnalytics(
+    @Query('restaurantId') restaurantId?: number,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.ordersService.getPlatformAnalytics(
+      restaurantId ? Number(restaurantId) : undefined,
+      startDate,
+      endDate,
+    );
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
   @Get('orders/admin/:id')
   async getOrderDetailsForAdmin(@Param('id', ParseIntPipe) id: number) {
     return this.ordersService.getOrderDetailsForAdmin(id);

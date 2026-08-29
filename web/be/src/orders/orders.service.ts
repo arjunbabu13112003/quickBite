@@ -758,6 +758,7 @@ export class OrdersService {
           ? order.items.map((item) => ({
               id: item.id,
               foodName: item.foodName,
+              foodImage: item.foodImage,
               quantity: item.quantity,
               unitPrice: parseFloat(item.unitPrice.toString()),
               lineTotal: parseFloat(item.lineTotal.toString()),
@@ -1142,5 +1143,211 @@ export class OrdersService {
 
     const decrypted = decryptPin(order.deliveryPinHash);
     return { deliveryPin: decrypted || null };
+  }
+
+  async getPlatformAnalytics(
+    hotelId?: number,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<any> {
+    let start = startDate ? new Date(startDate) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    let end = endDate ? new Date(endDate) : new Date();
+
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+
+    const durationMs = end.getTime() - start.getTime();
+    const prevStart = new Date(start.getTime() - durationMs - 1000);
+    prevStart.setHours(0, 0, 0, 0);
+    const prevEnd = new Date(start.getTime() - 1000);
+    prevEnd.setHours(23, 59, 59, 999);
+
+    let hotelFilterCurrent = '';
+    let hotelFilterPrev = '';
+    let hotelFilterReviews = '';
+    const paramsCurrent: any[] = [start, end];
+    const paramsPrev: any[] = [prevStart, prevEnd];
+    const paramsReviews: any[] = [start, end];
+    const paramsReviewsPrev: any[] = [prevStart, prevEnd];
+
+    if (hotelId) {
+      hotelFilterCurrent = 'AND o."hotelId" = $3';
+      hotelFilterPrev = 'AND o."hotelId" = $3';
+      hotelFilterReviews = 'AND r."hotelId" = $3';
+      paramsCurrent.push(hotelId);
+      paramsPrev.push(hotelId);
+      paramsReviews.push(hotelId);
+      paramsReviewsPrev.push(hotelId);
+    }
+
+    const metricsQuery = `
+      SELECT 
+        COALESCE(SUM(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
+        COUNT(o.id) as "ordersCount",
+        COALESCE(AVG(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE NULL END), 0) as "avgOrderValue",
+        COUNT(CASE WHEN o."orderStatus" = 'delivered' THEN 1 ELSE NULL END) as "completedOrders"
+      FROM orders o
+      WHERE o."placedAt" >= $1 AND o."placedAt" <= $2
+      ${hotelFilterCurrent}
+    `;
+
+    const ratingQuery = `
+      SELECT COALESCE(AVG(r.rating), 0) as "avgRating"
+      FROM hotel_reviews r
+      WHERE r."createdAt" >= $1 AND r."createdAt" <= $2
+      ${hotelFilterReviews}
+    `;
+
+    const [currentMetrics, prevMetrics, currentRating, prevRating] = await Promise.all([
+      this.dataSource.query(metricsQuery, paramsCurrent),
+      this.dataSource.query(metricsQuery, paramsPrev),
+      this.dataSource.query(ratingQuery, paramsReviews),
+      this.dataSource.query(ratingQuery, paramsReviewsPrev),
+    ]);
+
+    const curr = currentMetrics[0];
+    const prev = prevMetrics[0];
+
+    // Fallback overall rating if no rating in this period
+    let currRatingVal = parseFloat(currentRating[0]?.avgRating || 0);
+    let prevRatingVal = parseFloat(prevRating[0]?.avgRating || 0);
+    if (currRatingVal === 0) {
+      const fallbackQuery = `
+        SELECT COALESCE(AVG(r.rating), 4.5) as "avgRating"
+        FROM hotel_reviews r
+        ${hotelId ? 'WHERE r."hotelId" = $1' : ''}
+      `;
+      const fallbackRating = await this.dataSource.query(fallbackQuery, hotelId ? [hotelId] : []);
+      currRatingVal = parseFloat(fallbackRating[0]?.avgRating || 4.5);
+    }
+    if (prevRatingVal === 0) {
+      prevRatingVal = currRatingVal;
+    }
+
+    // Calculations
+    const revenue = parseFloat(curr.revenue || 0);
+    const prevRevenue = parseFloat(prev.revenue || 0);
+    const ordersCount = parseInt(curr.ordersCount || 0, 10);
+    const prevOrdersCount = parseInt(prev.ordersCount || 0, 10);
+    const avgOrderValue = parseFloat(curr.avgOrderValue || 0);
+    const prevAvgOrderValue = parseFloat(prev.avgOrderValue || 0);
+    const completedOrders = parseInt(curr.completedOrders || 0, 10);
+    const prevCompletedOrders = parseInt(prev.completedOrders || 0, 10);
+
+    const calcChange = (c: number, p: number) => {
+      if (p === 0) return c > 0 ? 100 : 0;
+      return parseFloat((((c - p) / p) * 100).toFixed(1));
+    };
+
+    const metrics = {
+      totalRevenue: { value: revenue, change: calcChange(revenue, prevRevenue) },
+      totalOrders: { value: ordersCount, change: calcChange(ordersCount, prevOrdersCount) },
+      avgOrderValue: { value: avgOrderValue, change: calcChange(avgOrderValue, prevAvgOrderValue) },
+      completedOrders: {
+        value: completedOrders,
+        rate: ordersCount > 0 ? parseFloat(((completedOrders / ordersCount) * 100).toFixed(1)) : 0,
+        change: calcChange(completedOrders, prevCompletedOrders)
+      },
+      customerRating: { value: parseFloat(currRatingVal.toFixed(1)), change: calcChange(currRatingVal, prevRatingVal) }
+    };
+
+    // Trend Query
+    const trendQuery = `
+      SELECT 
+        DATE(o."placedAt") as "dateStr",
+        COALESCE(SUM(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
+        COUNT(o.id) as "ordersCount"
+      FROM orders o
+      WHERE o."placedAt" >= $1 AND o."placedAt" <= $2
+      ${hotelFilterCurrent}
+      GROUP BY DATE(o."placedAt")
+      ORDER BY DATE(o."placedAt") ASC
+    `;
+
+    const trendData = await this.dataSource.query(trendQuery, paramsCurrent);
+
+    // Order status Query
+    const statusQuery = `
+      SELECT 
+        o."orderStatus" as "status",
+        COUNT(o.id) as "count"
+      FROM orders o
+      WHERE o."placedAt" >= $1 AND o."placedAt" <= $2
+      ${hotelFilterCurrent}
+      GROUP BY o."orderStatus"
+    `;
+
+    const statusData = await this.dataSource.query(statusQuery, paramsCurrent);
+
+    // Top Selling Items Query
+    const topItemsQuery = `
+      SELECT 
+        oi."foodName" as "name",
+        oi."foodImage" as "image",
+        h.name as "restaurantName",
+        SUM(oi.quantity) as "soldCount",
+        SUM(oi."lineTotal") as "revenue"
+      FROM order_items oi
+      JOIN orders o ON oi."orderId" = o.id
+      LEFT JOIN hotels h ON o."hotelId" = h.id
+      WHERE o."placedAt" >= $1 AND o."placedAt" <= $2
+      ${hotelFilterCurrent}
+      GROUP BY oi."foodName", oi."foodImage", h.name
+      ORDER BY "soldCount" DESC
+      LIMIT 5
+    `;
+
+    const topItems = await this.dataSource.query(topItemsQuery, paramsCurrent);
+
+    // Restaurant Performance Query (only for platform-wide)
+    let performanceData = [];
+    if (!hotelId) {
+      const performanceQuery = `
+        SELECT 
+          h.id as "hotelId",
+          h.name as "name",
+          COALESCE(u.name, 'No Admin Assigned') as "managerName",
+          COUNT(o.id) as "ordersCount",
+          COALESCE(SUM(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE 0 END), 0) as "revenue",
+          COALESCE(AVG(CASE WHEN o."orderStatus" NOT IN ('cancelled', 'rejected') THEN o."totalAmount" ELSE NULL END), 0) as "avgOrderValue",
+          COALESCE(AVG(r.rating), 4.5) as "rating",
+          COUNT(CASE WHEN o."orderStatus" = 'delivered' THEN 1 ELSE NULL END) as "completedOrdersCount"
+        FROM hotels h
+        LEFT JOIN orders o ON o."hotelId" = h.id AND o."placedAt" >= $1 AND o."placedAt" <= $2
+        LEFT JOIN hotel_admins ha ON ha."hotelId" = h.id AND ha."isActive" = true
+        LEFT JOIN users u ON u.id = ha."userId"
+        LEFT JOIN hotel_reviews r ON r."hotelId" = h.id AND r."createdAt" >= $1 AND r."createdAt" <= $2
+        GROUP BY h.id, h.name, u.name
+        ORDER BY "revenue" DESC
+      `;
+      const perfRaw = await this.dataSource.query(performanceQuery, [start, end]);
+      performanceData = perfRaw.map((p: any) => {
+        const total = parseInt(p.ordersCount || 0, 10);
+        const comp = parseInt(p.completedOrdersCount || 0, 10);
+        const rate = total > 0 ? Math.round((comp / total) * 100) : 0;
+        let status = 'STABLE';
+        if (rate >= 90) status = 'EXCELLENT';
+        else if (rate < 70) status = 'NEEDS ATTN';
+        return {
+          hotelId: p.hotelId,
+          name: p.name,
+          managerName: p.managerName,
+          orders: total,
+          revenue: parseFloat(p.revenue || 0),
+          avgOrderValue: parseFloat(p.avgOrderValue || 0),
+          rating: parseFloat(parseFloat(p.rating || 4.5).toFixed(1)),
+          completionRate: rate,
+          status,
+        };
+      });
+    }
+
+    return {
+      metrics,
+      trendData,
+      statusData,
+      topItems,
+      performanceData,
+    };
   }
 }
