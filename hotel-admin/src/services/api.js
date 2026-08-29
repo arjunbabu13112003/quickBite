@@ -1,4 +1,120 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+
+// --- CENTRALIZED API ERROR AND CONNECTIVITY HANDLING ---
+export const qbEvents = {
+  listeners: new Set(),
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  },
+  emit(message, onRetry) {
+    this.listeners.forEach(listener => {
+      try {
+        listener(message, onRetry);
+      } catch (e) {
+        console.error("Error in listener:", e);
+      }
+    });
+  }
+};
+
+const getFriendlyApiError = async (error, response) => {
+  if (error) {
+    console.error("[API Technical Error]", error);
+  }
+  if (response) {
+    console.error("[API Response Error Status]", response.status);
+    try {
+      const clone = response.clone();
+      const text = await clone.text();
+      console.error("[API Response Error Body]", text.substring(0, 500));
+    } catch (e) {}
+  }
+
+  let status = response ? response.status : 0;
+  let message = "Server is temporarily unavailable. Please try again.";
+
+  if (response) {
+    try {
+      const clone = response.clone();
+      const errData = await clone.json();
+      if (errData && typeof errData.message === 'string') {
+        const isTechnical = /sql|database|query|table|row|column|exception|nest|internal|stack/i.test(errData.message);
+        if (!isTechnical && errData.message.trim() !== '') {
+          message = errData.message;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (status === 401) {
+    message = "Session expired. Please log in again.";
+  } else if (status === 403) {
+    message = "You don't have permission to access this.";
+  } else if (status === 404) {
+    message = "Requested data was not found.";
+  } else if (status >= 500) {
+    message = "Server is temporarily unavailable. Please try again.";
+  } else if (!response && error) {
+    message = "Server is temporarily unavailable. Please try again.";
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      message = "No internet connection. Please check your network and try again.";
+    }
+  }
+
+  return { status, message };
+};
+
+export const requestWithHandling = async (requestFn, onRetry, isGet = true, isBackground = false) => {
+  try {
+    return await requestFn();
+  } catch (err) {
+    if (isBackground || !isGet || err.status === 404 || err.status === 403 || err.status === 401) {
+      throw err;
+    }
+    if (onRetry) {
+      qbEvents.emit(err.message || "Server is temporarily unavailable. Please try again.", onRetry);
+    }
+    throw err;
+  }
+};
+
+const qbFetch = async (url, options = {}) => {
+  const urlStr = typeof url === 'string' ? url : (url && url.url) || '';
+  if (!urlStr.startsWith(API_BASE_URL)) {
+    return window.fetch(url, options);
+  }
+
+  const isGet = !options.method || options.method.toUpperCase() === 'GET';
+
+  const execute = async () => {
+    try {
+      const res = await window.fetch(url, options);
+      if (!res.ok) {
+        const err = await getFriendlyApiError(null, res);
+        const isAuthEndpoint = urlStr.includes('/users/login') || urlStr.includes('/users/register');
+        if (res.status === 401 && !isAuthEndpoint) {
+          qbEvents.emit("UNAUTHORIZED", null);
+        }
+        throw err;
+      }
+      return res;
+    } catch (error) {
+      const err = await getFriendlyApiError(error, null);
+      throw err;
+    }
+  };
+
+  if (isGet) {
+    const isProfileCheck = urlStr.includes('/users/profile') || urlStr.includes('/hotel-admins/my-hotels');
+    return requestWithHandling(execute, () => qbFetch(url, options), true, isProfileCheck);
+  } else {
+    return execute();
+  }
+};
+
+const fetch = qbFetch;
+
 const getAuthHeaders = () => {
   const token = localStorage.getItem('qb_token') || sessionStorage.getItem('qb_token');
   return token ? { 'Authorization': `Bearer ${token}` } : {};

@@ -84,12 +84,26 @@ export const getApiBaseUrl = (): string => {
   return getDefaultApiBaseUrl();
 };
 
-export const startBaseUrlDetection = (): Promise<string> => {
+let currentDetectionId = 0;
+let activeDetectionPromise: Promise<string> | null = null;
+
+export const startBaseUrlDetection = (force = false): Promise<string> => {
+  if (force) {
+    resolvedBaseUrl = null;
+    activeDetectionPromise = null;
+  }
+
   if (resolvedBaseUrl) {
     return Promise.resolve(resolvedBaseUrl);
   }
 
-  return new Promise((resolve) => {
+  if (activeDetectionPromise) {
+    return activeDetectionPromise;
+  }
+
+  const detectionId = ++currentDetectionId;
+
+  activeDetectionPromise = new Promise((resolve) => {
     const defaultUrl = getDefaultApiBaseUrl();
     const localhostUrl = 'http://localhost:5000';
     const emulatorUrl = 'http://10.0.2.2:5000';
@@ -110,50 +124,74 @@ export const startBaseUrlDetection = (): Promise<string> => {
       candidates.push(emulatorUrl);
     }
 
-    console.log(`[API Base Resolver] Testing candidate URLs: ${candidates.join(', ')}`);
+    console.log(`[API Base Resolver] Testing candidate URLs (Run #${detectionId}): ${candidates.join(', ')}`);
 
-    const testUrl = async (url: string) => {
-      try {
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), 3000); // 3 seconds timeout
-        const res = await fetch(`${url}/health`, {
-          method: 'GET',
-          signal: controller.signal,
-        });
-        clearTimeout(id);
-        if (res.status === 200) {
-          return url;
-        }
-      } catch (e) {
-        // ignore
-      }
-      throw new Error('failed');
+    const timeoutHandles: any[] = [];
+
+    const testUrl = (url: string): Promise<string> => {
+      return new Promise((resResolve, resReject) => {
+        const timer = setTimeout(() => {
+          resReject(new Error('timeout'));
+        }, 3000);
+        timeoutHandles.push(timer);
+
+        globalThis.fetch(`${url}/health`, { method: 'GET' })
+          .then((res: any) => {
+            clearTimeout(timer);
+            if (res.status === 200) {
+              resResolve(url);
+            } else {
+              resReject(new Error('status not 200'));
+            }
+          })
+          .catch((err: any) => {
+            clearTimeout(timer);
+            resReject(err);
+          });
+      });
     };
 
     let resolved = false;
     let failedCount = 0;
 
+    const cleanup = () => {
+      timeoutHandles.forEach(h => clearTimeout(h));
+      if (currentDetectionId === detectionId) {
+        activeDetectionPromise = null;
+      }
+    };
+
     candidates.forEach((url) => {
       testUrl(url)
         .then((successfulUrl) => {
+          if (detectionId !== currentDetectionId) {
+            return;
+          }
           if (!resolved) {
             resolved = true;
             resolvedBaseUrl = successfulUrl;
             console.log(`[API Base Resolver] Active backend detected: ${resolvedBaseUrl}`);
+            cleanup();
             resolve(resolvedBaseUrl);
           }
         })
         .catch(() => {
+          if (detectionId !== currentDetectionId) {
+            return;
+          }
           failedCount++;
           if (failedCount === candidates.length && !resolved) {
             resolved = true;
             resolvedBaseUrl = defaultUrl;
             console.log(`[API Base Resolver] No active backend detected. Falling back to: ${resolvedBaseUrl}`);
+            cleanup();
             resolve(resolvedBaseUrl);
           }
         });
     });
   });
+
+  return activeDetectionPromise;
 };
 
 export const resolveApiUrl = (path: string): string => {

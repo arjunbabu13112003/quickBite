@@ -2,6 +2,8 @@ import { Platform, NativeModules } from 'react-native';
 import Constants from 'expo-constants';
 
 let resolvedBaseUrl = null;
+let currentDetectionId = 0;
+let activeDetectionPromise = null;
 let hasLogged = false;
 
 // 1. Synchronous helper to get the default/configured API URL based on Expo build metadata
@@ -82,15 +84,28 @@ const getDefaultApiBaseUrl = () => {
 };
 
 // 2. Perform connection checks to candidate URLs and cache the active one
-export const startBaseUrlDetection = () => {
-  if (resolvedBaseUrl) return Promise.resolve(resolvedBaseUrl);
+export const startBaseUrlDetection = (force = false) => {
+  if (force) {
+    resolvedBaseUrl = null;
+    activeDetectionPromise = null;
+  }
+
+  if (resolvedBaseUrl) {
+    return Promise.resolve(resolvedBaseUrl);
+  }
+
+  if (activeDetectionPromise) {
+    return activeDetectionPromise;
+  }
+
+  const detectionId = ++currentDetectionId;
 
   if (!__DEV__) {
     resolvedBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || '';
     return Promise.resolve(resolvedBaseUrl);
   }
 
-  return new Promise((resolve) => {
+  activeDetectionPromise = new Promise((resolve) => {
     const defaultUrl = getDefaultApiBaseUrl();
     const localhostUrl = 'http://localhost:5000';
     const emulatorUrl = 'http://10.0.2.2:5000';
@@ -111,50 +126,74 @@ export const startBaseUrlDetection = () => {
       candidates.push(emulatorUrl);
     }
 
-    console.log(`[API Base Resolver] Testing candidate URLs: ${candidates.join(', ')}`);
+    console.log(`[API Base Resolver] Testing candidate URLs (Run #${detectionId}): ${candidates.join(', ')}`);
 
-    const testUrl = async (url) => {
-      try {
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), 3000); // 3000ms timeout for wireless debugging latency
-        const res = await fetch(`${url}/health`, {
-          method: 'GET',
-          signal: controller.signal,
-        });
-        clearTimeout(id);
-        if (res.status === 200) {
-          return url;
-        }
-      } catch (e) {
-        // ignore
-      }
-      throw new Error('failed');
+    const timeoutHandles = [];
+
+    const testUrl = (url) => {
+      return new Promise((resResolve, resReject) => {
+        const timer = setTimeout(() => {
+          resReject(new Error('timeout'));
+        }, 3000);
+        timeoutHandles.push(timer);
+
+        global.fetch(`${url}/health`, { method: 'GET' })
+          .then((res) => {
+            clearTimeout(timer);
+            if (res.status === 200) {
+              resResolve(url);
+            } else {
+              resReject(new Error('status not 200'));
+            }
+          })
+          .catch((err) => {
+            clearTimeout(timer);
+            resReject(err);
+          });
+      });
     };
 
     let resolved = false;
     let failedCount = 0;
 
+    const cleanup = () => {
+      timeoutHandles.forEach(h => clearTimeout(h));
+      if (currentDetectionId === detectionId) {
+        activeDetectionPromise = null;
+      }
+    };
+
     candidates.forEach((url) => {
       testUrl(url)
         .then((successfulUrl) => {
+          if (detectionId !== currentDetectionId) {
+            return;
+          }
           if (!resolved) {
             resolved = true;
             resolvedBaseUrl = successfulUrl;
             console.log(`[API Base Resolver] Active backend detected: ${resolvedBaseUrl}`);
+            cleanup();
             resolve(resolvedBaseUrl);
           }
         })
         .catch(() => {
+          if (detectionId !== currentDetectionId) {
+            return;
+          }
           failedCount++;
           if (failedCount === candidates.length && !resolved) {
             resolved = true;
             resolvedBaseUrl = defaultUrl;
             console.log(`[API Base Resolver] No active backend detected. Falling back to default URL: ${resolvedBaseUrl}`);
+            cleanup();
             resolve(resolvedBaseUrl);
           }
         });
     });
   });
+
+  return activeDetectionPromise;
 };
 
 // Start background detection immediately in DEV mode

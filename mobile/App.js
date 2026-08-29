@@ -317,6 +317,113 @@ const resolveProductImage = (imgStr, activeBackend) => {
   return `${host}/uploads/foods/${resolved}`;
 };
 
+// --- CENTRALIZED API ERROR AND CONNECTIVITY HANDLING ---
+const qbEvents = {
+  listeners: new Set(),
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  },
+  emit(message, onRetry) {
+    this.listeners.forEach(listener => {
+      try {
+        listener(message, onRetry);
+      } catch (e) {
+        console.error("Error in listener:", e);
+      }
+    });
+  }
+};
+
+const getFriendlyApiError = async (error, response) => {
+  if (error) {
+    console.warn("[API Technical Error]", error);
+  }
+  if (response) {
+    console.warn("[API Response Error Status]", response.status);
+    try {
+      const clone = response.clone();
+      const text = await clone.text();
+      console.warn("[API Response Error Body]", text.substring(0, 500));
+    } catch (e) {}
+  }
+
+  let status = response ? response.status : 0;
+  let message = "Server is temporarily unavailable. Please try again.";
+
+  if (response) {
+    try {
+      const clone = response.clone();
+      const errData = await clone.json();
+      if (errData && typeof errData.message === 'string') {
+        const isTechnical = /sql|database|query|table|row|column|exception|nest|internal|stack/i.test(errData.message);
+        if (!isTechnical && errData.message.trim() !== '') {
+          message = errData.message;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (status === 401) {
+    message = "Session expired. Please log in again.";
+  } else if (status === 403) {
+    message = "You don't have permission to access this.";
+  } else if (status === 404) {
+    message = "Requested data was not found.";
+  } else if (status >= 500) {
+    message = "Server is temporarily unavailable. Please try again.";
+  } else if (!response && error) {
+    message = "Server is temporarily unavailable. Please try again.";
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      message = "No internet connection. Please check your network and try again.";
+    }
+  }
+
+  return { status, message };
+};
+
+const qbFetch = async (url, options) => {
+  const urlStr = typeof url === 'string' ? url : (url && url.url) || '';
+  if (!urlStr.includes(':5000')) {
+    return global.fetch(url, options);
+  }
+
+  try {
+    const res = await Promise.race([
+      global.fetch(url, options),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+    ]);
+    if (!res.ok) {
+      const err = await getFriendlyApiError(null, res);
+      const isAuthEndpoint = urlStr.includes('/users/login') || urlStr.includes('/users/register');
+      if (res.status === 401 && !isAuthEndpoint) {
+        qbEvents.emit("UNAUTHORIZED", null);
+      }
+      throw err;
+    }
+    return res;
+  } catch (error) {
+    const err = await getFriendlyApiError(error, null);
+    throw err;
+  }
+};
+
+const fetch = qbFetch;
+
+const requestWithHandling = async (requestFn, onRetry, isBackground = false) => {
+  try {
+    return await requestFn();
+  } catch (err) {
+    if (isBackground || err.status === 404 || err.status === 403 || err.status === 401) {
+      throw err;
+    }
+    if (onRetry) {
+      qbEvents.emit(err.message || "Server is temporarily unavailable. Please try again.", onRetry);
+    }
+    throw err;
+  }
+};
+
 let cachedBackendUrl = null;
 
 const FloatingCartBar = ({ 
@@ -419,6 +526,17 @@ export default function App() {
 function MainApp() {
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom || initialWindowMetrics?.insets?.bottom || 0;
+
+  // Skeleton & Food Loading State
+  const [isSkeletonLoading, setIsSkeletonLoading] = useState(true);
+  const [dbConnectionError, setDbConnectionError] = useState(false);
+  const [dbConnectionErrorMsg, setDbConnectionErrorMsg] = useState('');
+  const [apiError, setApiError] = useState(null); // { message, onRetry }
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [isSessionLoaded, setIsSessionLoaded] = useState(false);
+  const [isApiErrorHandlerReady, setIsApiErrorHandlerReady] = useState(false);
+  const [offersLoadError, setOffersLoadError] = useState(false);
+  const [ordersLoadError, setOrdersLoadError] = useState(false);
 
   // Navigation & Tab state: 'home' | 'wishlist' | 'orders' | 'profile' | 'admin'
   const [activeTab, _setActiveTab] = useState('home');
@@ -694,11 +812,9 @@ function MainApp() {
   const [activeHotelOfferFoods, setActiveHotelOfferFoods] = useState([]);
   const [loadingHotelOffers, setLoadingHotelOffers] = useState(false);
 
-  const resolveImage = (imgStr) => resolveProductImage(imgStr, resolvedBackendUrl);
-
   // Helper to get backend endpoint — delegates to dynamic resolver (no stale cache)
-  const getActiveBackend = async () => {
-    await startBaseUrlDetection();
+  const getActiveBackend = async (force = false) => {
+    await startBaseUrlDetection(force);
     return getApiBaseUrl();
   };
 
@@ -719,10 +835,7 @@ function MainApp() {
     if (catNames.some(n => n.includes('shawarma') || n.includes('kebab')) || foodNames.some(n => n.includes('shawarma'))) {
       return 'middle_eastern';
     }
-    if (catNames.some(n => n.includes('seafood') || n.includes('fish')) || foodNames.some(n => n.includes('seafood') || n.includes('fish'))) {
-      return 'seafood';
-    }
-    if (catNames.some(n => n.includes('healthy') || n.includes('salad')) || foodNames.some(n => n.includes('salad'))) {
+    if (catNames.some(n => n.includes('healthy') || n.includes('salad') || n.includes('soup')) || foodNames.some(n => n.includes('salad') || n.includes('soup'))) {
       return 'healthy';
     }
     if (catNames.some(n => n.includes('dessert') || n.includes('ice cream') || n.includes('sweet')) || foodNames.some(n => n.includes('dessert') || n.includes('ice cream'))) {
@@ -732,13 +845,17 @@ function MainApp() {
   };
 
   // Fetch backend data and map it into the UI's expected shape
-  const fetchBackendData = async () => {
+  const fetchBackendData = async (force = false) => {
+    console.log('[QuickBite] fetchBackendData() called, force =', force);
     setIsSkeletonLoading(true);
     setDbConnectionError(false);
     try {
-      const backendUrl = await getActiveBackend();
+      const backendUrl = await getActiveBackend(force);
       const resolveImage = (imgStr) => resolveProductImage(imgStr, backendUrl);
-      const res = await fetch(`${backendUrl}/hotels`);
+      const res = await requestWithHandling(
+        () => fetch(`${backendUrl}/hotels`),
+        () => fetchBackendData(true)
+      );
       if (!res.ok) throw new Error('Failed to fetch hotels');
       const fetchedHotels = await res.json();
       
@@ -891,23 +1008,23 @@ function MainApp() {
       }
 
       setDbConnectionError(false);
+      setDbConnectionErrorMsg('');
     } catch (error) {
       console.warn('Error fetching backend data:', error);
       setDbConnectionError(true);
+      setDbConnectionErrorMsg(error.message || "Server is temporarily unavailable. Please try again.");
     } finally {
       setIsSkeletonLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchBackendData();
-  }, []);
+
 
   useEffect(() => {
-    if (activeTab === 'home') {
+    if (isApiErrorHandlerReady && isSessionLoaded && activeTab === 'home') {
       fetchBackendData();
     }
-  }, [activeTab]);
+  }, [activeTab, isApiErrorHandlerReady, isSessionLoaded]);
 
   useEffect(() => {
     if (selectedRestaurant) {
@@ -1147,46 +1264,47 @@ function MainApp() {
     }
   }, [selectedRestaurant?.id, modalOpenCount]);
 
+  const fetchRestaurantDetails = useCallback(async (restId) => {
+    setLoadingDetails(true);
+    setDetailedRestaurant(null); // Clear stale details immediately
+    console.log('RESTAURANT DETAILS ID:', restId);
+    try {
+      const res = await requestWithHandling(
+        () => fetch(`${resolvedBackendUrl}/hotels/${restId}`),
+        () => fetchRestaurantDetails(restId)
+      );
+      if (!res.ok) throw new Error('Failed to fetch detailed restaurant profile');
+      const data = await res.json();
+      
+      console.log('RESTAURANT DETAILS RESPONSE:', JSON.stringify(data));
+      console.log('PHONE:', data.phoneNumber);
+      console.log('EMAIL:', data.email);
+      console.log('LANDMARK:', data.landmark);
+      console.log('FULL ADDRESS:', data.address);
+      console.log('LOGO:', data.logo);
+      console.log('COVER:', data.image);
+      console.log('GALLERY:', data.gallery);
+      console.log('PREPARATION TIME:', data.averagePreparationTime);
+      console.log('MIN ORDER:', data.minimumOrderAmount);
+      console.log('DELIVERY RADIUS:', data.deliveryRadiusKm);
+
+      setDetailedRestaurant(data);
+    } catch (err) {
+      console.warn('Error fetching detailed restaurant profile:', err);
+      setDetailedRestaurant(selectedRestaurant);
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, [resolvedBackendUrl, selectedRestaurant]);
+
   // Fetch detailed restaurant profile when selectedRestaurant changes
   useEffect(() => {
     if (selectedRestaurant?.id) {
-      setLoadingDetails(true);
-      setDetailedRestaurant(null); // Clear stale details immediately
-      
-      const restId = selectedRestaurant.id;
-      console.log('RESTAURANT DETAILS ID:', restId);
-
-      fetch(`${resolvedBackendUrl}/hotels/${restId}`)
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to fetch detailed restaurant profile');
-          return res.json();
-        })
-        .then(data => {
-          console.log('RESTAURANT DETAILS RESPONSE:', JSON.stringify(data));
-          console.log('PHONE:', data.phoneNumber);
-          console.log('EMAIL:', data.email);
-          console.log('LANDMARK:', data.landmark);
-          console.log('FULL ADDRESS:', data.address);
-          console.log('LOGO:', data.logo);
-          console.log('COVER:', data.image);
-          console.log('GALLERY:', data.gallery);
-          console.log('PREPARATION TIME:', data.averagePreparationTime);
-          console.log('MIN ORDER:', data.minimumOrderAmount);
-          console.log('DELIVERY RADIUS:', data.deliveryRadiusKm);
-
-          setDetailedRestaurant(data);
-        })
-        .catch(err => {
-          console.warn('Error fetching detailed restaurant profile:', err);
-          setDetailedRestaurant(selectedRestaurant);
-        })
-        .finally(() => {
-          setLoadingDetails(false);
-        });
+      fetchRestaurantDetails(selectedRestaurant.id);
     } else {
       setDetailedRestaurant(null);
     }
-  }, [selectedRestaurant?.id, resolvedBackendUrl]);
+  }, [selectedRestaurant?.id, fetchRestaurantDetails]);
 
   // Animated interpolations for header center title
   const restTitleOpacity = restScrollY.interpolate({
@@ -1248,7 +1366,11 @@ function MainApp() {
           }
         }
       } catch (err) {
-        console.error('Error fetching restaurant offers:', err);
+        if (err && (err.status === 0 || err.message === 'timeout' || /network|aborted/i.test(err.message))) {
+          console.warn('Error fetching restaurant offers (handled network/timeout):', err);
+        } else {
+          console.error('Error fetching restaurant offers:', err);
+        }
       } finally {
         if (active) {
           setLoadingRestaurantOffers(false);
@@ -1382,7 +1504,11 @@ function MainApp() {
           }
         }
       } catch (err) {
-        console.error('Error fetching cart offers:', err);
+        if (err && (err.status === 0 || err.message === 'timeout' || /network|aborted/i.test(err.message))) {
+          console.warn('Error fetching cart offers (handled network/timeout):', err);
+        } else {
+          console.error('Error fetching cart offers:', err);
+        }
       }
     };
     fetchCartOffers();
@@ -1653,8 +1779,10 @@ function MainApp() {
     const hotelId = getCartHotelId();
     if (!hotelId || !currentUser?.token) {
       setBackendCoupons([]);
+      setOffersLoadError(false);
       return;
     }
+    setOffersLoadError(false);
     try {
       const response = await fetch(`${resolvedBackendUrl}/offers/hotels/${hotelId}/public-offers`, {
         headers: {
@@ -1666,26 +1794,36 @@ function MainApp() {
         const data = await response.json();
         if (Array.isArray(data)) {
           setBackendCoupons(data);
+          setOffersLoadError(false);
         } else {
           setBackendCoupons([]);
         }
       } else {
         setBackendCoupons([]);
+        setOffersLoadError(true);
       }
     } catch (err) {
       setBackendCoupons([]);
+      setOffersLoadError(true);
+      if (err && (err.status === 0 || err.message === 'timeout' || /network|aborted/i.test(err.message))) {
+        qbEvents.emit("Server is temporarily unavailable. Please try again.", () => fetchBackendOffers());
+      }
     }
   };
 
   const fetchMyOrders = async () => {
     if (!currentUser?.token) return;
+    setOrdersLoadError(false);
     try {
-      const res = await fetch(`${resolvedBackendUrl}/orders`, {
-        headers: {
-          'Authorization': `Bearer ${currentUser?.token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const res = await requestWithHandling(
+        () => fetch(`${resolvedBackendUrl}/orders`, {
+          headers: {
+            'Authorization': `Bearer ${currentUser?.token}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        () => fetchMyOrders()
+      );
       if (res.ok) {
         const data = await res.json();
         const mappedOrders = data.map(o => ({
@@ -1724,9 +1862,13 @@ function MainApp() {
           activeAssignment: o.activeAssignment
         }));
         setMyOrdersList(mappedOrders);
+        setOrdersLoadError(false);
+      } else {
+        setOrdersLoadError(true);
       }
     } catch (e) {
       console.warn('Error fetching customer orders:', e);
+      setOrdersLoadError(true);
     }
   };
 
@@ -1865,9 +2007,7 @@ function MainApp() {
   const [toastAnimX] = useState(new Animated.Value(500));
   const [toastMessage, setToastMessage] = useState('');
 
-  // Skeleton & Food Loading State
-  const [isSkeletonLoading, setIsSkeletonLoading] = useState(false);
-  const [dbConnectionError, setDbConnectionError] = useState(false);
+  // trigger skeleton loader helper
 
   const triggerSkeletonLoading = () => {
     setIsSkeletonLoading(true);
@@ -1905,6 +2045,35 @@ function MainApp() {
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editAvatar, setEditAvatar] = useState('');
+
+  const handleLogoutRef = useRef(null);
+  useEffect(() => {
+    handleLogoutRef.current = handleLogout;
+  });
+
+  useEffect(() => {
+    console.log('[QuickBite] qbEvents subscription useEffect start');
+    const unsubscribe = qbEvents.subscribe((message, onRetry) => {
+      console.log('[QuickBite] qbEvents subscriber received:', message);
+      if (message === "UNAUTHORIZED") {
+        if (handleLogoutRef.current) {
+          handleLogoutRef.current();
+        }
+        return;
+      }
+      setApiError(prev => {
+        if (prev && prev.message === message) return prev;
+        return { message, onRetry };
+      });
+    });
+    console.log('[QuickBite] setting isApiErrorHandlerReady to true');
+    setIsApiErrorHandlerReady(true);
+    return () => {
+      console.log('[QuickBite] cleaning up qbEvents subscription');
+      setIsApiErrorHandlerReady(false);
+      unsubscribe();
+    };
+  }, []);
 
   // ─── ANDROID HARDWARE BACK BUTTON HANDLER ─────────────────────────
   useEffect(() => {
@@ -2114,8 +2283,10 @@ function MainApp() {
   // ─── PERSISTENCE: Load saved session on app start ─────────────────────────
   useEffect(() => {
     const loadSession = async () => {
+      console.log('[QuickBite] loadSession hook start');
       try {
         const savedUser = await AsyncStorage.getItem('qb_user');
+        console.log('[QuickBite] loadSession qb_user loaded:', savedUser);
         const savedDark = await AsyncStorage.getItem('qb_darkMode');
         if (savedDark !== null) setDarkMode(JSON.parse(savedDark));
         if (savedUser) {
@@ -2134,6 +2305,9 @@ function MainApp() {
         }
       } catch (e) {
         console.warn('Session load error:', e);
+      } finally {
+        console.log('[QuickBite] loadSession setting isSessionLoaded to true');
+        setIsSessionLoaded(true);
       }
     };
     loadSession();
@@ -3472,8 +3646,13 @@ function MainApp() {
       setPromoError('');
       triggerToastNotification(`🎉 Coupon ${offer.code} Applied Successfully!`);
     } catch (err) {
-      console.error(err);
-      setPromoError('⚠️ Connection error. Please try again.');
+      if (err && (err.status === 0 || err.message === 'timeout' || /network|aborted/i.test(err.message))) {
+        console.warn('Error applying coupon (handled network/timeout):', err);
+        qbEvents.emit("Server is temporarily unavailable. Please try again.", () => applyPromo(codeToApply));
+      } else {
+        console.error(err);
+        setPromoError('⚠️ Connection error. Please try again.');
+      }
     }
   };
 
@@ -3532,7 +3711,11 @@ function MainApp() {
             triggerToastNotification('⚠️ Applied coupon is no longer valid for this cart');
           }
         } catch (err) {
-          console.error('Error revalidating applied promo:', err);
+          if (err && (err.status === 0 || err.message === 'timeout' || /network|aborted/i.test(err.message))) {
+            console.warn('Error revalidating applied promo (handled network/timeout):', err);
+          } else {
+            console.error('Error revalidating applied promo:', err);
+          }
         }
       };
 
@@ -3542,6 +3725,7 @@ function MainApp() {
 
   const handlePlaceOrder = async () => {
     if (cartItems.length === 0) return;
+    if (isProcessingCheckout) return; // Ignore duplicate taps while order creation is in progress
     if (!selectedAddress) {
       Alert.alert('Delivery Address Required', 'Please select a delivery address to proceed.');
       return;
@@ -3673,6 +3857,15 @@ function MainApp() {
           step: 1
         };
 
+        // Clear cart on backend on successful confirmation
+        fetch(`${resolvedBackendUrl}/cart`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }).catch(err => console.warn('Failed to clear backend cart on successful COD:', err));
+
         setLastPlacedOrder(codOrder);
         setMyOrdersList(prev => [codOrder, ...prev]);
         setOrderStepMap(prev => ({ ...prev, [backendOrder.id]: 1 }));
@@ -3768,6 +3961,15 @@ function MainApp() {
             step: 1
           };
 
+          // Clear cart on backend on successful confirmation
+          fetch(`${resolvedBackendUrl}/cart`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }).catch(err => console.warn('Failed to clear backend cart on successful payment:', err));
+
           setLastPlacedOrder(confirmedOrder);
           setMyOrdersList(prev => [confirmedOrder, ...prev]);
           setOrderStepMap(prev => ({ ...prev, [backendOrder.id]: 1 }));
@@ -3797,16 +3999,21 @@ function MainApp() {
       });
 
     } catch (err) {
-      console.error('handlePlaceOrder error:', err);
-      const isUnauthorized = err.message && (err.message.includes('401') || err.message.toLowerCase().includes('unauthorized'));
-      setPaymentFailedModal({
-        visible: true,
-        title: 'Order Failed',
-        message: isUnauthorized 
-          ? "Your login session has expired. Please log out and log back in to place your order."
-          : `We couldn't place your order. ${err.message || 'Please check your connection and try again.'}`,
-        isSessionExpired: isUnauthorized
-      });
+      if (err && (err.status === 0 || err.message === 'timeout' || /network|aborted/i.test(err.message))) {
+        console.warn('handlePlaceOrder network/timeout error (handled):', err);
+        qbEvents.emit("Server is temporarily unavailable. Please try again.", () => handlePlaceOrder());
+      } else {
+        console.error('handlePlaceOrder error:', err);
+        const isUnauthorized = err.message && (err.message.includes('401') || err.message.toLowerCase().includes('unauthorized'));
+        setPaymentFailedModal({
+          visible: true,
+          title: 'Order Failed',
+          message: isUnauthorized 
+            ? "Your login session has expired. Please log out and log back in to place your order."
+            : `We couldn't place your order. ${err.message || 'Please check your connection and try again.'}`,
+          isSessionExpired: isUnauthorized
+        });
+      }
       setIsProcessingCheckout(false);
     }
   };
@@ -4931,7 +5138,9 @@ function MainApp() {
                     {/* 8. RESTAURANTS & HOTELS SECTION WITH SKELETON & FOOD LOADER */}
                     <View style={styles.sectionHeader}>
                       <Text style={[styles.sectionTitle, { color: D.heading }]}>Restaurants & Hotels</Text>
-                      <Text style={[styles.sectionCount, { color: D.textSub }]}>{filteredRestaurants.length} places</Text>
+                      {(!isSkeletonLoading && !dbConnectionError) && (
+                        <Text style={[styles.sectionCount, { color: D.textSub }]}>{filteredRestaurants.length} places</Text>
+                      )}
                     </View>
 
                     {isSkeletonLoading ? (
@@ -4944,11 +5153,11 @@ function MainApp() {
                         <AlertTriangle size={24} color="#EF4444" />
                         <Text style={[styles.errorTitle, { color: darkMode ? '#FCA5A5' : '#991B1B' }]}>Connection Error</Text>
                         <Text style={[styles.errorText, { color: darkMode ? '#F87171' : '#B91C1C' }]}>
-                          Unable to connect to {appName} server. Tap Retry.
+                          {dbConnectionErrorMsg || `Unable to connect to ${appName} server. Tap Retry.`}
                         </Text>
                         <TouchableOpacity
                           style={[styles.retryBtn, { backgroundColor: '#EF4444' }]}
-                          onPress={fetchBackendData}
+                          onPress={() => fetchBackendData(true)}
                         >
                           <RefreshCw size={14} color="#ffffff" style={{ marginRight: 6 }} />
                           <Text style={styles.retryBtnText}>Retry Connection</Text>
@@ -4963,7 +5172,7 @@ function MainApp() {
                         </Text>
                         <TouchableOpacity
                           style={[styles.retryBtn, { backgroundColor: darkMode ? '#38BDF8' : '#0284C7' }]}
-                          onPress={fetchBackendData}
+                          onPress={() => fetchBackendData(true)}
                         >
                           <RefreshCw size={14} color="#ffffff" style={{ marginRight: 6 }} />
                           <Text style={styles.retryBtnText}>Refresh</Text>
@@ -5158,10 +5367,22 @@ function MainApp() {
                   scrollEventThrottle={16}
                   contentContainerStyle={[
                     { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 110 },
-                    myOrdersList.length === 0 && { flexGrow: 1, justifyContent: 'center' }
+                    (ordersLoadError || myOrdersList.length === 0) && { flexGrow: 1, justifyContent: 'center' }
                   ]}
                 >
-                  {myOrdersList.length === 0 ? (
+                  {ordersLoadError ? (
+                    <View style={styles.emptyStateCenter}>
+                      <AlertTriangle size={52} color="#EF4444" />
+                      <Text style={[styles.emptyTitle, { color: D.text, marginTop: 12 }]}>Server is temporarily unavailable</Text>
+                      <Text style={[styles.emptySubtitle, { color: D.textSub, textAlign: 'center', paddingHorizontal: 24 }]}>Please check your connection and try again.</Text>
+                      <TouchableOpacity
+                        onPress={fetchMyOrders}
+                        style={{ backgroundColor: '#EF4444', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, marginTop: 16 }}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Retry</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : myOrdersList.length === 0 ? (
                     <View style={styles.emptyStateCenter}>
                       <Truck size={52} color={darkMode ? '#475569' : '#D1D5DB'} />
                       <Text style={[styles.emptyTitle, { color: D.text }]}>No Orders Placed Yet</Text>
@@ -7328,7 +7549,17 @@ function MainApp() {
 
                 <Text style={{ fontSize: 16, fontWeight: '800', color: D.text, marginBottom: 12 }}>More offers</Text>
 
-                {backendCoupons.length === 0 ? (
+                {offersLoadError ? (
+                  <View style={{ padding: 24, alignItems: 'center', backgroundColor: D.card, borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                    <Text style={{ color: '#EF4444', fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 12 }}>Server is temporarily unavailable. Please try again.</Text>
+                    <TouchableOpacity
+                      onPress={fetchBackendOffers}
+                      style={{ backgroundColor: '#EF4444', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 }}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : backendCoupons.length === 0 ? (
                   <View style={{ padding: 24, alignItems: 'center', backgroundColor: D.card, borderRadius: 12, borderWidth: 1, borderColor: D.cardBorder }}>
                     <Text style={{ color: D.textSub, fontSize: 14, fontWeight: '600', textAlign: 'center' }}>No promotional offers available at this restaurant right now.</Text>
                   </View>
@@ -9054,6 +9285,54 @@ function MainApp() {
             )}
           </Modal>
 
+          {apiError && (
+            <Modal
+              animationType="fade"
+              transparent={true}
+              visible={true}
+              onRequestClose={() => setApiError(null)}
+            >
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                <View style={{ backgroundColor: darkMode ? '#1E293B' : '#FFFFFF', borderRadius: 16, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 }}>
+                  <Text style={{ fontSize: 40, marginBottom: 12 }}>⚠️</Text>
+                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: darkMode ? '#F1F5F9' : '#0F172A', marginBottom: 8, textAlign: 'center' }}>Connection Issue</Text>
+                  <Text style={{ fontSize: 14, color: darkMode ? '#94A3B8' : '#475569', marginBottom: 20, textAlign: 'center', lineHeight: 20 }}>{apiError.message}</Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center', width: '100%' }}>
+                    <TouchableOpacity 
+                      style={{ flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: darkMode ? '#475569' : '#CBD5E1', alignItems: 'center' }}
+                      onPress={() => setApiError(null)}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: darkMode ? '#94A3B8' : '#475569' }}>Cancel</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={{ flex: 1, paddingVertical: 12, borderRadius: 8, backgroundColor: '#FF6B1A', alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                      disabled={isRetrying}
+                      onPress={async () => {
+                        if (isRetrying) return;
+                        setIsRetrying(true);
+                        try {
+                          await startBaseUrlDetection(true);
+                          await apiError.onRetry();
+                          setApiError(null);
+                        } catch (e) {
+                          // keep error modal open, message will update if needed
+                        } finally {
+                          setIsRetrying(false);
+                        }
+                      }}
+                    >
+                      {isRetrying && <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 6 }} />}
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#ffffff' }}>
+                        {isRetrying ? 'Retrying...' : 'Retry'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+          )}
         </View>
       </View>
     </SafeAreaProvider>

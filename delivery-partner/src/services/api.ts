@@ -23,6 +23,110 @@ export const getAuthToken = async () => {
   }
 };
 
+// --- CENTRALIZED API ERROR AND CONNECTIVITY HANDLING ---
+export const qbEvents = {
+  listeners: new Set<any>(),
+  subscribe(listener: any) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  },
+  emit(message: string, onRetry?: any) {
+    this.listeners.forEach(listener => {
+      try {
+        listener(message, onRetry);
+      } catch (e) {
+        console.error("Error in listener:", e);
+      }
+    });
+  }
+};
+
+const getFriendlyApiError = async (error: any, response: any) => {
+  if (error) {
+    console.warn("[API Technical Error]", error);
+  }
+  if (response) {
+    console.warn("[API Response Error Status]", response.status);
+    try {
+      const clone = response.clone();
+      const text = await clone.text();
+      console.warn("[API Response Error Body]", text.substring(0, 500));
+    } catch (e) {}
+  }
+
+  let status = response ? response.status : 0;
+  let message = "Server is temporarily unavailable. Please try again.";
+
+  if (response) {
+    try {
+      const clone = response.clone();
+      const errData = await clone.json();
+      if (errData && typeof errData.message === 'string') {
+        const isTechnical = /sql|database|query|table|row|column|exception|nest|internal|stack/i.test(errData.message);
+        if (!isTechnical && errData.message.trim() !== '') {
+          message = errData.message;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (status === 401) {
+    message = "Session expired. Please log in again.";
+  } else if (status === 403) {
+    message = "You don't have permission to access this.";
+  } else if (status === 404) {
+    message = "Requested data was not found.";
+  } else if (status >= 500) {
+    message = "Server is temporarily unavailable. Please try again.";
+  } else if (!response && error) {
+    message = "Server is temporarily unavailable. Please try again.";
+    if (typeof navigator !== 'undefined' && (navigator as any).onLine === false) {
+      message = "No internet connection. Please check your network and try again.";
+    }
+  }
+
+  return { status, message };
+};
+
+const qbFetch = async (url: string | Request, options?: RequestInit) => {
+  const urlStr = typeof url === 'string' ? url : (url && (url as any).url) || '';
+  if (!urlStr.includes(':5000')) {
+    return globalThis.fetch(url, options);
+  }
+
+  try {
+    const res = await globalThis.fetch(url, options);
+    if (!res.ok) {
+      const err = await getFriendlyApiError(null, res);
+      const isAuthEndpoint = urlStr.includes('/delivery-partners/login');
+      if (res.status === 401 && !isAuthEndpoint) {
+        qbEvents.emit("UNAUTHORIZED", null);
+      }
+      throw err;
+    }
+    return res;
+  } catch (error) {
+    const err = await getFriendlyApiError(error, null);
+    throw err;
+  }
+};
+
+const fetch = qbFetch;
+
+export const requestWithHandling = async (requestFn: () => Promise<any>, onRetry?: () => Promise<any>, isBackground = false) => {
+  try {
+    return await requestFn();
+  } catch (err: any) {
+    if (isBackground || err.status === 404 || err.status === 403 || err.status === 401) {
+      throw err;
+    }
+    if (onRetry) {
+      qbEvents.emit(err.message || "Server is temporarily unavailable. Please try again.", onRetry);
+    }
+    throw err;
+  }
+};
+
 const apiMethods = {
   login: async (dto: any) => {
     const controller = new AbortController();
@@ -58,30 +162,24 @@ const apiMethods = {
     }
   },
 
-  getMe: async () => {
-    const token = await getAuthToken();
-    if (!token) {
-      throw new Error('No token found');
-    }
-    
-    const res = await fetch(resolveApiUrl('/delivery-partners/me'), {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
+  getMe: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) {
+          throw new Error('No token found');
+        }
+        const res = await fetch(resolveApiUrl('/delivery-partners/me'), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
       },
-    });
-    
-    if (res.status === 401) {
-      await setAuthToken(null);
-      throw new Error('Unauthorized');
-    }
-    
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || 'Failed to fetch profile.');
-    }
-    
-    return await res.json();
+      () => api.getMe(),
+      true // isBackground
+    );
   },
 
   updateProfile: async (name: string, email: string) => {
@@ -112,27 +210,20 @@ const apiMethods = {
     return await res.json();
   },
 
-  getIncomingAssignment: async () => {
-    const token = await getAuthToken();
-    if (!token) throw new Error('No token found');
-
-    const res = await fetch(resolveApiUrl('/delivery-partners/me/incoming-assignment'), {
-      headers: {
-        'Authorization': `Bearer ${token}`,
+  getIncomingAssignment: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/incoming-assignment'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
       },
-    });
-
-    if (res.status === 401) {
-      await setAuthToken(null);
-      throw new Error('Unauthorized');
-    }
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || 'Failed to fetch incoming assignment');
-    }
-
-    return await res.json();
+      () => api.getIncomingAssignment()
+    );
   },
 
   acceptAssignment: async (assignmentId: number) => {
@@ -186,27 +277,20 @@ const apiMethods = {
     return await res.json();
   },
 
-  getActiveDelivery: async () => {
-    const token = await getAuthToken();
-    if (!token) throw new Error('No token found');
-
-    const res = await fetch(resolveApiUrl('/delivery-partners/me/active-delivery'), {
-      headers: {
-        'Authorization': `Bearer ${token}`,
+  getActiveDelivery: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/active-delivery'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
       },
-    });
-
-    if (res.status === 401) {
-      await setAuthToken(null);
-      throw new Error('Unauthorized');
-    }
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || 'Failed to fetch active delivery');
-    }
-
-    return await res.json();
+      () => api.getActiveDelivery()
+    );
   },
 
   updateOnlineStatus: async (isOnline: boolean) => {
@@ -237,75 +321,55 @@ const apiMethods = {
     return await res.json();
   },
 
-  heartbeat: async () => {
-    const token = await getAuthToken();
-    if (!token) throw new Error('No token found');
-
-    const res = await fetch(resolveApiUrl('/delivery-partners/me/heartbeat'), {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
+  heartbeat: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/heartbeat'), {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        return await res.json();
       },
-    });
-
-    if (res.status === 401) {
-      await setAuthToken(null);
-      throw new Error('Unauthorized');
-    }
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || 'Heartbeat failed');
-    }
-
-    return await res.json();
+      () => api.heartbeat(),
+      true // isBackground
+    );
   },
 
-  getDashboardStats: async () => {
-    const token = await getAuthToken();
-    if (!token) throw new Error('No token found');
-
-    const res = await fetch(resolveApiUrl('/delivery-partners/me/dashboard'), {
-      headers: {
-        'Authorization': `Bearer ${token}`,
+  getDashboardStats: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/dashboard'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
       },
-    });
-
-    if (res.status === 401) {
-      await setAuthToken(null);
-      throw new Error('Unauthorized');
-    }
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || 'Failed to fetch dashboard stats');
-    }
-
-    return await res.json();
+      () => api.getDashboardStats()
+    );
   },
 
-  getCompletedOrders: async () => {
-    const token = await getAuthToken();
-    if (!token) throw new Error('No token found');
-
-    const res = await fetch(resolveApiUrl('/delivery-partners/me/orders/history'), {
-      headers: {
-        'Authorization': `Bearer ${token}`,
+  getCompletedOrders: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/orders/history'), {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
       },
-    });
-
-    if (res.status === 401) {
-      await setAuthToken(null);
-      throw new Error('Unauthorized');
-    }
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || 'Failed to fetch completed orders');
-    }
-
-    return await res.json();
+      () => api.getCompletedOrders()
+    );
   },
 
   getAvailableOrders: async () => {

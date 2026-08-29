@@ -27,7 +27,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Map as MapView, Camera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
-import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
+import { api, getAuthToken, setAuthToken, resolveApiUrl, qbEvents } from '../services/api';
 import { startBaseUrlDetection } from '../services/apiResolver';
 import { routingService } from '../services/routingService';
 import * as Location from 'expo-location';
@@ -322,7 +322,13 @@ export default function AppIndex() {
   const [editEmail, setEditEmail] = useState('');
   const [personalUpdateError, setPersonalUpdateError] = useState('');
   const [isUpdatingPersonal, setIsUpdatingPersonal] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentPartner, setCurrentPartner] = useState<any>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authToken, setAuthTokenState] = useState<string | null>(null);
+  const [sessionState, setSessionState] = useState<'checking' | 'authenticated' | 'unauthenticated' | 'server-unavailable'>('checking');
+  const [apiError, setApiError] = useState<any>(null); // { message, onRetry }
+  const [isRetrying, setIsRetrying] = useState(false);
   const [selectedPreviewDoc, setSelectedPreviewDoc] = useState<any>(null);
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -410,13 +416,8 @@ export default function AppIndex() {
   const [isAcceptingDeclining, setIsAcceptingDeclining] = useState(false);
 
   // Authentication local mock states -> now real states
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [accountStatus, setAccountStatus] = useState<'APPROVED' | 'PENDING' | 'ACTION_REQUIRED' | 'SUSPENDED'>('APPROVED');
   const [authScreen, setAuthScreen] = useState<'login' | 'forgot-password' | 'verify-otp' | 'create-password' | 'password-updated'>('login');
-
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [currentPartner, setCurrentPartner] = useState<any>(null);
-  const [isInitializing, setIsInitializing] = useState(true);
 
   const [isBackgroundTrackingActive, setIsBackgroundTrackingActive] = useState(false);
   const [appState, setAppState] = useState(AppState.currentState);
@@ -938,6 +939,7 @@ export default function AppIndex() {
     setIsOnline(false);
     setIsAvailable(false);
     setIsAuthenticated(false);
+    setSessionState('unauthenticated');
     setDeliveryState('none');
     setIncomingAssignment(null);
     setActiveAssignment(null);
@@ -1204,33 +1206,101 @@ export default function AppIndex() {
     }
   };
 
-  useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        const token = await getAuthToken();
-        setAuthTokenState(token);
-        if (token) {
-          const data = await api.getMe();
-          setCurrentUser(data.partner.user);
-          setCurrentPartner(data.partner);
-          setAccountStatus(data.partner.accountStatus);
-          setIsOnline(data.partner.isOnline);
-          setIsAvailable(data.partner.isAvailable);
-          setIsAuthenticated(true);
+  const restoreAttemptRef = useRef<number>(0);
+  const isRestoreRunningRef = useRef<boolean>(false);
 
-          if (data.partner.accountStatus === 'APPROVED') {
-            await syncActiveDeliveryState();
-          }
+  const restoreSession = useCallback(async () => {
+    if (isRestoreRunningRef.current) return false;
+    isRestoreRunningRef.current = true;
+    const attemptId = ++restoreAttemptRef.current;
+
+    setSessionState('checking');
+    try {
+      const token = await getAuthToken();
+      if (attemptId !== restoreAttemptRef.current) return false;
+      setAuthTokenState(token);
+      if (token) {
+        const data = await Promise.race([
+          api.getMe(),
+          new Promise<any>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+        ]);
+        if (attemptId !== restoreAttemptRef.current) return false;
+        setCurrentUser(data.partner.user);
+        setCurrentPartner(data.partner);
+        setAccountStatus(data.partner.accountStatus);
+        setIsOnline(data.partner.isOnline);
+        setIsAvailable(data.partner.isAvailable);
+        setIsAuthenticated(true);
+        setSessionState('authenticated');
+
+        if (data.partner.accountStatus === 'APPROVED') {
+          await syncActiveDeliveryState();
         }
-      } catch (err) {
-        const error = err as any;
-        console.error('Session restoration failed:', error);
+        return true;
+      } else {
+        if (attemptId !== restoreAttemptRef.current) return false;
+        setIsAuthenticated(false);
+        setSessionState('unauthenticated');
+        return true;
+      }
+    } catch (err: any) {
+      if (attemptId !== restoreAttemptRef.current) return false;
+      console.warn('Session restoration failed:', err.message || err);
+      if (err.status === 401) {
         await setAuthToken(null);
-      } finally {
-        setIsInitializing(false);
+        setAuthTokenState(null);
+        setIsAuthenticated(false);
+        setSessionState('unauthenticated');
+        return true;
+      } else {
+        // Network or backend offline - do NOT clear token, do NOT render login
+        setSessionState('server-unavailable');
+        setApiError({
+          message: 'Server is temporarily unavailable. Please try again.',
+          onRetry: () => restoreSession()
+        });
+        return false;
+      }
+    } finally {
+      if (attemptId === restoreAttemptRef.current) {
+        isRestoreRunningRef.current = false;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    restoreSession();
+  }, [restoreSession]);
+
+  const handleLogoutRef = useRef<any>(null);
+  useEffect(() => {
+    handleLogoutRef.current = handleLogout;
+  });
+
+  useEffect(() => {
+    (globalThis as any).handleUnauthorizedState = () => {
+      if (handleLogoutRef.current) {
+        handleLogoutRef.current(true);
       }
     };
-    restoreSession();
+
+    const unsubscribe = qbEvents.subscribe((message: string, onRetry: any) => {
+      if (message === "UNAUTHORIZED") {
+        if (handleLogoutRef.current) {
+          handleLogoutRef.current(true);
+        }
+        return;
+      }
+      setApiError((prev: any) => {
+        if (prev && prev.message === message) return prev;
+        return { message, onRetry };
+      });
+    });
+
+    return () => {
+      delete (globalThis as any).handleUnauthorizedState;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -5385,6 +5455,7 @@ export default function AppIndex() {
         setActiveTab('home');
       }
       setIsAuthenticated(true);
+      setSessionState('authenticated');
       
       setLoginEmailMobile('');
       setLoginPassword('');
@@ -5860,8 +5931,67 @@ export default function AppIndex() {
     }
   };
 
-  // Gated Auth rendering check on top-level launch
-  if (isInitializing) {
+  const renderConnectionErrorModal = () => {
+    if (!apiError) return null;
+    return (
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={true}
+        onRequestClose={() => {
+          if (sessionState !== 'server-unavailable') {
+            setApiError(null);
+          }
+        }}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#1E293B', borderRadius: 16, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 }}>
+            <Text style={{ fontSize: 40, marginBottom: 12 }}>⚠️</Text>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#F1F5F9', marginBottom: 8, textAlign: 'center' }}>Connection Issue</Text>
+            <Text style={{ fontSize: 14, color: '#94A3B8', marginBottom: 20, textAlign: 'center', lineHeight: 20 }}>{apiError.message}</Text>
+            
+            <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center', width: '100%' }}>
+              {sessionState !== 'server-unavailable' && (
+                <TouchableOpacity 
+                  style={{ flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#475569', alignItems: 'center' }}
+                  onPress={() => setApiError(null)}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#94A3B8' }}>Cancel</Text>
+                </TouchableOpacity>
+              )}
+              
+              <TouchableOpacity 
+                style={{ flex: 1, paddingVertical: 12, borderRadius: 8, backgroundColor: '#FF6B1A', alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                disabled={isRetrying}
+                onPress={async () => {
+                  if (isRetrying) return;
+                  setIsRetrying(true);
+                  try {
+                    await startBaseUrlDetection(true);
+                    const success = await apiError.onRetry();
+                    if (success) {
+                      setApiError(null);
+                    }
+                  } catch (e) {
+                    // keep error modal open
+                  } finally {
+                    setIsRetrying(false);
+                  }
+                }}
+              >
+                {isRetrying && <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 6 }} />}
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#ffffff' }}>
+                  {isRetrying ? 'Retrying...' : 'Retry'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  if (sessionState === 'checking') {
     return (
       <View style={{ flex: 1, backgroundColor: '#FCFAF7', justifyContent: 'center', alignItems: 'center' }}>
         <StatusBar style="dark" />
@@ -5871,7 +6001,16 @@ export default function AppIndex() {
     );
   }
 
-  if (!isAuthenticated) {
+  if (sessionState === 'server-unavailable') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FCFAF7', justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar style="dark" />
+        {renderConnectionErrorModal()}
+      </View>
+    );
+  }
+
+  if (sessionState === 'unauthenticated' || !isAuthenticated) {
     return (
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
@@ -6219,6 +6358,8 @@ export default function AppIndex() {
       {renderFullChartModal()}
       {renderNavigationModal()}
       {renderItemsModal()}
+
+      {renderConnectionErrorModal()}
     </SafeAreaView>
   );
 }
