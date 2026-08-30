@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Branding, BrandingAppType, BrandingStatus } from './branding.entity';
 import { join, resolve, basename } from 'path';
-import { existsSync, mkdirSync, copyFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, copyFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -526,6 +526,9 @@ export class BrandingService implements OnModuleInit {
                 console.log(`[BrandingService] Local sync success: copied notification icon ${srcNotification} to ${destNotification}`);
               }
             }
+
+            // 4. Delete native icons to force Expo prebuild regeneration
+            this.deleteNativeLauncherIcons(appRoot);
           } else {
             console.warn(`[BrandingService] Local sync skipped: app root does not exist at ${appRoot}`);
           }
@@ -808,5 +811,70 @@ export class BrandingService implements OnModuleInit {
       return join(this.defaultsDir, filename);
     }
     return join(this.uploadDir, filename);
+  }
+
+  private deleteNativeLauncherIcons(appRoot: string) {
+    // 1. Android native icons
+    const resDir = join(appRoot, 'android', 'app', 'src', 'main', 'res');
+    if (existsSync(resDir)) {
+      try {
+        const subdirs = readdirSync(resDir);
+        for (const subdir of subdirs) {
+          if (subdir.startsWith('mipmap-')) {
+            this.recursiveDeleteLauncherIcons(join(resDir, subdir));
+          }
+        }
+      } catch (e) {
+        console.warn(`[BrandingService] Failed to read Android res directory: ${e.message}`);
+      }
+    }
+    // 2. iOS native icons
+    const iosDir = join(appRoot, 'ios');
+    if (existsSync(iosDir)) {
+      this.recursiveDeleteIosIcons(iosDir);
+    }
+  }
+
+  private recursiveDeleteLauncherIcons(dir: string) {
+    if (!existsSync(dir)) return;
+    const items = readdirSync(dir);
+    for (const item of items) {
+      const fullPath = join(dir, item);
+      const stat = statSync(fullPath);
+      if (stat.isDirectory()) {
+        this.recursiveDeleteLauncherIcons(fullPath);
+      } else if (stat.isFile() && item.startsWith('ic_launcher')) {
+        try {
+          unlinkSync(fullPath);
+          console.log(`[BrandingService] Deleted native Android launcher icon to force regeneration: ${fullPath}`);
+        } catch (e) {
+          console.warn(`[BrandingService] Failed to delete native icon ${fullPath}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  private recursiveDeleteIosIcons(dir: string) {
+    if (!existsSync(dir)) return;
+    const items = readdirSync(dir);
+    for (const item of items) {
+      const fullPath = join(dir, item);
+      const stat = statSync(fullPath);
+      if (stat.isDirectory()) {
+        if (item === 'AppIcon.appiconset') {
+          try {
+            const files = readdirSync(fullPath);
+            for (const file of files) {
+              unlinkSync(join(fullPath, file));
+            }
+            console.log(`[BrandingService] Cleared native iOS AppIcon.appiconset to force regeneration: ${fullPath}`);
+          } catch (e) {
+            console.warn(`[BrandingService] Failed to clear iOS appiconset ${fullPath}: ${e.message}`);
+          }
+        } else {
+          this.recursiveDeleteIosIcons(fullPath);
+        }
+      }
+    }
   }
 }

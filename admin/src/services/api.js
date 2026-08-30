@@ -1066,6 +1066,16 @@ export const api = {
     return handleResponse(res);
   },
 
+  markAppIconAsCurrent: async (appType) => {
+    const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/mark-current`, {
+      method: 'PUT',
+      headers: {
+        ...getAuthHeaders()
+      }
+    });
+    return handleResponse(res);
+  },
+
   updateAppName: async (appType, appName) => {
     const res = await fetch(`${API_BASE_URL}/branding/app-icons/${appType}/app-name`, {
       method: 'PUT',

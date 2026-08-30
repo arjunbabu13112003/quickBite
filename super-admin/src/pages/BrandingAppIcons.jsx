@@ -22,6 +22,10 @@ export default function BrandingAppIcons() {
     CUSTOMER: false,
     DELIVERY_PARTNER: false
   });
+  const [isSynced, setIsSynced] = useState({
+    CUSTOMER: true,
+    DELIVERY_PARTNER: true
+  });
 
   const fetchBrandingData = async () => {
     setLoading(true);
@@ -67,6 +71,7 @@ export default function BrandingAppIcons() {
       const updated = await api.uploadAppIcon(appType, file);
       setAppIcons(prev => prev.map(icon => icon.appType === appType ? updated : icon));
       setSuccessMessage(`Icon uploaded and prepared successfully for ${appType === 'CUSTOMER' ? 'Customer App' : 'Delivery Partner App'}.`);
+      setIsSynced(prev => ({ ...prev, [appType]: false }));
     } catch (err) {
       console.error(err);
       setError(err.message || 'Failed to upload icon.');
@@ -85,6 +90,8 @@ export default function BrandingAppIcons() {
       const updated = await api.activateAppIconForNextUpdate(appType);
       setAppIcons(prev => prev.map(icon => icon.appType === appType ? updated : icon));
       setSuccessMessage(`New icon is committed and set as "Pending Next Update" for ${appType === 'CUSTOMER' ? 'Customer App' : 'Delivery Partner App'}.`);
+      alert('New icon committed and set as "Pending Next Update". Expo assets synchronized successfully!');
+      setIsSynced(prev => ({ ...prev, [appType]: true }));
     } catch (err) {
       console.error(err);
       setError(err.message || 'Failed to save configuration.');
@@ -106,9 +113,31 @@ export default function BrandingAppIcons() {
       const updated = await api.deletePendingAppIcon(appType);
       setAppIcons(prev => prev.map(icon => icon.appType === appType ? updated : icon));
       setSuccessMessage(`Pending icon update discarded for ${appType === 'CUSTOMER' ? 'Customer App' : 'Delivery Partner App'}.`);
+      setIsSynced(prev => ({ ...prev, [appType]: true }));
     } catch (err) {
       console.error(err);
       setError(err.message || 'Failed to cancel pending icon.');
+    } finally {
+      setActionLoading(prev => ({ ...prev, [appType]: false }));
+    }
+  };
+
+  const handleMarkCurrent = async (appType) => {
+    if (!confirm('Have you successfully rebuilt and deployed the app with the new icon and name? Clicking OK will promote these pending settings to current.')) {
+      return;
+    }
+
+    setActionLoading(prev => ({ ...prev, [appType]: true }));
+    setError(null);
+    setSuccessMessage('');
+
+    try {
+      const updated = await api.markAppIconAsCurrent(appType);
+      setAppIcons(prev => prev.map(icon => icon.appType === appType ? updated : icon));
+      setSuccessMessage(`Branding promoted to Current successfully for ${appType === 'CUSTOMER' ? 'Customer App' : 'Delivery Partner App'}.`);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to promote branding changes.');
     } finally {
       setActionLoading(prev => ({ ...prev, [appType]: false }));
     }
@@ -541,7 +570,7 @@ export default function BrandingAppIcons() {
 
               </div>
 
-              {/* Action notice helper */}
+               {/* Action notice helper */}
               <div style={{
                 fontSize: '0.75rem',
                 color: 'var(--text-muted)',
@@ -551,11 +580,7 @@ export default function BrandingAppIcons() {
                 lineHeight: '1.4'
               }}>
                 {hasDraft ? (
-                  isPending ? (
-                    <span style={{ color: '#c2410c' }}>✓ Configuration committed. Icon will be applied with the next app update.</span>
-                  ) : (
-                    <span style={{ color: 'var(--primary)' }}>Draft prepared. Click "Save for Next Update" to commit changes.</span>
-                  )
+                  <span style={{ color: '#c2410c' }}>✓ Changes saved in database. Click "Save for Next Update" to sync changes to Expo build assets.</span>
                 ) : (
                   <span>Upload a square logo (PNG/JPG/JPEG, Recommended: 1024x1024px)</span>
                 )}
@@ -624,7 +649,7 @@ export default function BrandingAppIcons() {
                 </div>
 
                 {/* Save button */}
-                {hasDraft && !isPending && (
+                {hasDraft && !isSynced[appType] && (
                   <button
                     onClick={() => handleSaveForNextUpdate(appType)}
                     disabled={isAppLoading}
@@ -648,6 +673,34 @@ export default function BrandingAppIcons() {
                   >
                     <Save size={16} />
                     <span>Save for Next Update</span>
+                  </button>
+                )}
+
+                {/* Mark Update as Applied button */}
+                {isPending && (
+                  <button
+                    onClick={() => handleMarkCurrent(appType)}
+                    disabled={isAppLoading}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      padding: '0.8rem',
+                      borderRadius: 'var(--radius-md)',
+                      border: 'none',
+                      background: '#10b981',
+                      color: '#ffffff',
+                      fontSize: '0.85rem',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)',
+                      transition: 'all var(--transition-fast)'
+                    }}
+                  >
+                    <CheckCircle size={16} />
+                    <span>Mark Update as Applied</span>
                   </button>
                 )}
               </div>
