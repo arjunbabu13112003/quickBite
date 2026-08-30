@@ -83,6 +83,7 @@ import {
   Camera,
   Moon,
   Sun,
+  Bell,
   Zap,
   Mic,
   EllipsisVertical,
@@ -541,6 +542,14 @@ function MainApp() {
   // Navigation & Tab state: 'home' | 'wishlist' | 'orders' | 'profile' | 'admin'
   const [activeTab, _setActiveTab] = useState('home');
   const [tabHistory, setTabHistory] = useState(['home']);
+
+  // Promotions Inbox & Notifications State
+  const [notifications, setNotifications] = useState([]);
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState(false);
+  const processedNotificationsRef = useRef(new Set());
+  const unreadNotificationsCount = useMemo(() => notifications.filter(n => !n.isRead).length, [notifications]);
 
   // Offers Tab State
   const [offersFilter, setOffersFilter] = useState('all');
@@ -2231,7 +2240,7 @@ function MainApp() {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-      console.log(`[PUSH] Notification permission status: ${finalStatus}`);
+      console.log(`[PUSH] permission status: ${finalStatus}`);
 
       if (finalStatus !== 'granted') {
         console.log('[PUSH ERROR] Failed to get push token: permission not granted');
@@ -2239,13 +2248,13 @@ function MainApp() {
       }
 
       const projectId = "cc5a8d68-fc76-4dd6-8ae2-a1e134f091aa";
-      console.log(`[PUSH] Using EAS Project ID: ${projectId}`);
+      console.log(`[PUSH] expo project id: ${projectId}`);
 
       const tokenObj = await Notifications.getExpoPushTokenAsync({
         projectId: projectId
       });
       const token = tokenObj.data;
-      console.log(`[PUSH] Expo token generated: ${token}`);
+      console.log(`[PUSH] token obtained: ${token}`);
       return token;
     } catch (error) {
       console.log(`[PUSH ERROR] ${error?.stack || error?.message || error}`);
@@ -2279,11 +2288,12 @@ function MainApp() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${userToken}`,
         },
-        body: JSON.stringify({ pushToken }),
+        body: JSON.stringify({ pushToken, appType: 'CUSTOMER' }),
       });
       if (res.ok) {
         lastRegisteredTokenRef.current = cacheKey;
         console.log('[PUSH] Push token successfully registered on backend');
+        console.log(`[PUSH] token saved for user: ${activeUserId}`);
       } else {
         const errorText = await res.text().catch(() => '');
         console.log(`[PUSH ERROR] Failed to register push token on backend: status ${res.status}, body: ${errorText}`);
@@ -2299,21 +2309,331 @@ function MainApp() {
     }
   }, [currentUser?.id, currentUser?.token]);
 
+  const fetchCustomerNotifications = async () => {
+    if (!currentUser?.token) return;
+    setNotificationsLoading(true);
+    setNotificationsError(false);
+    try {
+      const base = await startBaseUrlDetection();
+      const res = await fetch(`${base}/notifications/customer/me`, {
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`,
+        },
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setNotifications(data || []);
+    } catch (err) {
+      console.warn('[PUSH] Failed to fetch notifications:', err);
+      setNotificationsError(true);
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser?.token) {
+      fetchCustomerNotifications();
+    } else {
+      setNotifications([]);
+    }
+  }, [currentUser?.id, currentUser?.token]);
+
+  const handleMarkNotificationAsRead = async (id) => {
+    if (!currentUser?.token) return;
+    try {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+      const base = await startBaseUrlDetection();
+      await fetch(`${base}/notifications/customer/me/${id}/read`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`,
+        },
+      });
+    } catch (err) {
+      console.warn('[PUSH] Failed to mark read:', err);
+    }
+  };
+
+  const handleMarkAllNotificationsAsRead = async () => {
+    if (!currentUser?.token) return;
+    try {
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      const base = await startBaseUrlDetection();
+      await fetch(`${base}/notifications/customer/me/read-all`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`,
+        },
+      });
+    } catch (err) {
+      console.warn('[PUSH] Failed to mark all read:', err);
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    if (!currentUser?.token) return;
+    try {
+      setNotifications([]);
+      const base = await startBaseUrlDetection();
+      await fetch(`${base}/notifications/customer/me`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`,
+        },
+      });
+    } catch (err) {
+      console.warn('[PUSH] Failed to clear notifications:', err);
+    }
+  };
+
+  const handleNotificationTap = useCallback(async (response) => {
+    if (!response) return;
+    const id = response.notification.request.identifier;
+    if (processedNotificationsRef.current.has(id)) {
+      console.log('[PUSH] Already processed notification tap for identifier:', id);
+      return;
+    }
+    processedNotificationsRef.current.add(id);
+
+    const data = response.notification.request.content.data;
+    console.log('[PUSH] Processing notification tap response. Data:', JSON.stringify(data));
+    
+    const action = data?.action; // HOME, OFFERS, CAMPAIGN, RESTAURANT, ORDERS
+    const argument = data?.argument; // campaignId, restaurantId
+
+    // Existing legacy transactional order tap handler fallback
+    const orderId = data?.orderId;
+    if (orderId) {
+      console.log('[PUSH] Opening legacy order details:', orderId);
+      setSelectedOrderForDetail({ id: Number(orderId), orderId: Number(orderId) });
+      return;
+    }
+
+    if (!action) return;
+
+    try {
+      if (action === 'HOME') {
+        setActiveTab('home');
+        setSelectedCategory('all');
+        setOnlyOffers(false);
+        setSelectedRestaurant(null);
+        setActiveCampaignId(null);
+      } else if (action === 'OFFERS') {
+        setActiveTab('home');
+        setSelectedCategory('offers');
+        setOnlyOffers(true);
+        setSelectedRestaurant(null);
+        setActiveCampaignId(null);
+      } else if (action === 'CAMPAIGN') {
+        if (argument) {
+          const campaignId = Number(argument);
+          setActiveTab('home');
+          setSelectedRestaurant(null);
+          setActiveCampaignId(campaignId);
+        }
+      } else if (action === 'RESTAURANT') {
+        if (argument) {
+          const restId = Number(argument);
+          setActiveTab('home');
+          setActiveCampaignId(null);
+          setSelectedRestaurant({ id: restId });
+        }
+      } else if (action === 'ORDERS') {
+        setActiveTab('orders');
+        setSelectedRestaurant(null);
+        setActiveCampaignId(null);
+      }
+    } catch (e) {
+      console.warn('[PUSH TAP ERROR] Failed to parse target action safely, falling back to HOME:', e);
+      setActiveTab('home');
+      setSelectedCategory('all');
+      setOnlyOffers(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!Notifications) return;
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      const orderId = data?.orderId;
-      if (orderId) {
-        console.log('[PUSH] Tapped notification. Opening order detail for ID:', orderId);
-        setSelectedOrderForDetail({ id: Number(orderId), orderId: Number(orderId) });
-      }
+      handleNotificationTap(response);
     });
 
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [handleNotificationTap]);
+
+  useEffect(() => {
+    const checkColdStartNotification = async () => {
+      if (!Notifications) return;
+      try {
+        const response = await Notifications.getLastNotificationResponseAsync();
+        if (response) {
+          console.log('[PUSH] Found initial cold-start notification response');
+          handleNotificationTap(response);
+        }
+      } catch (err) {
+        console.warn('[PUSH] Failed to read cold start notification:', err);
+      }
+    };
+    
+    if (isSessionLoaded && isApiErrorHandlerReady) {
+      checkColdStartNotification();
+    }
+  }, [isSessionLoaded, isApiErrorHandlerReady, handleNotificationTap]);
+
+  const renderNotificationModal = () => {
+    return (
+      <Modal
+        visible={isNotificationModalOpen}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsNotificationModalOpen(false)}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'flex-end',
+        }}>
+          <View style={{
+            height: '80%',
+            backgroundColor: D.bg,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            padding: 16,
+            paddingBottom: bottomInset + 16,
+          }}>
+            {/* Header */}
+            <View style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottomWidth: 1,
+              borderBottomColor: D.divider,
+              paddingBottom: 12,
+              marginBottom: 16,
+            }}>
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: '900', color: D.text }}>Inbox & Promotions</Text>
+                <Text style={{ fontSize: 12, color: D.textSub, marginTop: 2 }}>Stay updated with latest offers and deals</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsNotificationModalOpen(false)} style={{ padding: 4 }}>
+                <X size={20} color={D.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Error / Offline state */}
+            {notificationsError ? (
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                <AlertTriangle size={36} color="#EF4444" style={{ marginBottom: 12 }} />
+                <Text style={{ fontSize: 15, fontWeight: '700', color: D.text, textAlign: 'center' }}>Connection Issue</Text>
+                <Text style={{ fontSize: 13, color: D.textSub, textAlign: 'center', marginTop: 4, marginBottom: 16 }}>Server is temporarily unavailable. Please try again.</Text>
+                <TouchableOpacity
+                  onPress={fetchCustomerNotifications}
+                  style={{
+                    backgroundColor: '#FF5252',
+                    paddingVertical: 10,
+                    paddingHorizontal: 20,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : notificationsLoading ? (
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#FF5252" />
+                <Text style={{ color: D.textSub, fontSize: 13, marginTop: 10 }}>Loading inbox messages...</Text>
+              </View>
+            ) : notifications.length === 0 ? (
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+                <Bell size={48} color={darkMode ? '#475569' : '#CBD5E1'} style={{ marginBottom: 16 }} />
+                <Text style={{ fontSize: 16, fontWeight: '800', color: D.text, textAlign: 'center' }}>Your inbox is empty</Text>
+                <Text style={{ fontSize: 13, color: D.textSub, textAlign: 'center', marginTop: 4 }}>Fresh deals and announcements will appear here.</Text>
+              </View>
+            ) : (
+              <View style={{ flex: 1 }}>
+                {/* Actions */}
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  marginBottom: 12,
+                  paddingHorizontal: 4,
+                }}>
+                  <TouchableOpacity onPress={handleMarkAllNotificationsAsRead}>
+                    <Text style={{ fontSize: 13, color: '#FF5252', fontWeight: '700' }}>Mark all as read</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleClearAllNotifications}>
+                    <Text style={{ fontSize: 13, color: D.textSub, fontWeight: '600' }}>Clear all</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* List */}
+                <FlatList
+                  data={notifications}
+                  keyExtractor={(item) => String(item.id)}
+                  showsVerticalScrollIndicator={false}
+                  renderItem={({ item }) => {
+                    return (
+                      <TouchableOpacity
+                        onPress={() => {
+                          handleMarkNotificationAsRead(item.id);
+                          setIsNotificationModalOpen(false);
+                          if (item.data) {
+                            handleNotificationTap({
+                              notification: {
+                                request: {
+                                  identifier: `inbox-tap-${item.id}`,
+                                  content: { data: item.data }
+                                }
+                              }
+                            });
+                          }
+                        }}
+                        style={{
+                          backgroundColor: item.isRead ? 'transparent' : (darkMode ? '#1E1B1D' : '#FFF9F9'),
+                          borderLeftWidth: 3,
+                          borderLeftColor: item.isRead ? 'transparent' : '#FF5252',
+                          borderRadius: 8,
+                          padding: 12,
+                          marginBottom: 8,
+                          borderWidth: 1,
+                          borderColor: darkMode ? '#3E3439' : '#FFEBEB',
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <Text style={{
+                            fontSize: 14,
+                            fontWeight: item.isRead ? '700' : '900',
+                            color: D.text,
+                            flex: 1,
+                            marginRight: 8,
+                          }}>
+                            {item.title}
+                          </Text>
+                          <Text style={{ fontSize: 10, color: D.textSub }}>
+                            {new Date(item.createdAt).toLocaleDateString()}
+                          </Text>
+                        </View>
+                        <Text style={{
+                          fontSize: 12,
+                          color: D.textSub,
+                          marginTop: 4,
+                          lineHeight: 16,
+                        }}>
+                          {item.body}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
 
   // ─── PERSISTENCE: Load saved session on app start ─────────────────────────
   useEffect(() => {
@@ -2992,7 +3312,7 @@ function MainApp() {
     setSelectedRestaurant(null);
     setViewingProduct(null);
     setIsCartOpen(false);
-    setIsCheckoutOpen(false);
+    handleCloseCheckout();
     setSearchQuery('');
     setSelectedCategory('all');
     setOnlyVeg(false);
@@ -3798,6 +4118,19 @@ function MainApp() {
     setIsProcessingCheckout(true);
     setCheckoutLoadingText('Syncing cart with backend...');
 
+    let activeKey = checkoutIdempotencyKey;
+    if (!activeKey) {
+      activeKey = `QB-${Date.now()}-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      setCheckoutIdempotencyKey(activeKey);
+    }
+    setCheckoutAttemptStatus('submitted');
+    if (currentUser?.id) {
+      await AsyncStorage.setItem(`qb_checkout_attempt_${currentUser.id}`, JSON.stringify({
+        idempotencyKey: activeKey,
+        status: 'submitted'
+      })).catch(() => {});
+    }
+
     try {
       const backendUrl = resolvedBackendUrl;
       const token = currentUser?.token;
@@ -3882,7 +4215,8 @@ function MainApp() {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Idempotency-Key': activeKey
         },
         body: JSON.stringify({
           addressId: Number(finalAddressId),
@@ -3935,6 +4269,11 @@ function MainApp() {
         setOrderStepMap(prev => ({ ...prev, [backendOrder.id]: 1 }));
         setCartItems([]);
         setAppliedPromo(null);
+        setCheckoutIdempotencyKey(null);
+        setCheckoutAttemptStatus('confirmed');
+        if (currentUser?.id) {
+          AsyncStorage.removeItem(`qb_checkout_attempt_${currentUser.id}`).catch(() => {});
+        }
         setIsCheckoutOpen(false);
         setIsCartOpen(false);
 
@@ -4039,6 +4378,11 @@ function MainApp() {
           setOrderStepMap(prev => ({ ...prev, [backendOrder.id]: 1 }));
           setCartItems([]);
           setAppliedPromo(null);
+          setCheckoutIdempotencyKey(null);
+          setCheckoutAttemptStatus('confirmed');
+          if (currentUser?.id) {
+            AsyncStorage.removeItem(`qb_checkout_attempt_${currentUser.id}`).catch(() => {});
+          }
           setIsCheckoutOpen(false);
           setIsCartOpen(false);
 
@@ -4347,6 +4691,24 @@ function MainApp() {
                     : <Moon size={18} color="#4B5563" />
                   }
                 </TouchableOpacity>
+
+                {/* Notifications Bell Button */}
+                {currentUser && (
+                  <TouchableOpacity
+                    style={[styles.cartIconBtn, { backgroundColor: darkMode ? '#252840' : '#F3F4F6', marginRight: 8 }]}
+                    onPress={() => {
+                      fetchCustomerNotifications();
+                      setIsNotificationModalOpen(true);
+                    }}
+                  >
+                    <Bell size={18} color={D.text} />
+                    {unreadNotificationsCount > 0 && (
+                      <Animated.View style={[styles.cartBadge, { transform: [{ scale: cartAnim }] }]}>
+                        <Text style={styles.cartBadgeText}>{unreadNotificationsCount}</Text>
+                      </Animated.View>
+                    )}
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={[styles.cartIconBtn, { backgroundColor: darkMode ? '#252840' : '#F3F4F6' }]}
@@ -7556,12 +7918,7 @@ function MainApp() {
                           alignItems: 'center',
                           justifyContent: 'center'
                         }}
-                        onPress={() => {
-                          setIsCartOpen(false);
-                          setTimeout(() => {
-                            setIsCheckoutOpen(true);
-                          }, 150);
-                        }}
+                        onPress={handleOpenCheckout}
                       >
                         <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '800', marginRight: 8 }}>Place Order</Text>
                         <Truck size={18} color="#ffffff" />
@@ -7732,6 +8089,9 @@ function MainApp() {
               </ScrollView>
             </SafeAreaView>
           </Modal>
+
+          {/* CUSTOMER INBOX MODAL */}
+          {renderNotificationModal()}
 
           {/* PLATFORM CAMPAIGN DETAILS MODAL */}
           {activeCampaignId !== null && (
@@ -7949,7 +8309,7 @@ function MainApp() {
         )}
 
           {/* CHECKOUT & PAYMENT MODAL */}
-          <Modal visible={isCheckoutOpen} animationType="slide" statusBarTranslucent onRequestClose={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setTimeout(() => setIsCartOpen(true), 150); } }} onShow={() => { setTimeout(() => setCheckoutLayoutKey(k => k + 1), 60); }}>
+          <Modal visible={isCheckoutOpen} animationType="slide" statusBarTranslucent onRequestClose={() => { if (!isProcessingCheckout) { handleCloseCheckout(); setTimeout(() => setIsCartOpen(true), 150); } }} onShow={() => { setTimeout(() => setCheckoutLayoutKey(k => k + 1), 60); }}>
             <View key={checkoutLayoutKey} style={{ flex: 1, backgroundColor: '#F5F7FA', paddingTop: STATUSBAR_HEIGHT }}>
 
                 {/* ── COMPACT HEADER ── */}
@@ -7964,7 +8324,7 @@ function MainApp() {
                   position: 'relative',
                 }}>
                   <TouchableOpacity 
-                    onPress={() => { if (!isProcessingCheckout) { setIsCheckoutOpen(false); setTimeout(() => setIsCartOpen(true), 150); } }} 
+                    onPress={() => { if (!isProcessingCheckout) { handleCloseCheckout(); setTimeout(() => setIsCartOpen(true), 150); } }} 
                     style={{ position: 'absolute', left: 16, zIndex: 10, padding: 4 }}
                     disabled={isProcessingCheckout}
                   >
