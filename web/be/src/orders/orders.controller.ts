@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   ParseIntPipe,
+  Headers,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -57,8 +58,12 @@ export class OrdersController {
 
   @Roles(UserRole.CUSTOMER)
   @Post('orders')
-  create(@Body() dto: CreateOrderDto, @Request() req) {
-    return this.ordersService.createOrder(req.user.userId, dto);
+  create(
+    @Body() dto: CreateOrderDto,
+    @Request() req,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.ordersService.createOrder(req.user.userId, dto, idempotencyKey);
   }
 
   @Roles(UserRole.CUSTOMER)

@@ -126,18 +126,8 @@ export class OrdersService {
     return dynamicOfferPrice !== null ? dynamicOfferPrice : parseFloat(food.price.toString());
   }
 
-  async createOrder(userId: number, dto: CreateOrderDto): Promise<Order> {
-    // 1. Verify address ownership and activity
-    const address = await this.addressRepository.findOne({
-      where: { id: dto.addressId, userId, isActive: true },
-    });
-    if (!address) {
-      throw new NotFoundException(
-        `Delivery address with ID ${dto.addressId} not found`,
-      );
-    }
-
-    // 2. Verify customer cart is not empty
+  async createOrder(userId: number, dto: CreateOrderDto, idempotencyKey?: string): Promise<Order> {
+    // Load customer cart first to check idempotency and verify cart content
     const cart = await this.cartRepository.findOne({
       where: { userId },
       relations: [
@@ -152,6 +142,61 @@ export class OrdersService {
       ],
     });
 
+    let currentFingerprint = '';
+    if (cart && cart.items && cart.items.length > 0) {
+      const sortedItems = [...cart.items].map(item => {
+        const choiceIds = (item.customizationChoices || [])
+          .map(c => Number(c.choiceId))
+          .sort((a, b) => a - b);
+        return {
+          foodId: Number(item.foodId),
+          quantity: Number(item.quantity),
+          choiceIds,
+        };
+      }).sort((a, b) => a.foodId - b.foodId);
+
+      const fingerprintData = {
+        userId,
+        addressId: Number(dto.addressId),
+        paymentMethod: dto.paymentMethod?.toLowerCase(),
+        hotelId: Number(cart.hotelId),
+        couponCode: dto.couponCode || null,
+        items: sortedItems,
+      };
+      currentFingerprint = crypto.createHash('sha256').update(JSON.stringify(fingerprintData)).digest('hex');
+    }
+
+    if (idempotencyKey) {
+      const existingOrder = await this.orderRepository.findOne({
+        where: { userId, idempotencyKey },
+        relations: ['hotel', 'items'],
+      });
+
+      if (existingOrder) {
+        if (currentFingerprint && existingOrder.idempotencyFingerprint && existingOrder.idempotencyFingerprint !== currentFingerprint) {
+          throw new ConflictException('This checkout request does not match the original order attempt.');
+        }
+
+        if (Number(existingOrder.addressId) !== Number(dto.addressId) ||
+            existingOrder.paymentMethod?.toLowerCase() !== dto.paymentMethod?.toLowerCase()) {
+          throw new ConflictException('This checkout request does not match the original order attempt.');
+        }
+
+        return existingOrder;
+      }
+    }
+
+    // 1. Verify address ownership and activity
+    const address = await this.addressRepository.findOne({
+      where: { id: dto.addressId, userId, isActive: true },
+    });
+    if (!address) {
+      throw new NotFoundException(
+        `Delivery address with ID ${dto.addressId} not found`,
+      );
+    }
+
+    // 2. Verify customer cart is not empty
     if (!cart || !cart.items || cart.items.length === 0) {
       throw new BadRequestException('Your cart is empty');
     }
@@ -429,79 +474,102 @@ export class OrdersService {
     const encryptedPin = encryptPin(rawPin);
 
     // 7. Write transactional updates
-    const result = await this.dataSource.transaction(async (manager) => {
-      const order = manager.create(Order, {
-        orderNumber,
-        userId,
-        hotelId: hotel.id,
-        addressId: address.id,
-        subtotal,
-        deliveryFee: finalDeliveryFee,
-        taxAmount,
-        discountAmount,
-        totalAmount,
-        paymentMethod: dto.paymentMethod,
-        paymentStatus: PaymentStatus.PENDING,
-        orderStatus: OrderStatus.PLACED,
-        customerNote: dto.customerNote,
-        couponCode: dto.couponCode,
-        // Delivery Address Snapshot
-        deliveryRecipientName: address.recipientName,
-        deliveryPhoneNumber: address.phoneNumber,
-        deliveryAddressLine1: address.addressLine1,
-        deliveryAddressLine2: address.addressLine2,
-        deliveryLandmark: address.landmark,
-        deliveryArea: address.area,
-        deliveryCity: address.city,
-        deliveryState: address.state,
-        deliveryPincode: address.pincode,
-        deliveryLatitude: address.latitude,
-        deliveryLongitude: address.longitude,
-        deliveryPinHash: encryptedPin,
-        deliveryPinAttemptCount: 0,
-      });
-
-      const savedOrder = await manager.save(Order, order);
-
-      for (const itemData of orderItemsData) {
-        const orderItem = manager.create(OrderItem, {
-          orderId: savedOrder.id,
-          foodId: itemData.foodId,
-          foodName: itemData.foodName,
-          foodImage: itemData.foodImage,
-          quantity: itemData.quantity,
-          unitPrice: itemData.unitPrice,
-          customizationPrice: itemData.customizationPrice,
-          finalUnitPrice: itemData.finalUnitPrice,
-          lineTotal: itemData.lineTotal,
+    let result;
+    try {
+      result = await this.dataSource.transaction(async (manager) => {
+        const order = manager.create(Order, {
+          orderNumber,
+          userId,
+          hotelId: hotel.id,
+          addressId: address.id,
+          subtotal,
+          deliveryFee: finalDeliveryFee,
+          taxAmount,
+          discountAmount,
+          totalAmount,
+          paymentMethod: dto.paymentMethod,
+          paymentStatus: PaymentStatus.PENDING,
+          orderStatus: OrderStatus.PLACED,
+          customerNote: dto.customerNote,
+          couponCode: dto.couponCode,
+          // Delivery Address Snapshot
+          deliveryRecipientName: address.recipientName,
+          deliveryPhoneNumber: address.phoneNumber,
+          deliveryAddressLine1: address.addressLine1,
+          deliveryAddressLine2: address.addressLine2,
+          deliveryLandmark: address.landmark,
+          deliveryArea: address.area,
+          deliveryCity: address.city,
+          deliveryState: address.state,
+          deliveryPincode: address.pincode,
+          deliveryLatitude: address.latitude,
+          deliveryLongitude: address.longitude,
+          deliveryPinHash: encryptedPin,
+          deliveryPinAttemptCount: 0,
+          idempotencyKey,
+          idempotencyFingerprint: currentFingerprint || null,
         });
 
-        const savedOrderItem = await manager.save(OrderItem, orderItem);
+        const savedOrder = await manager.save(Order, order);
 
-        if (itemData.customizations.length > 0) {
-          const mappingEntities = itemData.customizations.map((c) =>
-            manager.create(OrderItemCustomization, {
-              orderItemId: savedOrderItem.id,
-              groupName: c.groupName,
-              choiceName: c.choiceName,
-              additionalPrice: c.additionalPrice,
-            }),
-          );
-          await manager.save(OrderItemCustomization, mappingEntities);
+        for (const itemData of orderItemsData) {
+          const orderItem = manager.create(OrderItem, {
+            orderId: savedOrder.id,
+            foodId: itemData.foodId,
+            foodName: itemData.foodName,
+            foodImage: itemData.foodImage,
+            quantity: itemData.quantity,
+            unitPrice: itemData.unitPrice,
+            customizationPrice: itemData.customizationPrice,
+            finalUnitPrice: itemData.finalUnitPrice,
+            lineTotal: itemData.lineTotal,
+          });
+
+          const savedOrderItem = await manager.save(OrderItem, orderItem);
+
+          if (itemData.customizations.length > 0) {
+            const mappingEntities = itemData.customizations.map((c) =>
+              manager.create(OrderItemCustomization, {
+                orderItemId: savedOrderItem.id,
+                groupName: c.groupName,
+                choiceName: c.choiceName,
+                additionalPrice: c.additionalPrice,
+              }),
+            );
+            await manager.save(OrderItemCustomization, mappingEntities);
+          }
+        }
+
+        // Clear cart items only for non-online orders (e.g. COD) immediately.
+        // Online orders will clear the cart only after payment is verified successfully.
+        if (dto.paymentMethod?.toLowerCase() !== 'online') {
+          await manager.delete(CartItem, { cartId: cart.id });
+          if (dto.couponCode) {
+            await this.offersService.recordRedemption(savedOrder.id, manager);
+          }
+        }
+
+        return savedOrder;
+      });
+    } catch (err) {
+      if (idempotencyKey && (err.code === '23505' || err.message?.includes('unique') || err.message?.includes('duplicate key'))) {
+        const existingOrder = await this.orderRepository.findOne({
+          where: { userId, idempotencyKey },
+          relations: ['hotel', 'items'],
+        });
+        if (existingOrder) {
+          if (currentFingerprint && existingOrder.idempotencyFingerprint && existingOrder.idempotencyFingerprint !== currentFingerprint) {
+            throw new ConflictException('This checkout request does not match the original order attempt.');
+          }
+          if (Number(existingOrder.addressId) !== Number(dto.addressId) ||
+              existingOrder.paymentMethod?.toLowerCase() !== dto.paymentMethod?.toLowerCase()) {
+            throw new ConflictException('This checkout request does not match the original order attempt.');
+          }
+          return existingOrder;
         }
       }
-
-      // Clear cart items only for non-online orders (e.g. COD) immediately.
-      // Online orders will clear the cart only after payment is verified successfully.
-      if (dto.paymentMethod?.toLowerCase() !== 'online') {
-        await manager.delete(CartItem, { cartId: cart.id });
-        if (dto.couponCode) {
-          await this.offersService.recordRedemption(savedOrder.id, manager);
-        }
-      }
-
-      return savedOrder;
-    });
+      throw err;
+    }
 
     // Notify hotel admin on new order
     this.notificationsService.createHotelNotification(

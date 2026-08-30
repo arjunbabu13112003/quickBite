@@ -8,6 +8,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Unique,
 } from 'typeorm';
 import { User } from '../users/user.entity';
 import { Hotel } from '../hotels/hotel.entity';
@@ -21,6 +22,7 @@ import { DeliveryPartner } from '../delivery-partners/delivery-partner.entity';
 @Entity('orders')
 @Index(['userId'])
 @Index(['hotelId'])
+@Unique(['userId', 'idempotencyKey'])
 export class Order {
   @PrimaryGeneratedColumn()
   id: number;
@@ -137,6 +139,12 @@ export class Order {
 
   @Column({ type: 'timestamp', nullable: true })
   deliveryBypassTimestamp?: Date;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  idempotencyKey?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  idempotencyFingerprint?: string;
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   placedAt: Date;

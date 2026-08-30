@@ -2025,6 +2025,41 @@ function MainApp() {
 
   // Checkout & Payment State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [checkoutIdempotencyKey, setCheckoutIdempotencyKey] = useState(null);
+  const [checkoutAttemptStatus, setCheckoutAttemptStatus] = useState(null); // 'new' | 'submitted' | 'confirmed'
+
+  const handleOpenCheckout = async () => {
+    let activeKey = checkoutIdempotencyKey;
+    if (activeKey) {
+      console.log('[Checkout] Reusing active key on checkout open:', activeKey);
+    } else {
+      activeKey = `QB-${Date.now()}-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      setCheckoutIdempotencyKey(activeKey);
+      setCheckoutAttemptStatus('new');
+      if (currentUser?.id) {
+        await AsyncStorage.setItem(`qb_checkout_attempt_${currentUser.id}`, JSON.stringify({
+          idempotencyKey: activeKey,
+          status: 'new'
+        })).catch(() => {});
+      }
+    }
+    setIsCartOpen(false);
+    setTimeout(() => {
+      setIsCheckoutOpen(true);
+    }, 150);
+  };
+
+  const handleCloseCheckout = async () => {
+    if (checkoutAttemptStatus === 'new') {
+      setCheckoutIdempotencyKey(null);
+      setCheckoutAttemptStatus(null);
+      if (currentUser?.id) {
+        await AsyncStorage.removeItem(`qb_checkout_attempt_${currentUser.id}`).catch(() => {});
+      }
+    }
+    setIsCheckoutOpen(false);
+  };
+
   const [paymentMethod, setPaymentMethod] = useState('online'); // 'online' | 'cod'
   const [isOrderSuccessModalOpen, setIsOrderSuccessModalOpen] = useState(false);
   const [successScaleAnim] = useState(new Animated.Value(0));
@@ -2302,6 +2337,17 @@ function MainApp() {
           const savedFavs = await AsyncStorage.getItem(`qb_favs_${user.id}`);
           if (savedCart) setCartItems(JSON.parse(savedCart));
           if (savedFavs) setFavorites(JSON.parse(savedFavs));
+
+          // Load persisted checkout attempt if exists
+          const persistedAttempt = await AsyncStorage.getItem(`qb_checkout_attempt_${user.id}`);
+          if (persistedAttempt) {
+            const parsed = JSON.parse(persistedAttempt);
+            if (parsed && parsed.idempotencyKey) {
+              setCheckoutIdempotencyKey(parsed.idempotencyKey);
+              setCheckoutAttemptStatus(parsed.status || 'submitted');
+              console.log('[Checkout] Restored persisted attempt:', parsed);
+            }
+          }
         }
       } catch (e) {
         console.warn('Session load error:', e);
@@ -2339,6 +2385,19 @@ function MainApp() {
             }
             setCartItems(savedCart ? JSON.parse(savedCart) : []);
             setFavorites(savedFavs ? JSON.parse(savedFavs) : []);
+
+            const persistedAttempt = await AsyncStorage.getItem(`qb_checkout_attempt_${currentUser.id}`);
+            if (persistedAttempt) {
+              const parsed = JSON.parse(persistedAttempt);
+              if (parsed && parsed.idempotencyKey) {
+                setCheckoutIdempotencyKey(parsed.idempotencyKey);
+                setCheckoutAttemptStatus(parsed.status || 'submitted');
+                console.log('[Checkout] Restored persisted attempt for user:', parsed);
+              }
+            } else {
+              setCheckoutIdempotencyKey(null);
+              setCheckoutAttemptStatus(null);
+            }
           } catch (e) {
             console.warn('Load user data error:', e);
           }
@@ -3103,6 +3162,11 @@ function MainApp() {
     setFavorites([]);
     setMyOrdersList([]);
     setOrderStepMap({});
+    setCheckoutIdempotencyKey(null);
+    setCheckoutAttemptStatus(null);
+    if (currentUser?.id) {
+      await AsyncStorage.removeItem(`qb_checkout_attempt_${currentUser.id}`).catch(() => { });
+    }
     await AsyncStorage.removeItem('qb_user').catch(() => { });
     triggerToastNotification('👋 Logged out successfully');
   };
