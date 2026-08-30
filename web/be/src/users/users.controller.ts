@@ -95,7 +95,11 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @Post('push-token')
-  async registerPushToken(@Request() req, @Body('pushToken') pushToken: string) {
-    return this.usersService.registerPushToken(req.user.userId, pushToken);
+  async registerPushToken(
+    @Request() req,
+    @Body('pushToken') pushToken: string,
+    @Body('appType') appType?: string,
+  ) {
+    return this.usersService.registerPushToken(req.user.userId, pushToken, appType);
   }
 }

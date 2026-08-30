@@ -21,6 +21,7 @@ import { HomeFoodCategoriesModule } from './home-food-categories/home-food-categ
 import { OffersModule } from './offers/offers.module';
 import { AppController } from './app.controller';
 import { BrandingModule } from './branding/branding.module';
+import { PushCampaignsModule } from './push-campaigns/push-campaigns.module';
 
 @Module({
   controllers: [AppController],
@@ -72,6 +73,7 @@ import { BrandingModule } from './branding/branding.module';
     HomeFoodCategoriesModule,
     OffersModule,
     BrandingModule,
+    PushCampaignsModule,
   ],
 })
 export class AppModule implements NestModule {

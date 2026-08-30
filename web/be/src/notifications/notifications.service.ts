@@ -3,11 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HotelNotification } from './hotel-notification.entity';
 import { DeliveryPartnerNotification } from './delivery-partner-notification.entity';
+import { CustomerNotification } from './customer-notification.entity';
 import { Order } from '../orders/order.entity';
 import { DeliveryPartner } from '../delivery-partners/delivery-partner.entity';
 import { OrderStatus } from '../orders/enums/order-status.enum';
 import { User } from '../users/user.entity';
 import { UserRole } from '../users/user-role.enum';
+import { DevicePushToken, AppType } from '../users/device-push-token.entity';
 
 @Injectable()
 export class NotificationsService {
@@ -16,12 +18,16 @@ export class NotificationsService {
     private readonly notificationRepository: Repository<HotelNotification>,
     @InjectRepository(DeliveryPartnerNotification)
     private readonly partnerNotificationRepository: Repository<DeliveryPartnerNotification>,
+    @InjectRepository(CustomerNotification)
+    private readonly customerNotificationRepository: Repository<CustomerNotification>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(DeliveryPartner)
     private readonly partnerRepository: Repository<DeliveryPartner>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(DevicePushToken)
+    private readonly devicePushTokenRepository: Repository<DevicePushToken>,
   ) {}
 
   async notifyRestaurant(orderId: number) {
@@ -208,30 +214,30 @@ export class NotificationsService {
       console.warn(`[PUSH] sendCustomerPush failed: User #${userId} not found`);
       return;
     }
-    if (!user.pushToken) {
-      console.log(`[PUSH] sendCustomerPush skipped: User #${userId} has no registered pushToken`);
+    const tokenRecord = await this.devicePushTokenRepository.findOne({
+      where: { userId: user.id, appType: AppType.CUSTOMER, isActive: true },
+    });
+    if (!tokenRecord) {
+      console.log(`[PUSH] sendCustomerPush skipped: User #${userId} has no registered CUSTOMER push token`);
       return;
     }
-    this.sendExpoPush(user.pushToken, user.id, title, body, data);
+    this.sendExpoPush(tokenRecord.token, user.id, title, body, data);
   }
 
   async broadcastCustomerPush(title: string, body: string, data?: any) {
     try {
-      const customers = await this.userRepository.find({
-        where: { role: UserRole.CUSTOMER },
-        select: ['id', 'pushToken'],
+      const tokens = await this.devicePushTokenRepository.find({
+        where: { appType: AppType.CUSTOMER, isActive: true },
       });
 
       const uniqueTokens = new Set<string>();
       const recipients: { id: number; token: string }[] = [];
 
-      for (const customer of customers) {
-        if (customer.pushToken && customer.pushToken.trim() !== '') {
-          const token = customer.pushToken.trim();
-          if (!uniqueTokens.has(token)) {
-            uniqueTokens.add(token);
-            recipients.push({ id: customer.id, token });
-          }
+      for (const t of tokens) {
+        const token = t.token.trim();
+        if (!uniqueTokens.has(token)) {
+          uniqueTokens.add(token);
+          recipients.push({ id: t.userId, token });
         }
       }
 
@@ -262,11 +268,14 @@ export class NotificationsService {
       console.warn(`[PUSH] sendPartnerPush failed: Partner #${partnerId} has no linked User record`);
       return;
     }
-    if (!partner.user.pushToken) {
-      console.log(`[PUSH] sendPartnerPush skipped: Partner #${partnerId} (User #${partner.user.id}) has no registered pushToken`);
+    const tokenRecord = await this.devicePushTokenRepository.findOne({
+      where: { userId: partner.user.id, appType: AppType.DELIVERY_PARTNER, isActive: true },
+    });
+    if (!tokenRecord) {
+      console.log(`[PUSH] sendPartnerPush skipped: Partner #${partnerId} (User #${partner.user.id}) has no registered DELIVERY_PARTNER push token`);
       return;
     }
-    this.sendExpoPush(partner.user.pushToken, partner.user.id, title, body, data);
+    this.sendExpoPush(tokenRecord.token, partner.user.id, title, body, data);
   }
 
   async createHotelNotification(
@@ -338,6 +347,7 @@ export class NotificationsService {
                   console.log(`[PUSH] Nullifying invalid token: ${pushToken}`);
                   await this.userRepository.update(userId, { pushToken: null });
                 }
+                await this.devicePushTokenRepository.delete({ token: pushToken });
               } else if (errCode === 'MessageTooBig') {
                 console.error(`[PUSH ERROR: PAYLOAD] MessageTooBig: The message payload is too large.`);
               } else if (errCode === 'MessageRateExceeded') {
@@ -401,6 +411,7 @@ export class NotificationsService {
                   console.log(`[PUSH] Nullifying invalid token: ${pushToken}`);
                   await this.userRepository.update(userId, { pushToken: null });
                 }
+                await this.devicePushTokenRepository.delete({ token: pushToken });
               } else if (errCode === 'MessageTooBig') {
                 console.error(`[PUSH ERROR: PAYLOAD] MessageTooBig: The message payload is too large.`);
               } else if (errCode === 'MessageRateExceeded') {
@@ -426,5 +437,92 @@ export class NotificationsService {
         console.warn(`[PUSH] Failed to check receipt for User #${userId}:`, err.message || err);
       }
     })();
+  }
+
+  // --- CUSTOMER NOTIFICATIONS INBOX METHODS ---
+
+  async getCustomerNotifications(userId: number): Promise<CustomerNotification[]> {
+    return await this.customerNotificationRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async markCustomerAsRead(id: number, userId: number): Promise<CustomerNotification> {
+    const notification = await this.customerNotificationRepository.findOne({
+      where: { id, userId },
+    });
+    if (!notification) {
+      throw new NotFoundException(`Notification #${id} not found for this customer`);
+    }
+    notification.isRead = true;
+    return await this.customerNotificationRepository.save(notification);
+  }
+
+  async markAllCustomerAsRead(userId: number): Promise<void> {
+    await this.customerNotificationRepository.update(
+      { userId, isRead: false },
+      { isRead: true }
+    );
+  }
+
+  async clearAllCustomerNotifications(userId: number): Promise<void> {
+    await this.customerNotificationRepository.delete({ userId });
+  }
+
+  async createCustomerNotification(
+    userId: number,
+    campaignId: number | undefined,
+    runId: number | undefined,
+    title: string,
+    body: string,
+    type = 'promotion',
+    data?: any,
+  ): Promise<CustomerNotification> {
+    try {
+      // Check uniqueness: promotions are now unique by runId, not campaignId
+      if (runId) {
+        const existing = await this.customerNotificationRepository.findOne({
+          where: { userId, runId },
+        });
+        if (existing) {
+          return existing; // idempotent return
+        }
+      } else if (campaignId) {
+        // Fallback for any legacy or other campaign notifications without runId
+        const existing = await this.customerNotificationRepository.findOne({
+          where: { userId, campaignId },
+        });
+        if (existing) {
+          return existing;
+        }
+      }
+
+      const notification = this.customerNotificationRepository.create({
+        userId,
+        campaignId,
+        runId,
+        title,
+        body,
+        type,
+        data,
+      });
+      return await this.customerNotificationRepository.save(notification);
+    } catch (err: any) {
+      if (err.code === '23505') {
+        if (runId) {
+          const existing = await this.customerNotificationRepository.findOne({
+            where: { userId, runId },
+          });
+          if (existing) return existing;
+        } else if (campaignId) {
+          const existing = await this.customerNotificationRepository.findOne({
+            where: { userId, campaignId },
+          });
+          if (existing) return existing;
+        }
+      }
+      throw err;
+    }
   }
 }

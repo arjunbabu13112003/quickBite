@@ -12,12 +12,15 @@ import { UpdateHotelAdminDto } from './dto/update-hotel-admin.dto';
 
 import { UserRole } from './user-role.enum';
 import { Hotel } from '../hotels/hotel.entity';
+import { DevicePushToken, AppType } from './device-push-token.entity';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(DevicePushToken)
+    private readonly devicePushTokenRepository: Repository<DevicePushToken>,
     private readonly jwtService: JwtService,
     private readonly dataSource: DataSource,
   ) {}
@@ -321,16 +324,83 @@ export class UsersService {
     }));
   }
 
-  async registerPushToken(userId: number, pushToken: string) {
+  async registerPushToken(userId: number, pushToken: string, appTypeInput?: string) {
+    const redactedToken = pushToken && pushToken.length > 25
+      ? `${pushToken.slice(0, 19)}...${pushToken.slice(-4)}`
+      : pushToken;
     console.log('[PUSH] Registering token');
     console.log(`[PUSH] User/Partner ID: ${userId}`);
-    console.log(`[PUSH] Token: ${pushToken}`);
+    console.log(`[PUSH] Token: ${redactedToken}`);
+    console.log(`[PUSH] App Type Input: ${appTypeInput}`);
+
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    user.pushToken = pushToken || null;
-    await this.usersRepository.save(user);
+
+    if (appTypeInput && !Object.values(AppType).includes(appTypeInput as any)) {
+      throw new BadRequestException('Invalid appType');
+    }
+
+    const appType = appTypeInput === 'DELIVERY_PARTNER' ? AppType.DELIVERY_PARTNER : AppType.CUSTOMER;
+
+    // Role Guard: CUSTOMER push tokens must ONLY be registered for users with role === 'customer'
+    if (appType === AppType.CUSTOMER && user.role !== UserRole.CUSTOMER) {
+      console.log(`[PUSH] Skipping CUSTOMER token registration for non-customer user ID: ${userId} (role: ${user.role})`);
+      return { success: false, message: 'Only customer accounts can register customer push tokens' };
+    }
+
+    try {
+      await this.dataSource.transaction(async (transactionalEntityManager) => {
+        // Enforce the ONE-ACTIVE-PER-APP invariant: deactivate previous active tokens for this user/appType
+        await transactionalEntityManager.update(
+          DevicePushToken,
+          { userId, appType, isActive: true },
+          { isActive: false }
+        );
+
+        // 1. Persist/update in device_push_tokens table
+        let deviceToken = await transactionalEntityManager.findOne(DevicePushToken, {
+          where: { token: pushToken }
+        });
+
+        if (deviceToken) {
+          deviceToken.userId = userId;
+          deviceToken.appType = appType;
+          deviceToken.isActive = true;
+          await transactionalEntityManager.save(DevicePushToken, deviceToken);
+        } else {
+          deviceToken = transactionalEntityManager.create(DevicePushToken, {
+            userId,
+            token: pushToken,
+            appType,
+            isActive: true,
+          });
+          await transactionalEntityManager.save(DevicePushToken, deviceToken);
+        }
+      });
+    } catch (err: any) {
+      // Safely catch database-level unique constraint violations (e.g. Postgres error code 23505) and return idempotent success
+      if (err.code === '23505' || err.message?.includes('UQ_active_user_app_token') || err.message?.includes('device_push_tokens')) {
+        console.log('[PUSH] Caught concurrent registration constraint race safely. Returning idempotent success.');
+        return { success: true, message: 'Push token registered successfully (idempotent conflict resolved)' };
+      }
+      throw err;
+    }
+
+    // 2. Fallback compatibility for user.pushToken (CUSTOMER ONLY)
+    // Delivery Partner tokens must NEVER enter or pollute users.pushToken
+    if (appType === AppType.CUSTOMER) {
+      user.pushToken = pushToken || null;
+      await this.usersRepository.save(user);
+    } else {
+      // If a delivery partner token was previously registered to user.pushToken for this user, nullify it to clean contamination
+      if (user.pushToken === pushToken) {
+        user.pushToken = null;
+        await this.usersRepository.save(user);
+      }
+    }
+
     return { success: true, message: 'Push token registered successfully' };
   }
 }

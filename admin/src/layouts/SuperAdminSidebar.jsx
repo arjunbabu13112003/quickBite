@@ -12,6 +12,7 @@ import {
   Pizza,
   Tag,
   Palette,
+  Send,
 } from 'lucide-react';
 
 const NAVIGATION_ITEMS = [
@@ -23,12 +24,13 @@ const NAVIGATION_ITEMS = [
   { id: 'orders', name: 'Orders', icon: ClipboardList, path: '/super-admin/orders' },
   { id: 'payments', name: 'Payments', icon: CreditCard, path: '/super-admin/payments' },
   { id: 'offers', name: 'Offers', icon: Tag, path: '/super-admin/offers' },
+  { id: 'push-campaigns', name: 'Push Campaigns', icon: Send, path: '/super-admin/push-campaigns' },
   { id: 'analytics', name: 'Analytics', icon: BarChart3, path: '/super-admin/analytics' },
   { id: 'branding', name: 'Branding', icon: Palette, path: '/super-admin/branding/app-icons' },
   { id: 'settings', name: 'Settings', icon: Settings, path: '/super-admin/settings' },
 ];
 
-const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders', 'offers', 'analytics', 'branding'];
+const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders', 'offers', 'branding', 'push-campaigns'];
 
 export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate, onLogout }) {
   const handleItemClick = (e, item) => {

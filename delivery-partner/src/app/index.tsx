@@ -235,6 +235,25 @@ function calculateDistance(
   return Math.round(d * 10) / 10; // Round to 1 decimal place
 }
 
+function isNetworkError(error: any): boolean {
+  if (!error) return false;
+  const message = typeof error === 'string' ? error : error.message || String(error);
+  return (
+    /status\s*===\s*0/i.test(message) ||
+    /status\s*=\s*0/i.test(message) ||
+    /timeout/i.test(message) ||
+    /Network request failed/i.test(message) ||
+    /backend unreachable/i.test(message) ||
+    /Server is temporarily unavailable/i.test(message) ||
+    /connection refused/i.test(message) ||
+    /aborted/i.test(message) ||
+    /failed to fetch/i.test(message) ||
+    /unable to reach/i.test(message) ||
+    error.status === 0 ||
+    error.status >= 500
+  );
+}
+
 export default function AppIndex() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -260,7 +279,8 @@ export default function AppIndex() {
 
   const logUniqueError = useCallback((category: string, errorMsg: string, level: 'error' | 'warn' = 'error') => {
     if (lastLoggedErrorsRef.current[category] !== errorMsg) {
-      if (level === 'warn') {
+      const resolvedLevel = isNetworkError(errorMsg) ? 'warn' : level;
+      if (resolvedLevel === 'warn') {
         console.warn(errorMsg);
       } else {
         console.error(errorMsg);
@@ -1062,8 +1082,12 @@ export default function AppIndex() {
         setViewingActiveOrder(false);
         await stopTrackingCoordinator();
       }
-    } catch (activeErr) {
-      console.error('Failed to sync active delivery:', activeErr);
+    } catch (activeErr: any) {
+      if (isNetworkError(activeErr)) {
+        console.warn('Failed to sync active delivery (network unavailable):', activeErr.message || activeErr);
+      } else {
+        console.error('Failed to sync active delivery:', activeErr);
+      }
     }
   };
 
@@ -1101,8 +1125,12 @@ export default function AppIndex() {
         setAccountStatus(profile.partner.accountStatus);
         setIsOnline(profile.partner.isOnline);
         setIsAvailable(profile.partner.isAvailable);
-      } catch (meErr) {
-        console.error('Failed to refresh profile:', meErr);
+      } catch (meErr: any) {
+        if (isNetworkError(meErr)) {
+          console.warn('Failed to refresh profile (network unavailable):', meErr.message || meErr);
+        } else {
+          console.error('Failed to refresh profile:', meErr);
+        }
       }
       
       await fetchDashboardStats();
@@ -1336,7 +1364,11 @@ export default function AppIndex() {
         };
         reader.readAsDataURL(blob);
       } catch (err: any) {
-        console.error('[Preview] Load error:', err);
+        if (isNetworkError(err)) {
+          console.warn('[Preview] Load error (network unavailable):', err.message || err);
+        } else {
+          console.error('[Preview] Load error:', err);
+        }
         setPreviewError(err.message || 'Could not load document preview.');
         setPreviewLoading(false);
       }
@@ -1531,7 +1563,7 @@ export default function AppIndex() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ pushToken }),
+        body: JSON.stringify({ pushToken, appType: 'DELIVERY_PARTNER' }),
       });
       if (res.ok) {
         console.log('[PUSH] Push token successfully registered on backend');
@@ -2143,11 +2175,32 @@ export default function AppIndex() {
       if (error.message && (error.message.includes('active delivery') || error.message.includes('Complete or resolve'))) {
         alert('Complete your active delivery before going offline.');
       } else if (error.message === 'Unauthorized' || error.message === 'Forbidden resource') {
-        console.error('Failed to toggle online status:', error.message);
+        console.warn('Failed to toggle online status (unauthorized):', error.message);
         await handleLogout(true);
       } else {
-        console.error('Failed to toggle online status:', error.message);
-        alert(error.message || 'Unable to change status. Please try again.');
+        if (isNetworkError(error)) {
+          console.warn('Failed to toggle online status (network unavailable):', error.message);
+          qbEvents.emit(error.message || 'Server is temporarily unavailable. Please try again.', async () => {
+            try {
+              const retryData = await api.updateOnlineStatus(targetOnline);
+              setIsOnline(retryData.isOnline);
+              setIsAvailable(retryData.isAvailable);
+              if (!retryData.isOnline) {
+                setIncomingAssignment(null);
+                setAvailableOrders([]);
+                if (deliveryState === 'incoming-request') {
+                  changeDeliveryState('none');
+                }
+              }
+              return true;
+            } catch (retryErr) {
+              return false;
+            }
+          });
+        } else {
+          console.error('Failed to toggle online status:', error.message);
+          alert(error.message || 'Unable to change status. Please try again.');
+        }
       }
       try {
         const profile = await api.getMe();
@@ -6046,8 +6099,12 @@ export default function AppIndex() {
       try {
         await api.markPartnerNotificationAsRead(item.id);
         fetchNotifications();
-      } catch (err) {
-        console.error('Failed to mark read:', err);
+      } catch (err: any) {
+        if (isNetworkError(err)) {
+          console.warn('Failed to mark read (network unavailable):', err.message || err);
+        } else {
+          console.error('Failed to mark read:', err);
+        }
       }
     }
   };
@@ -6056,8 +6113,12 @@ export default function AppIndex() {
     try {
       await api.clearAllPartnerNotifications();
       fetchNotifications();
-    } catch (err) {
-      console.error('Failed to clear all:', err);
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        console.warn('Failed to clear all (network unavailable):', err.message || err);
+      } else {
+        console.error('Failed to clear all:', err);
+      }
     }
   };
 
@@ -6065,8 +6126,12 @@ export default function AppIndex() {
     try {
       await api.markAllPartnerNotificationsAsRead();
       fetchNotifications();
-    } catch (err) {
-      console.error('Failed to mark all read:', err);
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        console.warn('Failed to mark all read (network unavailable):', err.message || err);
+      } else {
+        console.error('Failed to mark all read:', err);
+      }
     }
   };
 

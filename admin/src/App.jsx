@@ -26,6 +26,8 @@ import HomeFoodCategoriesList from './pages/super-admin/HomeFoodCategoriesList';
 import { SuperAdminOffersList, SuperAdminCreateCampaign } from './pages/super-admin/OffersManagement';
 import BrandingAppIcons from './pages/super-admin/BrandingAppIcons';
 import Analytics from './pages/super-admin/Analytics';
+import PushCampaignsList from './pages/super-admin/PushCampaignsList';
+import CreatePushCampaign from './pages/super-admin/CreatePushCampaign';
 
 // Hotel Admin Pages
 import HotelAdminDashboard from './pages/hotel-admin/HotelAdminDashboard';
@@ -271,10 +273,24 @@ export default function App() {
     const isOffersRoute = currentPath === '/super-admin/offers' || currentPath.startsWith('/super-admin/offers');
     const isBrandingRoute = currentPath === '/super-admin/branding' || currentPath === '/super-admin/branding/app-icons';
     const isAnalyticsRoute = currentPath === '/super-admin/analytics';
+    const isPushCampaignsRoute = currentPath === '/super-admin/push-campaigns' || currentPath.startsWith('/super-admin/push-campaigns/');
 
-    const currentTab = isBrandingRoute ? 'branding' : (isOffersRoute ? 'offers' : (isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : (isAnalyticsRoute ? 'analytics' : 'dashboard')))))));
+    const currentTab = isBrandingRoute ? 'branding' : (isOffersRoute ? 'offers' : (isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : (isAnalyticsRoute ? 'analytics' : (isPushCampaignsRoute ? 'push-campaigns' : 'dashboard'))))))));
 
     const renderSuperAdminContent = () => {
+      if (currentPath === '/super-admin/push-campaigns') {
+        return <PushCampaignsList onNavigate={navigateTo} />;
+      }
+      if (currentPath === '/super-admin/push-campaigns/new') {
+        return <CreatePushCampaign onNavigate={navigateTo} />;
+      }
+      if (currentPath.startsWith('/super-admin/push-campaigns/') && currentPath.endsWith('/edit')) {
+        const parts = currentPath.split('/');
+        const id = parseInt(parts[3], 10);
+        if (!isNaN(id)) {
+          return <CreatePushCampaign id={id} onNavigate={navigateTo} />;
+        }
+      }
       if (currentPath === '/super-admin/branding' || currentPath === '/super-admin/branding/app-icons') {
         return <BrandingAppIcons onNavigate={navigateTo} />;
       }

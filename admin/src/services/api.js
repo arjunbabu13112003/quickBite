@@ -1098,4 +1098,167 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  getPushCampaigns: async () => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getPushCampaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}`, {
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  createPushCampaign: async (data) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  updatePushCampaign: async (id, data) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}`, {
+      method: 'PATCH',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  deletePushCampaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() },
+    });
+    return res.status === 204 ? true : handleResponse(res);
+  },
+
+  previewPushCampaignAudience: async (data) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/preview-count`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  sendPushCampaign: async (id, idempotencyKey) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/send`, {
+      method: 'POST',
+      headers: { 
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ idempotencyKey }),
+    });
+    return handleResponse(res);
+  },
+
+  resumePushCampaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/resume`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  resumePushCampaignRun: async (runId) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/runs/${runId}/resume`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  pausePushCampaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/pause`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  resumeRecurringPushCampaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/resume-recurring`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  stopPushCampaignRecurrence: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/stop`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  archivePushCampaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/archive`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  cancelPushCampaignSchedule: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/cancel-schedule`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  clonePushCampaign: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/${id}/clone`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getPushCampaignRunDetails: async (runId) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/runs/${runId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  checkPushCampaignRunReceipts: async (runId) => {
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/runs/${runId}/check-receipts`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  uploadPushCampaignImage: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/push-campaigns/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': getAuthHeaders()['Authorization'],
+      },
+      body: formData,
+    });
+    return handleResponse(res);
+  },
 };

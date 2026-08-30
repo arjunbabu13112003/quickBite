@@ -9,9 +9,17 @@ function findLines(pattern) {
     if (line.toLowerCase().includes(pattern.toLowerCase())) {
       console.log(`${idx + 1}: ${line.trim()}`);
       count++;
+      if (count > 20) {
+        console.log('Truncating...');
+        return;
+      }
     }
   });
   console.log(`Total: ${count} matches\n`);
 }
 
-findLines('handleLogout');
+findLines('Notification');
+findLines('expo-notifications');
+findLines('push');
+findLines('token');
+findLines('bottomInset');

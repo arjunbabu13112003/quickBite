@@ -88,4 +88,30 @@ export class NotificationsController {
   clearAllPartnerNotifications(@Request() req) {
     return this.notificationsService.clearAllPartnerNotifications(req.user.userId);
   }
+
+  // --- CUSTOMER NOTIFICATIONS INBOX ---
+
+  @Roles(UserRole.CUSTOMER)
+  @Get('customer/me')
+  getCustomerNotifications(@Request() req) {
+    return this.notificationsService.getCustomerNotifications(req.user.userId);
+  }
+
+  @Roles(UserRole.CUSTOMER)
+  @Patch('customer/me/read-all')
+  markAllCustomerAsRead(@Request() req) {
+    return this.notificationsService.markAllCustomerAsRead(req.user.userId);
+  }
+
+  @Roles(UserRole.CUSTOMER)
+  @Patch('customer/me/:id/read')
+  markCustomerAsRead(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.notificationsService.markCustomerAsRead(id, req.user.userId);
+  }
+
+  @Roles(UserRole.CUSTOMER)
+  @Delete('customer/me')
+  clearAllCustomerNotifications(@Request() req) {
+    return this.notificationsService.clearAllCustomerNotifications(req.user.userId);
+  }
 }

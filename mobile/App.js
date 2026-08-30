@@ -1031,18 +1031,21 @@ function MainApp() {
 
   useEffect(() => {
     if (isApiErrorHandlerReady && isSessionLoaded && activeTab === 'home') {
-      fetchBackendData();
+      if (!initialDataLoadedRef.current) {
+        initialDataLoadedRef.current = true;
+        fetchBackendData();
+      }
     }
   }, [activeTab, isApiErrorHandlerReady, isSessionLoaded]);
 
   useEffect(() => {
-    if (selectedRestaurant) {
+    if (selectedRestaurant && !selectedRestaurant.name) {
       const updated = restaurants.find(r => r.id === selectedRestaurant.id);
       if (updated) {
         setSelectedRestaurant(updated);
       }
     }
-  }, [restaurants]);
+  }, [restaurants, selectedRestaurant]);
 
   const bannerRef = useRef(null);
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
@@ -1297,14 +1300,71 @@ function MainApp() {
       console.log('MIN ORDER:', data.minimumOrderAmount);
       console.log('DELIVERY RADIUS:', data.deliveryRadiusKm);
 
-      setDetailedRestaurant(data);
+      // Fetch food items menu list dynamically for this restaurant
+      const foodsRes = await fetch(`${resolvedBackendUrl}/hotels/${restId}/foods?activeOnly=true`);
+      let menuItems = [];
+      if (foodsRes.ok) {
+        const foods = await foodsRes.json();
+        menuItems = foods.map(f => {
+          const hasOfferPrice = f.offerPrice !== null && f.offerPrice !== undefined;
+          return {
+            id: f.id,
+            itemId: f.id,
+            name: f.name,
+            categoryName: f.category?.name || 'Specials',
+            price: hasOfferPrice ? Number(f.offerPrice) : Number(f.price),
+            originalPrice: Number(f.price),
+            image: resolveProductImage(f.image, resolvedBackendUrl),
+            isVeg: f.isVeg,
+            isPopular: f.isPopular,
+            description: f.description,
+            categoryId: f.category?.id,
+          };
+        });
+      }
+
+      const fullRestaurantData = {
+        ...data,
+        menu: menuItems
+      };
+
+      setDetailedRestaurant(fullRestaurantData);
+
+      // Populate selectedRestaurant immediately so standard views bind name/menu
+      setSelectedRestaurant(prev => {
+        if (prev && prev.id === restId) {
+          return {
+            ...prev,
+            name: data.name,
+            image: resolveProductImage(data.image, resolvedBackendUrl),
+            coverImage: resolveProductImage(data.image, resolvedBackendUrl),
+            address: data.address,
+            description: data.description || '',
+            menu: menuItems,
+            deliveryTime: `${data.deliveryTimeMin || 20}-${data.deliveryTimeMax || 35} min`,
+            deliveryFee: Number(data.deliveryFee) || 0,
+            minOrder: Number(data.minimumOrderAmount) || 0,
+            rating: 4.8,
+            reviewsCount: 150,
+          };
+        }
+        return prev;
+      });
+
     } catch (err) {
       console.warn('Error fetching detailed restaurant profile:', err);
-      setDetailedRestaurant(selectedRestaurant);
+      setSelectedRestaurant(prev => {
+        if (prev && prev.id === restId) {
+          setDetailedRestaurant(prev);
+        } else {
+          setDetailedRestaurant({ id: restId });
+        }
+        return prev;
+      });
     } finally {
       setLoadingDetails(false);
     }
-  }, [resolvedBackendUrl, selectedRestaurant]);
+  }, [resolvedBackendUrl]);
 
   // Fetch detailed restaurant profile when selectedRestaurant changes
   useEffect(() => {
@@ -2213,6 +2273,9 @@ function MainApp() {
   // ─── PUSH NOTIFICATIONS REGISTRATION ──────────────────────────────────────
   const lastRegisteredTokenRef = useRef(null);
   const pushRegistrationInFlightRef = useRef(false);
+  const initialDataLoadedRef = useRef(false);
+  const restoredTokenRef = useRef(null);
+  const startupPushTokenRegisteredRef = useRef(false);
 
   const registerForPushNotificationsAsync = async () => {
     if (!Notifications) {
@@ -2266,10 +2329,10 @@ function MainApp() {
     }
   };
 
-  const registerPushTokenForUser = async (userToken, userIdForLog) => {
+  const registerPushTokenForUser = async (userToken, userIdForLog, userRole) => {
     // 1. Role Guard: customer mobile push-token registration must run ONLY when authenticated user role === "customer"
-    if (currentUser?.role !== 'customer') {
-      console.log(`[PUSH] Skipping customer push registration: User #${userIdForLog} role is '${currentUser?.role || 'unknown'}', not 'customer'`);
+    if (userRole !== 'customer') {
+      console.log(`[PUSH] Skipping customer push registration: User #${userIdForLog} role is '${userRole || 'unknown'}', not 'customer'`);
       return;
     }
 
@@ -2290,7 +2353,7 @@ function MainApp() {
       const activeUserId = userIdForLog || currentUser?.id;
       const cacheKey = `${activeUserId}:${pushToken}`;
       if (lastRegisteredTokenRef.current === cacheKey) {
-        console.log('[PUSH] Token already registered for this user session. Skipping duplicate registration.');
+        console.log('[PUSH] Existing customer token already registered; skipping refresh');
         pushRegistrationInFlightRef.current = false;
         return;
       }
@@ -2329,10 +2392,21 @@ function MainApp() {
   };
 
   useEffect(() => {
-    if (currentUser?.token) {
-      registerPushTokenForUser(currentUser.token, currentUser.id);
+    if (isSessionLoaded && currentUser?.id && currentUser?.role === 'customer') {
+      const token = restoredTokenRef.current || currentUser?.token;
+      if (token) {
+        if (!startupPushTokenRegisteredRef.current) {
+          startupPushTokenRegisteredRef.current = true;
+          console.log('[PUSH] Triggering startup/login push token registration');
+          registerPushTokenForUser(token, currentUser.id, currentUser.role);
+        }
+      } else {
+        console.log('[PUSH] Startup/login push registration skipped: token not available');
+      }
+    } else if (!currentUser) {
+      startupPushTokenRegisteredRef.current = false;
     }
-  }, [currentUser?.id, currentUser?.token]);
+  }, [isSessionLoaded, currentUser?.id, currentUser?.role, currentUser?.token]);
 
   const fetchCustomerNotifications = async () => {
     if (!currentUser?.token) return;
@@ -2666,14 +2740,21 @@ function MainApp() {
       console.log('[QuickBite] loadSession hook start');
       try {
         const savedUser = await AsyncStorage.getItem('qb_user');
-        if (savedUser) {
-          const parsed = JSON.parse(savedUser);
-          console.log('[QuickBite] session restored:', { id: parsed.id, role: parsed.role });
-        }
-        const savedDark = await AsyncStorage.getItem('qb_darkMode');
-        if (savedDark !== null) setDarkMode(JSON.parse(savedDark));
+        const savedToken = await AsyncStorage.getItem('accessToken') || await AsyncStorage.getItem('qb_token');
+        let token = savedToken || null;
+
         if (savedUser) {
           const user = JSON.parse(savedUser);
+          if (user.token) {
+            token = user.token;
+          }
+          console.log('[QuickBite] session restored:', { id: user.id, role: user.role, hasToken: !!token });
+          
+          if (token) {
+            user.token = token;
+            restoredTokenRef.current = token;
+          }
+
           const savedAvatar = await AsyncStorage.getItem(`qb_avatar_${user.id}`);
           if (savedAvatar) user.avatar = savedAvatar;
           setCurrentUser(user);
@@ -2694,6 +2775,8 @@ function MainApp() {
             }
           }
         }
+        const savedDark = await AsyncStorage.getItem('qb_darkMode');
+        if (savedDark !== null) setDarkMode(JSON.parse(savedDark));
       } catch (e) {
         console.warn('Session load error:', e);
       } finally {
@@ -2706,12 +2789,19 @@ function MainApp() {
 
   // ─── PERSISTENCE: Save user session whenever currentUser changes ───────────
   useEffect(() => {
+    if (!isSessionLoaded) return;
     if (currentUser) {
       AsyncStorage.setItem('qb_user', JSON.stringify(currentUser)).catch(() => { });
+      if (currentUser.token) {
+        AsyncStorage.setItem('accessToken', currentUser.token).catch(() => { });
+        AsyncStorage.setItem('qb_token', currentUser.token).catch(() => { });
+      }
     } else {
       AsyncStorage.removeItem('qb_user').catch(() => { });
+      AsyncStorage.removeItem('accessToken').catch(() => { });
+      AsyncStorage.removeItem('qb_token').catch(() => { });
     }
-  }, [currentUser]);
+  }, [currentUser, isSessionLoaded]);
 
   // ─── PERSISTENCE: Save cart per user ──────────────────────────────────────
   const prevUserIdRef = useRef(null);
@@ -3493,6 +3583,7 @@ function MainApp() {
       } catch (e) { }
     }
     prevUserIdRef.current = null;
+    initialDataLoadedRef.current = false;
     setCurrentUser(null);
     setActiveTab('home');
     setEmail('');
@@ -3510,6 +3601,8 @@ function MainApp() {
       await AsyncStorage.removeItem(`qb_checkout_attempt_${currentUser.id}`).catch(() => { });
     }
     await AsyncStorage.removeItem('qb_user').catch(() => { });
+    await AsyncStorage.removeItem('accessToken').catch(() => { });
+    await AsyncStorage.removeItem('qb_token').catch(() => { });
     triggerToastNotification('👋 Logged out successfully');
   };
 
