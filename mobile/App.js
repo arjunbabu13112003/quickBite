@@ -2212,6 +2212,7 @@ function MainApp() {
 
   // ─── PUSH NOTIFICATIONS REGISTRATION ──────────────────────────────────────
   const lastRegisteredTokenRef = useRef(null);
+  const pushRegistrationInFlightRef = useRef(false);
 
   const registerForPushNotificationsAsync = async () => {
     if (!Notifications) {
@@ -2254,7 +2255,10 @@ function MainApp() {
         projectId: projectId
       });
       const token = tokenObj.data;
-      console.log(`[PUSH] token obtained: ${token}`);
+      const redactedToken = token && token.length > 25 
+        ? `${token.slice(0, 19)}...${token.slice(-4)}` 
+        : token;
+      console.log(`[PUSH] token obtained: ${redactedToken}`);
       return token;
     } catch (error) {
       console.log(`[PUSH ERROR] ${error?.stack || error?.message || error}`);
@@ -2263,21 +2267,40 @@ function MainApp() {
   };
 
   const registerPushTokenForUser = async (userToken, userIdForLog) => {
+    // 1. Role Guard: customer mobile push-token registration must run ONLY when authenticated user role === "customer"
+    if (currentUser?.role !== 'customer') {
+      console.log(`[PUSH] Skipping customer push registration: User #${userIdForLog} role is '${currentUser?.role || 'unknown'}', not 'customer'`);
+      return;
+    }
+
+    if (pushRegistrationInFlightRef.current) {
+      console.log('[PUSH] Registration already in progress. Skipping duplicate call.');
+      return;
+    }
+
+    pushRegistrationInFlightRef.current = true;
     try {
       console.log('[PUSH] Starting customer push registration');
       const pushToken = await registerForPushNotificationsAsync();
-      if (!pushToken) return;
+      if (!pushToken) {
+        pushRegistrationInFlightRef.current = false;
+        return;
+      }
 
       const activeUserId = userIdForLog || currentUser?.id;
       const cacheKey = `${activeUserId}:${pushToken}`;
       if (lastRegisteredTokenRef.current === cacheKey) {
         console.log('[PUSH] Token already registered for this user session. Skipping duplicate registration.');
+        pushRegistrationInFlightRef.current = false;
         return;
       }
 
       console.log('[PUSH] Registering token');
       console.log(`[PUSH] User ID: ${activeUserId}`);
-      console.log(`[PUSH] Token: ${pushToken}`);
+      const redactedToken = pushToken && pushToken.length > 25 
+        ? `${pushToken.slice(0, 19)}...${pushToken.slice(-4)}` 
+        : pushToken;
+      console.log(`[PUSH] Token: ${redactedToken}`);
 
       const endpointBase = await startBaseUrlDetection();
       const endpoint = `${endpointBase}/users/push-token`;
@@ -2300,6 +2323,8 @@ function MainApp() {
       }
     } catch (error) {
       console.log(`[PUSH ERROR] ${error?.stack || error?.message || error}`);
+    } finally {
+      pushRegistrationInFlightRef.current = false;
     }
   };
 
@@ -2641,7 +2666,10 @@ function MainApp() {
       console.log('[QuickBite] loadSession hook start');
       try {
         const savedUser = await AsyncStorage.getItem('qb_user');
-        console.log('[QuickBite] loadSession qb_user loaded:', savedUser);
+        if (savedUser) {
+          const parsed = JSON.parse(savedUser);
+          console.log('[QuickBite] session restored:', { id: parsed.id, role: parsed.role });
+        }
         const savedDark = await AsyncStorage.getItem('qb_darkMode');
         if (savedDark !== null) setDarkMode(JSON.parse(savedDark));
         if (savedUser) {
@@ -2649,9 +2677,6 @@ function MainApp() {
           const savedAvatar = await AsyncStorage.getItem(`qb_avatar_${user.id}`);
           if (savedAvatar) user.avatar = savedAvatar;
           setCurrentUser(user);
-          if (user.token) {
-            registerPushTokenForUser(user.token, user.id);
-          }
           // Load user-specific cart, favorites, avatar
           const savedCart = await AsyncStorage.getItem(`qb_cart_${user.id}`);
           const savedFavs = await AsyncStorage.getItem(`qb_favs_${user.id}`);
@@ -3437,9 +3462,6 @@ function MainApp() {
           setActiveTab('home');
           setIsLoadingAuth(false);
           triggerToastNotification(`🎉 Welcome back, ${userObj.name}!`);
-          if (userObj.token) {
-            registerPushTokenForUser(userObj.token, userObj.id);
-          }
           return;
         } else {
           // STRICT BACKEND VERIFICATION: Wrong email or password -> SHOW ERROR & DO NOT LOG IN!
