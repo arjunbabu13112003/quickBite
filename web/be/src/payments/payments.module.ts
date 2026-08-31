@@ -15,6 +15,11 @@ import { Order } from '../orders/order.entity';
 import { Hotel } from '../hotels/hotel.entity';
 import { DeliveryPartner } from '../delivery-partners/delivery-partner.entity';
 import { DeliveryAssignment } from '../delivery-partners/delivery-assignment.entity';
+import { PartnerEarning } from './entities/partner-earning.entity';
+import { PartnerWalletAdjustment } from './entities/partner-wallet-adjustment.entity';
+import { PartnerSettlement } from './entities/partner-settlement.entity';
+import { PartnerSettlementItem } from './entities/partner-settlement-item.entity';
+import { PartnerCodTransaction } from './entities/partner-cod-transaction.entity';
 import { RazorpayGateway } from './gateways/razorpay.gateway';
 import { OffersModule } from '../offers/offers.module';
 
@@ -34,6 +39,11 @@ import { OffersModule } from '../offers/offers.module';
       Hotel,
       DeliveryPartner,
       DeliveryAssignment,
+      PartnerEarning,
+      PartnerWalletAdjustment,
+      PartnerSettlement,
+      PartnerSettlementItem,
+      PartnerCodTransaction,
     ]),
   ],
   controllers: [PaymentsController, PaymentsWebhookController],

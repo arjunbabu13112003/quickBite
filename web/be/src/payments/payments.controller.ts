@@ -19,6 +19,8 @@ import { CreatePaymentAttemptDto } from './dto/create-payment-attempt.dto';
 import { CapturePaymentDto } from './dto/capture-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { VerifyRazorpayPaymentDto } from './dto/verify-razorpay-payment.dto';
+import { PartnerWalletAdjustmentDirection } from './entities/partner-wallet-adjustment.entity';
+import { PartnerSettlementStatus } from './entities/partner-settlement.entity';
 
 @Controller('payments')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -187,5 +189,59 @@ export class PaymentsController {
   @Post('admin/delivery-payouts/:id/retry')
   async retryPayout(@Param('id', ParseIntPipe) id: number) {
     return this.paymentsService.retryDeliveryPartnerPayout(id);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/partner-wallets')
+  async getAdminPartnerWallets() {
+    return this.paymentsService.getPartnerWallets();
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/delivery-partners/:partnerId/wallet')
+  async getAdminPartnerWallet(@Param('partnerId', ParseIntPipe) partnerId: number) {
+    return this.paymentsService.getWalletSummary(partnerId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/delivery-partners/:partnerId/settlements/preview')
+  async getAdminSettlementPreview(@Param('partnerId', ParseIntPipe) partnerId: number) {
+    return this.paymentsService.getSettlementPreview(partnerId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/delivery-partners/:partnerId/settlements')
+  async createAdminSettlement(@Param('partnerId', ParseIntPipe) partnerId: number) {
+    return this.paymentsService.createSettlement(partnerId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/partner-settlements/:settlementId/processing')
+  async processAdminSettlement(@Param('settlementId', ParseIntPipe) settlementId: number) {
+    return this.paymentsService.updateSettlementStatus(settlementId, PartnerSettlementStatus.PROCESSING);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/partner-settlements/:settlementId/paid')
+  async markAdminSettlementPaid(@Param('settlementId', ParseIntPipe) settlementId: number) {
+    return this.paymentsService.updateSettlementStatus(settlementId, PartnerSettlementStatus.PAID);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/partner-settlements/:settlementId/failed')
+  async markAdminSettlementFailed(@Param('settlementId', ParseIntPipe) settlementId: number) {
+    return this.paymentsService.updateSettlementStatus(settlementId, PartnerSettlementStatus.FAILED);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/delivery-partners/:partnerId/wallet-adjustments')
+  async createAdminWalletAdjustment(
+    @Param('partnerId', ParseIntPipe) partnerId: number,
+    @Body('amount') amount: string,
+    @Body('direction') direction: PartnerWalletAdjustmentDirection,
+    @Body('reason') reason: string,
+    @Request() req,
+  ) {
+    return this.paymentsService.createWalletAdjustment(partnerId, amount, direction, reason, req.user.userId);
   }
 }

@@ -247,6 +247,60 @@ const apiMethods = {
     return await res.json();
   },
 
+  getWalletSummary: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/wallet'), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
+      },
+      () => api.getWalletSummary(),
+      false
+    );
+  },
+
+  getEarningsHistory: async (page = 1, limit = 10): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl(`/delivery-partners/me/earnings?page=${page}&limit=${limit}`), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
+      },
+      () => api.getEarningsHistory(page, limit),
+      false
+    );
+  },
+
+  getSettlementsHistory: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/settlements'), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
+      },
+      () => api.getSettlementsHistory(),
+      false
+    );
+  },
+
   getIncomingAssignment: async (): Promise<any> => {
     return requestWithHandling(
       async () => {

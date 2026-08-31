@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   ParseIntPipe,
+  DefaultValuePipe,
   UseInterceptors,
   UploadedFiles,
   BadRequestException,
@@ -118,6 +119,37 @@ export class DeliveryPartnersController {
       throw new ForbiddenException('Forbidden resource');
     }
     return this.partnersService.changePassword(req.user.userId, dto);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('delivery-partners/me/wallet')
+  async getMyWallet(@Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.paymentsService.getWalletSummaryByUserId(req.user.userId);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('delivery-partners/me/earnings')
+  async getMyEarnings(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Request() req,
+  ) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.paymentsService.getEarningsByUserId(req.user.userId, page, limit);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('delivery-partners/me/settlements')
+  async getMySettlements(@Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.paymentsService.getSettlementsByUserId(req.user.userId);
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)

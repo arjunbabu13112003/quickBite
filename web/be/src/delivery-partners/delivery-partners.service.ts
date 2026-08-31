@@ -26,6 +26,7 @@ import { OrderStatus } from '../orders/enums/order-status.enum';
 import { PaymentsService } from '../payments/payments.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderFinancialAllocation } from '../payments/entities/order-financial-allocation.entity';
+import { PartnerEarning } from '../payments/entities/partner-earning.entity';
 import { CreateDeliveryPartnerDto } from './dto/create-delivery-partner.dto';
 import { AdminCreateDeliveryPartnerDto } from './dto/admin-create-delivery-partner.dto';
 import { UpdateDeliveryPartnerStatusDto } from './dto/update-delivery-partner-status.dto';
@@ -772,32 +773,29 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
       .andWhere('order.deliveredAt >= :monthStart AND order.deliveredAt < :monthEnd', { monthStart, monthEnd })
       .getCount();
 
-    // Calculate today's, this week's, and this month's earnings using correct credit ledger entries
-    const ledgerRepo = this.dataSource.getRepository('LedgerEntry');
+    // Calculate today's, this week's, and this month's earnings using authoritative PartnerEarning ledger entries
+    const earningRepo = this.dataSource.getRepository(PartnerEarning);
 
-    const todayEntries = await ledgerRepo.createQueryBuilder('le')
-      .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
-      .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
-      .andWhere('le.direction = :direction', { direction: 'credit' })
-      .andWhere('le.createdAt >= :todayStart AND le.createdAt < :todayEnd', { todayStart, todayEnd })
+    const todayEntries = await earningRepo.createQueryBuilder('pe')
+      .where('pe.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('pe.earnedAt >= :todayStart AND pe.earnedAt < :todayEnd', { todayStart, todayEnd })
+      .andWhere('pe.status != :status', { status: 'REVERSED' })
       .getMany();
-    const todayEarnings = todayEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+    const todayEarnings = todayEntries.reduce((sum, entry: any) => sum + Number(entry.grossEarning), 0);
 
-    const weeklyEntries = await ledgerRepo.createQueryBuilder('le')
-      .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
-      .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
-      .andWhere('le.direction = :direction', { direction: 'credit' })
-      .andWhere('le.createdAt >= :weekStart AND le.createdAt < :weekEnd', { weekStart, weekEnd })
+    const weeklyEntries = await earningRepo.createQueryBuilder('pe')
+      .where('pe.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('pe.earnedAt >= :weekStart AND pe.earnedAt < :weekEnd', { weekStart, weekEnd })
+      .andWhere('pe.status != :status', { status: 'REVERSED' })
       .getMany();
-    const weeklyEarnings = weeklyEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+    const weeklyEarnings = weeklyEntries.reduce((sum, entry: any) => sum + Number(entry.grossEarning), 0);
 
-    const monthlyEntries = await ledgerRepo.createQueryBuilder('le')
-      .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
-      .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
-      .andWhere('le.direction = :direction', { direction: 'credit' })
-      .andWhere('le.createdAt >= :monthStart AND le.createdAt < :monthEnd', { monthStart, monthEnd })
+    const monthlyEntries = await earningRepo.createQueryBuilder('pe')
+      .where('pe.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+      .andWhere('pe.earnedAt >= :monthStart AND pe.earnedAt < :monthEnd', { monthStart, monthEnd })
+      .andWhere('pe.status != :status', { status: 'REVERSED' })
       .getMany();
-    const monthlyEarnings = monthlyEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+    const monthlyEarnings = monthlyEntries.reduce((sum, entry: any) => sum + Number(entry.grossEarning), 0);
 
     // Calculate daily earnings trend for current week (Monday to Sunday)
     const weeklyChart = [];
@@ -809,14 +807,13 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
       const dayStart = new Date(dayStartIst.getTime() - (3600000 * 5.5));
       const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
       
-      const dayEntries = await ledgerRepo.createQueryBuilder('le')
-        .where('le.deliveryPartnerId = :partnerId', { partnerId: partner.id })
-        .andWhere('le.entryType = :entryType', { entryType: 'delivery_partner_payable' })
-        .andWhere('le.direction = :direction', { direction: 'credit' })
-        .andWhere('le.createdAt >= :dayStart AND le.createdAt < :dayEnd', { dayStart, dayEnd })
+      const dayEntries = await earningRepo.createQueryBuilder('pe')
+        .where('pe.deliveryPartnerId = :partnerId', { partnerId: partner.id })
+        .andWhere('pe.earnedAt >= :dayStart AND pe.earnedAt < :dayEnd', { dayStart, dayEnd })
+        .andWhere('pe.status != :status', { status: 'REVERSED' })
         .getMany();
         
-      const dayEarnings = dayEntries.reduce((sum, entry: any) => sum + Number(entry.amount), 0);
+      const dayEarnings = dayEntries.reduce((sum, entry: any) => sum + Number(entry.grossEarning), 0);
       
       const currentIstDayOfWeek = new Date(now.getTime() + 5.5 * 3600 * 1000).getUTCDay();
       const chartDayIndex = i;

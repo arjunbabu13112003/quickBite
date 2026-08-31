@@ -34,6 +34,12 @@ import { CreatePaymentAttemptDto } from './dto/create-payment-attempt.dto';
 import { CapturePaymentDto } from './dto/capture-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { OffersService } from '../offers/offers.service';
+import { PartnerEarning, PartnerEarningStatus } from './entities/partner-earning.entity';
+import { PartnerWalletAdjustment, PartnerWalletAdjustmentDirection, PartnerWalletAdjustmentStatus } from './entities/partner-wallet-adjustment.entity';
+import { PartnerSettlement, PartnerSettlementStatus, PartnerSettlementPaymentMethod } from './entities/partner-settlement.entity';
+import { PartnerSettlementItem, PartnerSettlementItemType } from './entities/partner-settlement-item.entity';
+import { PartnerCodTransaction, PartnerCodTransactionType } from './entities/partner-cod-transaction.entity';
+import { rupeesStringToPaise, paiseToRupeesString, parseRateToBasisPoints } from './utils/money';
 
 @Injectable()
 export class PaymentsService {
@@ -81,10 +87,11 @@ export class PaymentsService {
   }
 
   calculatePartnerEarning(deliveryFee: number): number {
-    const config = this.getPaymentConfig();
-    const deliveryFeePaise = Math.round(Number(deliveryFee || 0) * 100);
-    const deliveryPartnerEarningPaise = Math.round(deliveryFeePaise * config.deliveryPartnerEarningRate);
-    return deliveryPartnerEarningPaise / 100;
+    const rateStr = this.configService.get<string>('DELIVERY_PARTNER_EARNING_RATE', '1.00');
+    const rateBps = parseRateToBasisPoints(rateStr);
+    const deliveryFeePaise = rupeesStringToPaise(deliveryFee);
+    const earningPaise = Math.round((deliveryFeePaise * rateBps) / 10000);
+    return earningPaise / 100;
   }
 
   async createPaymentAttempt(dto: CreatePaymentAttemptDto): Promise<Payment> {
@@ -266,18 +273,20 @@ export class PaymentsService {
     const config = this.getPaymentConfig();
 
     // Money Precision using Paise integers
-    const subtotalPaise = Math.round(Number(order.subtotal) * 100);
-    const deliveryFeePaise = Math.round(Number(order.deliveryFee) * 100);
-    const taxAmountPaise = Math.round(Number(order.taxAmount) * 100);
-    const discountAmountPaise = Math.round(Number(order.discountAmount) * 100);
-    const grossAmountPaise = Math.round(Number(order.totalAmount) * 100);
+    const subtotalPaise = rupeesStringToPaise(order.subtotal);
+    const deliveryFeePaise = rupeesStringToPaise(order.deliveryFee);
+    const taxAmountPaise = rupeesStringToPaise(order.taxAmount);
+    const discountAmountPaise = rupeesStringToPaise(order.discountAmount);
+    const grossAmountPaise = rupeesStringToPaise(order.totalAmount);
 
     // Business Logic Allocations
     const hotelCommissionPaise = Math.round(subtotalPaise * config.hotelCommissionRate);
     const hotelGrossPaise = subtotalPaise + taxAmountPaise;
     const hotelNetPaise = hotelGrossPaise - hotelCommissionPaise - discountAmountPaise;
 
-    const deliveryPartnerEarningPaise = Math.round(deliveryFeePaise * config.deliveryPartnerEarningRate);
+    const rateStr = this.configService.get<string>('DELIVERY_PARTNER_EARNING_RATE', '1.00');
+    const rateBps = parseRateToBasisPoints(rateStr);
+    const deliveryPartnerEarningPaise = Math.round((deliveryFeePaise * rateBps) / 10000);
     const platformEarningPaise = hotelCommissionPaise;
 
     // Save allocation with historical rates
@@ -365,6 +374,51 @@ export class PaymentsService {
         amount: deliveryPartnerEarningPaise / 100,
         description: `Delivery fee earnings for Order #${order.id}`,
       }));
+
+      // Create PartnerEarning record
+      const holdMinutes = Number(this.configService.get<string>('PARTNER_EARNING_HOLD_MINUTES', '0'));
+      const availableAt = new Date(Date.now() + holdMinutes * 60 * 1000);
+      const earningStatus = holdMinutes > 0 ? PartnerEarningStatus.PENDING : PartnerEarningStatus.AVAILABLE;
+
+      const existingEarning = await manager.findOne(PartnerEarning, {
+        where: { orderId: order.id, deliveryPartnerId: assignment.deliveryPartnerId },
+      });
+
+      if (!existingEarning) {
+        const partnerEarning = manager.create(PartnerEarning, {
+          deliveryPartnerId: assignment.deliveryPartnerId,
+          orderId: order.id,
+          baseDeliveryFee: order.deliveryFee,
+          distanceFee: 0,
+          incentiveAmount: 0,
+          tipAmount: 0,
+          adjustmentAmount: 0,
+          grossEarning: deliveryPartnerEarningPaise / 100,
+          status: earningStatus,
+          availableAt,
+          activeSettlementId: null,
+          earnedAt: new Date(),
+        });
+        await manager.save(PartnerEarning, partnerEarning);
+      }
+
+      // Create PartnerCodTransaction if payment method is COD
+      if (order.paymentMethod?.toLowerCase() === 'cod') {
+        const existingCodTx = await manager.findOne(PartnerCodTransaction, {
+          where: { orderId: order.id, type: PartnerCodTransactionType.COLLECTED },
+        });
+
+        if (!existingCodTx) {
+          const codTx = manager.create(PartnerCodTransaction, {
+            deliveryPartnerId: assignment.deliveryPartnerId,
+            orderId: order.id,
+            amount: order.totalAmount,
+            type: PartnerCodTransactionType.COLLECTED,
+            status: 'COMPLETED',
+          });
+          await manager.save(PartnerCodTransaction, codTx);
+        }
+      }
     }
 
     // 6. Customer cash input record
@@ -1305,6 +1359,422 @@ export class PaymentsService {
 
       throw error;
     }
+  }
+
+  async releasePendingEarnings(partnerId?: number): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const qb = manager.createQueryBuilder()
+        .update(PartnerEarning)
+        .set({ status: PartnerEarningStatus.AVAILABLE })
+        .where('status = :status', { status: PartnerEarningStatus.PENDING })
+        .andWhere('availableAt <= :now', { now: new Date() });
+      
+      if (partnerId !== undefined) {
+        qb.andWhere('deliveryPartnerId = :partnerId', { partnerId });
+      }
+      
+      await qb.execute();
+    });
+  }
+
+  async getWalletSummary(partnerId: number): Promise<any> {
+    await this.releasePendingEarnings(partnerId);
+
+    const earnings = await this.dataSource.getRepository(PartnerEarning).find({
+      where: { deliveryPartnerId: partnerId }
+    });
+
+    const adjustments = await this.dataSource.getRepository(PartnerWalletAdjustment).find({
+      where: { deliveryPartnerId: partnerId }
+    });
+
+    const codTxs = await this.dataSource.getRepository(PartnerCodTransaction).find({
+      where: { deliveryPartnerId: partnerId }
+    });
+
+    let pendingPaise = 0;
+    let availableEarningsPaise = 0;
+    let reservedEarningsPaise = 0;
+    let settledEarningsPaise = 0;
+    let totalEarningsPaise = 0;
+
+    earnings.forEach((e) => {
+      const amtPaise = rupeesStringToPaise(e.grossEarning);
+      if (e.status !== PartnerEarningStatus.REVERSED) {
+        totalEarningsPaise += amtPaise;
+      }
+      if (e.status === PartnerEarningStatus.PENDING) {
+        pendingPaise += amtPaise;
+      } else if (e.status === PartnerEarningStatus.AVAILABLE) {
+        availableEarningsPaise += amtPaise;
+      } else if (e.status === PartnerEarningStatus.RESERVED) {
+        reservedEarningsPaise += amtPaise;
+      } else if (e.status === PartnerEarningStatus.SETTLED) {
+        settledEarningsPaise += amtPaise;
+      }
+    });
+
+    let availableAdjustmentsPaise = 0;
+    let reservedAdjustmentsPaise = 0;
+    let settledAdjustmentsPaise = 0;
+    let totalAdjustmentsPaise = 0;
+
+    adjustments.forEach((adj) => {
+      const amtPaise = rupeesStringToPaise(adj.amount);
+      const factor = adj.direction === PartnerWalletAdjustmentDirection.CREDIT ? 1 : -1;
+      const signedAmtPaise = amtPaise * factor;
+
+      if (adj.status !== PartnerWalletAdjustmentStatus.REVERSED) {
+        totalAdjustmentsPaise += signedAmtPaise;
+      }
+      if (adj.status === PartnerWalletAdjustmentStatus.AVAILABLE) {
+        availableAdjustmentsPaise += signedAmtPaise;
+      } else if (adj.status === PartnerWalletAdjustmentStatus.RESERVED) {
+        reservedAdjustmentsPaise += signedAmtPaise;
+      } else if (adj.status === PartnerWalletAdjustmentStatus.SETTLED) {
+        settledAdjustmentsPaise += signedAmtPaise;
+      }
+    });
+
+    let codOutstandingPaise = 0;
+    codTxs.forEach((tx) => {
+      const amtPaise = rupeesStringToPaise(tx.amount);
+      if (tx.type === PartnerCodTransactionType.COLLECTED || tx.type === PartnerCodTransactionType.ADJUSTMENT_DEBIT) {
+        codOutstandingPaise += amtPaise;
+      } else if (tx.type === PartnerCodTransactionType.REMITTED || tx.type === PartnerCodTransactionType.ADJUSTMENT_CREDIT) {
+        codOutstandingPaise -= amtPaise;
+      }
+    });
+
+    const pendingBalance = paiseToRupeesString(pendingPaise);
+    const availableBalance = paiseToRupeesString(availableEarningsPaise + availableAdjustmentsPaise);
+    const reservedBalance = paiseToRupeesString(reservedEarningsPaise + reservedAdjustmentsPaise);
+    const totalSettled = paiseToRupeesString(settledEarningsPaise + settledAdjustmentsPaise);
+    const totalEarnings = paiseToRupeesString(totalEarningsPaise + totalAdjustmentsPaise);
+    const codOutstanding = paiseToRupeesString(codOutstandingPaise);
+
+    return {
+      pendingBalance,
+      availableBalance,
+      reservedBalance,
+      totalSettled,
+      totalEarnings,
+      codOutstanding,
+    };
+  }
+
+  async getSettlementPreview(partnerId: number): Promise<any> {
+    const earnings = await this.dataSource.getRepository(PartnerEarning).find({
+      where: { deliveryPartnerId: partnerId, status: PartnerEarningStatus.AVAILABLE }
+    });
+
+    const adjustments = await this.dataSource.getRepository(PartnerWalletAdjustment).find({
+      where: { deliveryPartnerId: partnerId, status: PartnerWalletAdjustmentStatus.AVAILABLE }
+    });
+
+    let grossEarningsPaise = 0;
+    earnings.forEach(e => { grossEarningsPaise += rupeesStringToPaise(e.grossEarning); });
+
+    let creditAdjustmentsPaise = 0;
+    let debitAdjustmentsPaise = 0;
+    adjustments.forEach(adj => {
+      const amtPaise = rupeesStringToPaise(adj.amount);
+      if (adj.direction === PartnerWalletAdjustmentDirection.CREDIT) {
+        creditAdjustmentsPaise += amtPaise;
+      } else {
+        debitAdjustmentsPaise += amtPaise;
+      }
+    });
+
+    const netPaise = grossEarningsPaise + creditAdjustmentsPaise - debitAdjustmentsPaise;
+
+    return {
+      eligibleEarningsCount: earnings.length,
+      eligibleAdjustmentsCount: adjustments.length,
+      grossEarningsAmount: paiseToRupeesString(grossEarningsPaise),
+      creditAdjustmentsAmount: paiseToRupeesString(creditAdjustmentsPaise),
+      debitAdjustmentsAmount: paiseToRupeesString(debitAdjustmentsPaise),
+      netAmount: paiseToRupeesString(netPaise),
+      earningsDetails: earnings.map(e => ({ id: e.id, orderId: e.orderId, amount: paiseToRupeesString(rupeesStringToPaise(e.grossEarning)) })),
+      adjustmentsDetails: adjustments.map(a => ({ id: a.id, direction: a.direction, amount: paiseToRupeesString(rupeesStringToPaise(a.amount)), reason: a.reason })),
+    };
+  }
+
+  async createSettlement(partnerId: number): Promise<PartnerSettlement> {
+    return await this.dataSource.transaction(async (manager) => {
+      const earningRepo = manager.getRepository(PartnerEarning);
+      const adjustmentRepo = manager.getRepository(PartnerWalletAdjustment);
+      const settlementRepo = manager.getRepository(PartnerSettlement);
+      const itemRepo = manager.getRepository(PartnerSettlementItem);
+
+      const earnings = await earningRepo.find({
+        where: { deliveryPartnerId: partnerId, status: PartnerEarningStatus.AVAILABLE },
+        lock: { mode: 'pessimistic_write' }
+      });
+
+      const adjustments = await adjustmentRepo.find({
+        where: { deliveryPartnerId: partnerId, status: PartnerWalletAdjustmentStatus.AVAILABLE },
+        lock: { mode: 'pessimistic_write' }
+      });
+
+      if (earnings.length === 0 && adjustments.length === 0) {
+        throw new BadRequestException('No eligible earnings or adjustments available for settlement.');
+      }
+
+      let grossEarningsPaise = 0;
+      earnings.forEach(e => { grossEarningsPaise += rupeesStringToPaise(e.grossEarning); });
+
+      let creditAdjustmentsPaise = 0;
+      let debitAdjustmentsPaise = 0;
+      adjustments.forEach(adj => {
+        const amtPaise = rupeesStringToPaise(adj.amount);
+        if (adj.direction === PartnerWalletAdjustmentDirection.CREDIT) {
+          creditAdjustmentsPaise += amtPaise;
+        } else {
+          debitAdjustmentsPaise += amtPaise;
+        }
+      });
+
+      const netPaise = grossEarningsPaise + creditAdjustmentsPaise - debitAdjustmentsPaise;
+
+      if (netPaise <= 0) {
+        throw new BadRequestException('Calculated net settlement amount must be positive.');
+      }
+
+      const settlement = settlementRepo.create({
+        deliveryPartnerId: partnerId,
+        grossEarningsAmount: grossEarningsPaise / 100,
+        creditAdjustmentsAmount: creditAdjustmentsPaise / 100,
+        debitAdjustmentsAmount: debitAdjustmentsPaise / 100,
+        netAmount: netPaise / 100,
+        status: PartnerSettlementStatus.PENDING,
+        paymentMethod: PartnerSettlementPaymentMethod.MANUAL,
+        requestedAt: new Date(),
+      });
+      const savedSettlement = await settlementRepo.save(settlement);
+
+      for (const e of earnings) {
+        const item = itemRepo.create({
+          settlementId: savedSettlement.id,
+          itemType: PartnerSettlementItemType.EARNING,
+          partnerEarningId: e.id,
+          walletAdjustmentId: null,
+          amountSnapshot: e.grossEarning,
+        });
+        await itemRepo.save(item);
+
+        e.status = PartnerEarningStatus.RESERVED;
+        e.activeSettlementId = savedSettlement.id;
+        await earningRepo.save(e);
+      }
+
+      for (const a of adjustments) {
+        const item = itemRepo.create({
+          settlementId: savedSettlement.id,
+          itemType: PartnerSettlementItemType.ADJUSTMENT,
+          partnerEarningId: null,
+          walletAdjustmentId: a.id,
+          amountSnapshot: a.amount,
+        });
+        await itemRepo.save(item);
+
+        a.status = PartnerWalletAdjustmentStatus.RESERVED;
+        a.activeSettlementId = savedSettlement.id;
+        await adjustmentRepo.save(a);
+      }
+
+      return savedSettlement;
+    });
+  }
+
+  async updateSettlementStatus(settlementId: number, nextStatus: PartnerSettlementStatus): Promise<PartnerSettlement> {
+    return await this.dataSource.transaction(async (manager) => {
+      const settlementRepo = manager.getRepository(PartnerSettlement);
+      const earningRepo = manager.getRepository(PartnerEarning);
+      const adjustmentRepo = manager.getRepository(PartnerWalletAdjustment);
+      const itemRepo = manager.getRepository(PartnerSettlementItem);
+
+      const settlement = await settlementRepo.findOne({
+        where: { id: settlementId },
+        lock: { mode: 'pessimistic_write' }
+      });
+      if (!settlement) {
+        throw new NotFoundException('Settlement not found.');
+      }
+
+      const allowedTransitions: Record<PartnerSettlementStatus, PartnerSettlementStatus[]> = {
+        [PartnerSettlementStatus.PENDING]: [PartnerSettlementStatus.PROCESSING, PartnerSettlementStatus.CANCELLED],
+        [PartnerSettlementStatus.PROCESSING]: [PartnerSettlementStatus.PAID, PartnerSettlementStatus.FAILED],
+        [PartnerSettlementStatus.PAID]: [],
+        [PartnerSettlementStatus.FAILED]: [],
+        [PartnerSettlementStatus.CANCELLED]: [],
+      };
+
+      if (!allowedTransitions[settlement.status].includes(nextStatus)) {
+        throw new BadRequestException(`Invalid status transition from ${settlement.status} to ${nextStatus}`);
+      }
+
+      settlement.status = nextStatus;
+      if (nextStatus === PartnerSettlementStatus.PAID) {
+        settlement.paidAt = new Date();
+      } else if (nextStatus === PartnerSettlementStatus.PROCESSING) {
+        settlement.processedAt = new Date();
+      }
+      const savedSettlement = await settlementRepo.save(settlement);
+
+      const items = await itemRepo.find({ where: { settlementId } });
+
+      if (nextStatus === PartnerSettlementStatus.PAID) {
+        for (const item of items) {
+          if (item.itemType === PartnerSettlementItemType.EARNING && item.partnerEarningId) {
+            const e = await earningRepo.findOne({ where: { id: item.partnerEarningId } });
+            if (e && e.status === PartnerEarningStatus.RESERVED) {
+              e.status = PartnerEarningStatus.SETTLED;
+              e.activeSettlementId = null;
+              await earningRepo.save(e);
+            }
+          } else if (item.itemType === PartnerSettlementItemType.ADJUSTMENT && item.walletAdjustmentId) {
+            const a = await adjustmentRepo.findOne({ where: { id: item.walletAdjustmentId } });
+            if (a && a.status === PartnerWalletAdjustmentStatus.RESERVED) {
+              a.status = PartnerWalletAdjustmentStatus.SETTLED;
+              a.activeSettlementId = null;
+              await adjustmentRepo.save(a);
+            }
+          }
+        }
+      } else if (nextStatus === PartnerSettlementStatus.FAILED || nextStatus === PartnerSettlementStatus.CANCELLED) {
+        for (const item of items) {
+          if (item.itemType === PartnerSettlementItemType.EARNING && item.partnerEarningId) {
+            const e = await earningRepo.findOne({ where: { id: item.partnerEarningId } });
+            if (e && e.status === PartnerEarningStatus.RESERVED) {
+              e.status = PartnerEarningStatus.AVAILABLE;
+              e.activeSettlementId = null;
+              await earningRepo.save(e);
+            }
+          } else if (item.itemType === PartnerSettlementItemType.ADJUSTMENT && item.walletAdjustmentId) {
+            const a = await adjustmentRepo.findOne({ where: { id: item.walletAdjustmentId } });
+            if (a && a.status === PartnerWalletAdjustmentStatus.RESERVED) {
+              a.status = PartnerWalletAdjustmentStatus.AVAILABLE;
+              a.activeSettlementId = null;
+              await adjustmentRepo.save(a);
+            }
+          }
+        }
+      }
+
+      return savedSettlement;
+    });
+  }
+
+  async createWalletAdjustment(
+    partnerId: number,
+    amount: string,
+    direction: PartnerWalletAdjustmentDirection,
+    reason: string,
+    adminId: number
+  ): Promise<PartnerWalletAdjustment> {
+    const amtPaise = rupeesStringToPaise(amount);
+    if (amtPaise <= 0) {
+      throw new BadRequestException('Adjustment amount must be positive.');
+    }
+    if (!reason || !reason.trim()) {
+      throw new BadRequestException('Adjustment reason is required.');
+    }
+
+    const adj = this.dataSource.getRepository(PartnerWalletAdjustment).create({
+      deliveryPartnerId: partnerId,
+      amount: amtPaise / 100,
+      direction,
+      status: PartnerWalletAdjustmentStatus.AVAILABLE,
+      activeSettlementId: null,
+      reason,
+      createdByAdminUserId: adminId,
+    });
+    return await this.dataSource.getRepository(PartnerWalletAdjustment).save(adj);
+  }
+
+  async getWalletSummaryByUserId(userId: number): Promise<any> {
+    const partner = await this.dataSource.getRepository(DeliveryPartner).findOne({
+      where: { userId }
+    });
+    if (!partner) {
+      throw new NotFoundException('Delivery partner profile not found.');
+    }
+    return this.getWalletSummary(partner.id);
+  }
+
+  async getEarningsByUserId(userId: number, page: number, limit: number): Promise<any> {
+    const partner = await this.dataSource.getRepository(DeliveryPartner).findOne({ where: { userId } });
+    if (!partner) {
+      throw new NotFoundException('Delivery partner profile not found.');
+    }
+
+    const earningRepo = this.dataSource.getRepository(PartnerEarning);
+    const [items, total] = await earningRepo.findAndCount({
+      where: { deliveryPartnerId: partner.id },
+      order: { earnedAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+      relations: ['order'],
+    });
+
+    return {
+      items: items.map(e => ({
+        orderId: e.orderId,
+        orderNumber: e.order?.orderNumber || '',
+        deliveredAt: e.order?.deliveredAt || e.earnedAt,
+        baseDeliveryFee: paiseToRupeesString(rupeesStringToPaise(e.baseDeliveryFee)),
+        distanceFee: paiseToRupeesString(rupeesStringToPaise(e.distanceFee)),
+        incentive: paiseToRupeesString(rupeesStringToPaise(e.incentiveAmount)),
+        tip: paiseToRupeesString(rupeesStringToPaise(e.tipAmount)),
+        adjustment: paiseToRupeesString(rupeesStringToPaise(e.adjustmentAmount)),
+        grossEarning: paiseToRupeesString(rupeesStringToPaise(e.grossEarning)),
+        status: e.status,
+        availableAt: e.availableAt,
+      })),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async getSettlementsByUserId(userId: number): Promise<any> {
+    const partner = await this.dataSource.getRepository(DeliveryPartner).findOne({ where: { userId } });
+    if (!partner) {
+      throw new NotFoundException('Delivery partner profile not found.');
+    }
+
+    const settlements = await this.dataSource.getRepository(PartnerSettlement).find({
+      where: { deliveryPartnerId: partner.id },
+      order: { requestedAt: 'DESC' },
+    });
+
+    return settlements.map(s => ({
+      settlementId: s.id,
+      amount: paiseToRupeesString(rupeesStringToPaise(s.netAmount)),
+      status: s.status,
+      createdAt: s.createdAt,
+      paidAt: s.paidAt,
+      paymentMethod: s.paymentMethod,
+      reference: s.externalReference || null,
+    }));
+  }
+
+  async getPartnerWallets(): Promise<any[]> {
+    const partners = await this.dataSource.getRepository(DeliveryPartner).find({
+      relations: ['user']
+    });
+    const summaries = [];
+    for (const p of partners) {
+      const summary = await this.getWalletSummary(p.id);
+      summaries.push({
+        partnerId: p.id,
+        name: p.user?.name || '',
+        mobileNumber: p.user?.mobileNumber || '',
+        ...summary
+      });
+    }
+    return summaries;
   }
 }
 
