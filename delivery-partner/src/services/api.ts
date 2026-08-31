@@ -41,7 +41,7 @@ export const qbEvents = {
   }
 };
 
-const getFriendlyApiError = async (error: any, response: any) => {
+const getFriendlyApiError = async (error: any, response: any, urlStr = '') => {
   if (error) {
     console.warn("[API Technical Error]", error);
   }
@@ -70,8 +70,14 @@ const getFriendlyApiError = async (error: any, response: any) => {
     } catch (e) {}
   }
 
+  const isAuthEndpoint = urlStr.includes('/delivery-partners/login');
+
   if (status === 401) {
-    message = "Session expired. Please log in again.";
+    if (isAuthEndpoint) {
+      // For login endpoint, keep the original parsed message (e.g. "Invalid email/mobile or password.")
+    } else {
+      message = "Session expired. Please log in again.";
+    }
   } else if (status === 403) {
     message = "You don't have permission to access this.";
   } else if (status === 404) {
@@ -97,7 +103,7 @@ const qbFetch = async (url: string | Request, options?: RequestInit) => {
   try {
     const res = await globalThis.fetch(url, options);
     if (!res.ok) {
-      const err = await getFriendlyApiError(null, res);
+      const err = await getFriendlyApiError(null, res, urlStr);
       const isAuthEndpoint = urlStr.includes('/delivery-partners/login');
       if (res.status === 401 && !isAuthEndpoint) {
         qbEvents.emit("UNAUTHORIZED", null);
@@ -105,8 +111,13 @@ const qbFetch = async (url: string | Request, options?: RequestInit) => {
       throw err;
     }
     return res;
-  } catch (error) {
-    const err = await getFriendlyApiError(error, null);
+  } catch (error: any) {
+    // If the error was already processed and thrown by the if (!res.ok) block,
+    // it will have status and message. We should just rethrow it instead of re-wrapping.
+    if (error && typeof error.status === 'number' && typeof error.message === 'string') {
+      throw error;
+    }
+    const err = await getFriendlyApiError(error, null, urlStr);
     throw err;
   }
 };
@@ -156,9 +167,9 @@ const apiMethods = {
     } catch (err: any) {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError') {
-        throw new Error(`Connection timeout. Backend at ${getApiBaseUrl()} is unreachable.`);
+        throw new Error('Connection timeout. Backend is unreachable.');
       }
-      throw new Error(err.message ? `${err.message} (URL: ${getApiBaseUrl()})` : `Failed to connect to backend at ${getApiBaseUrl()}`);
+      throw err;
     }
   },
 
@@ -207,6 +218,32 @@ const apiMethods = {
       throw new Error(errData.message || 'Failed to update profile.');
     }
     
+    return await res.json();
+  },
+
+  changePassword: async (currentPassword: string, newPassword: string, confirmNewPassword: string) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error('No token found');
+
+    const res = await fetch(resolveApiUrl('/delivery-partners/me/change-password'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ currentPassword, newPassword, confirmNewPassword }),
+    });
+
+    if (res.status === 401) {
+      await setAuthToken(null);
+      throw new Error('Unauthorized');
+    }
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to change password.');
+    }
+
     return await res.json();
   },
 

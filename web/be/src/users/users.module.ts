@@ -8,11 +8,13 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User } from './user.entity';
 import { DevicePushToken } from './device-push-token.entity';
+import { PasswordResetOtp } from './password-reset-otp.entity';
+import { PasswordResetSession } from './password-reset-session.entity';
 import { JwtStrategy } from './jwt.strategy';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, DevicePushToken]),
+    TypeOrmModule.forFeature([User, DevicePushToken, PasswordResetOtp, PasswordResetSession]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -43,6 +43,12 @@ class EnvironmentVariables {
 }
 
 export function validate(config: Record<string, any>) {
+  const isProd = (config.NODE_ENV || process.env.NODE_ENV) === 'production';
+  const isOtpDev = config.OTP_DEV_MODE === 'true' || config.OTP_DEV_MODE === true || process.env.OTP_DEV_MODE === 'true';
+  if (isProd && isOtpDev) {
+    throw new Error('Safety violation: OTP_DEV_MODE cannot be enabled in production.');
+  }
+
   const validatedConfig = plainToInstance(
     EnvironmentVariables,
     {

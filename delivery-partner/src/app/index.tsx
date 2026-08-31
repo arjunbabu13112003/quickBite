@@ -336,12 +336,22 @@ export default function AppIndex() {
 
   const [liveOnlineSeconds, setLiveOnlineSeconds] = useState(0);
   const [currentIstDateKey, setCurrentIstDateKey] = useState('');
-  const [activeProfileSubScreen, setActiveProfileSubScreen] = useState<'main' | 'personal' | 'vehicle' | 'bank' | 'documents' | 'preferences'>('main');
+  const [activeProfileSubScreen, setActiveProfileSubScreen] = useState<'main' | 'personal' | 'vehicle' | 'bank' | 'documents' | 'preferences' | 'change_password'>('main');
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [personalUpdateError, setPersonalUpdateError] = useState('');
   const [isUpdatingPersonal, setIsUpdatingPersonal] = useState(false);
+
+  const [changePasswordCurrent, setChangePasswordCurrent] = useState('');
+  const [changePasswordNew, setChangePasswordNew] = useState('');
+  const [changePasswordConfirm, setChangePasswordConfirm] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [changePasswordError, setChangePasswordError] = useState('');
+  const [changePasswordSuccess, setChangePasswordSuccess] = useState('');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentPartner, setCurrentPartner] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -983,6 +993,7 @@ export default function AppIndex() {
   const [otpValue, setOtpValue] = useState('');
   const [otpError, setOtpError] = useState('');
   const [otpResendCountdown, setOtpResendCountdown] = useState(30);
+  const [resetToken, setResetToken] = useState('');
   const otpResendIntervalRef = useRef<any>(null);
 
   // Create Password states
@@ -4741,6 +4752,178 @@ export default function AppIndex() {
     }
   };
 
+  const renderChangePasswordScreen = () => {
+    const bgCol = '#FAF9F6';
+    const cardBg = '#FFFFFF';
+    const cardBorder = '#FAF6F0';
+    const textTitle = '#38220F';
+    const textSub = '#8A7A6E';
+    const inputBg = '#F8FAFC';
+    const inputBorder = '#E2E8F0';
+    const inputText = '#0F172A';
+
+    const handlePasswordChangeSubmit = async () => {
+      if (!changePasswordCurrent.trim() || !changePasswordNew.trim() || !changePasswordConfirm.trim()) {
+        setChangePasswordError('Passwords cannot be empty');
+        return;
+      }
+      if (changePasswordNew !== changePasswordConfirm) {
+        setChangePasswordError('Passwords do not match.');
+        return;
+      }
+      if (changePasswordNew.length < 8) {
+        setChangePasswordError('Minimum 8 characters required');
+        return;
+      }
+      if (changePasswordNew === changePasswordCurrent) {
+        setChangePasswordError('New password must be different from the current password.');
+        return;
+      }
+
+      setIsChangingPassword(true);
+      setChangePasswordError('');
+      setChangePasswordSuccess('');
+
+      try {
+        await api.changePassword(
+          changePasswordCurrent.trim(),
+          changePasswordNew.trim(),
+          changePasswordConfirm.trim()
+        );
+        
+        // Show success and clear fields
+        setChangePasswordSuccess('Password changed successfully.');
+        setChangePasswordCurrent('');
+        setChangePasswordNew('');
+        setChangePasswordConfirm('');
+        
+        // Return to personal details screen after a brief delay
+        setTimeout(() => {
+          setChangePasswordSuccess('');
+          setActiveProfileSubScreen('personal');
+        }, 1500);
+      } catch (err: any) {
+        setChangePasswordError(err.message || 'Failed to change password. Please try again.');
+      } finally {
+        setIsChangingPassword(false);
+      }
+    };
+
+    return (
+      <View style={{ flex: 1, backgroundColor: bgCol }}>
+        {/* Header */}
+        <View style={styles.subHeader}>
+          <TouchableOpacity 
+            onPress={() => {
+              setChangePasswordCurrent('');
+              setChangePasswordNew('');
+              setChangePasswordConfirm('');
+              setChangePasswordError('');
+              setChangePasswordSuccess('');
+              setActiveProfileSubScreen('personal');
+            }}
+            style={styles.subHeaderBackBtn}
+            disabled={isChangingPassword}
+          >
+            <Ionicons name="arrow-back" size={20} color={textTitle} />
+            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Change Password</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+          {changePasswordError ? (
+            <View style={{ backgroundColor: '#FEE2E2', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+              <Text style={{ color: '#B91C1C', fontSize: 13, fontWeight: '600' }}>{changePasswordError}</Text>
+            </View>
+          ) : null}
+
+          {changePasswordSuccess ? (
+            <View style={{ backgroundColor: '#D1FAE5', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+              <Text style={{ color: '#065F46', fontSize: 13, fontWeight: '600' }}>{changePasswordSuccess}</Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder, padding: 16 }]}>
+            {/* Current Password */}
+            <View style={{ marginBottom: 16 }}>
+              <Text style={[styles.detailLabel, { color: textSub }]}>Current Password</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, borderColor: inputBorder, backgroundColor: inputBg, paddingHorizontal: 12 }}>
+                <TextInput
+                  style={{ flex: 1, height: 44, color: inputText, fontSize: 14, fontWeight: '600' }}
+                  value={changePasswordCurrent}
+                  onChangeText={setChangePasswordCurrent}
+                  secureTextEntry={!showCurrentPassword}
+                  placeholder="Enter current password"
+                  placeholderTextColor="#94A3B8"
+                  editable={!isChangingPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity onPress={() => setShowCurrentPassword(!showCurrentPassword)} disabled={isChangingPassword} activeOpacity={0.6}>
+                  <Ionicons name={showCurrentPassword ? "eye" : "eye-off"} size={20} color="#8A7A6E" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* New Password */}
+            <View style={{ marginBottom: 16 }}>
+              <Text style={[styles.detailLabel, { color: textSub }]}>New Password</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, borderColor: inputBorder, backgroundColor: inputBg, paddingHorizontal: 12 }}>
+                <TextInput
+                  style={{ flex: 1, height: 44, color: inputText, fontSize: 14, fontWeight: '600' }}
+                  value={changePasswordNew}
+                  onChangeText={setChangePasswordNew}
+                  secureTextEntry={!showNewPassword}
+                  placeholder="Enter new password"
+                  placeholderTextColor="#94A3B8"
+                  editable={!isChangingPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)} disabled={isChangingPassword} activeOpacity={0.6}>
+                  <Ionicons name={showNewPassword ? "eye" : "eye-off"} size={20} color="#8A7A6E" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Confirm New Password */}
+            <View style={{ marginBottom: 8 }}>
+              <Text style={[styles.detailLabel, { color: textSub }]}>Confirm New Password</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, borderColor: inputBorder, backgroundColor: inputBg, paddingHorizontal: 12 }}>
+                <TextInput
+                  style={{ flex: 1, height: 44, color: inputText, fontSize: 14, fontWeight: '600' }}
+                  value={changePasswordConfirm}
+                  onChangeText={setChangePasswordConfirm}
+                  secureTextEntry={!showConfirmPassword}
+                  placeholder="Confirm new password"
+                  placeholderTextColor="#94A3B8"
+                  editable={!isChangingPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} disabled={isChangingPassword} activeOpacity={0.6}>
+                  <Ionicons name={showConfirmPassword ? "eye" : "eye-off"} size={20} color="#8A7A6E" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
+          <View style={{ marginTop: 24 }}>
+            <TouchableOpacity 
+              style={[styles.saveBtn, { marginHorizontal: 0, opacity: isChangingPassword ? 0.7 : 1 }]}
+              onPress={handlePasswordChangeSubmit}
+              disabled={isChangingPassword}
+              activeOpacity={0.8}
+            >
+              {isChangingPassword ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.saveBtnText}>Change Password</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  };
+
   const renderPersonalDetailsScreen = () => {
     const bgCol = '#FAF9F6';
     const cardBg = '#FFFFFF';
@@ -4909,6 +5092,32 @@ export default function AppIndex() {
               <Text style={[styles.detailLabel, { color: textSub, marginBottom: 0 }]}>Joined Date</Text>
               <Text style={[styles.detailValue, { color: textTitle }]}>{formatJoinedDate(currentPartner?.createdAt)}</Text>
             </View>
+          </View>
+
+          {/* Security Section */}
+          <Text style={[styles.profileSectionTitle, { color: textSub }]}>SECURITY</Text>
+          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <TouchableOpacity 
+              style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+              onPress={() => {
+                setChangePasswordCurrent('');
+                setChangePasswordNew('');
+                setChangePasswordConfirm('');
+                setChangePasswordError('');
+                setChangePasswordSuccess('');
+                setShowCurrentPassword(false);
+                setShowNewPassword(false);
+                setShowConfirmPassword(false);
+                setActiveProfileSubScreen('change_password');
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="lock-closed" size={18} color="#F97316" style={{ marginRight: 10 }} />
+                <Text style={{ fontSize: 13, fontWeight: '800', color: textTitle }}>Change Password</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={textSub} />
+            </TouchableOpacity>
           </View>
 
           {isEditingPersonal && (
@@ -5331,6 +5540,9 @@ export default function AppIndex() {
     if (activeProfileSubScreen === 'personal') {
       return renderPersonalDetailsScreen();
     }
+    if (activeProfileSubScreen === 'change_password') {
+      return renderChangePasswordScreen();
+    }
     if (activeProfileSubScreen === 'vehicle') {
       return renderVehicleDetailsScreen();
     }
@@ -5519,25 +5731,80 @@ export default function AppIndex() {
     });
   };
 
-  const handleSendOtpPress = () => {
+  const handleResendOtp = async () => {
+    setOtpError('');
+    try {
+      const res = await fetch(resolveApiUrl('/auth/delivery-partner/forgot-password/request-otp'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ identifier: resetMobile }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setOtpError(errData.message || 'Failed to resend OTP. Please try again.');
+        return;
+      }
+      startOtpCountdownTimer();
+    } catch (error) {
+      setOtpError('Network error. Please check your connection.');
+    }
+  };
+
+  const handleSendOtpPress = async () => {
     setResetMobileError('');
     if (!resetMobile.trim()) {
       setResetMobileError('Please enter your mobile number');
       return;
     }
-    changeAuthScreen('verify-otp');
+    try {
+      const res = await fetch(resolveApiUrl('/auth/delivery-partner/forgot-password/request-otp'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ identifier: resetMobile }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setResetMobileError(errData.message || 'Something went wrong. Please try again.');
+        return;
+      }
+      changeAuthScreen('verify-otp');
+    } catch (err) {
+      setResetMobileError('Network error. Please check your connection.');
+    }
   };
 
-  const handleVerifyOtpPress = () => {
+  const handleVerifyOtpPress = async () => {
     setOtpError('');
     if (otpValue.length < 6) {
       setOtpError('Please enter the 6-digit OTP code');
       return;
     }
-    changeAuthScreen('create-password');
+    try {
+      const res = await fetch(resolveApiUrl('/auth/delivery-partner/forgot-password/verify-otp'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ identifier: resetMobile, otp: otpValue }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setOtpError(errData.message || 'Invalid OTP. Please try again.');
+        return;
+      }
+      const data = await res.json();
+      setResetToken(data.resetToken);
+      changeAuthScreen('create-password');
+    } catch (err) {
+      setOtpError('Network error. Please check your connection.');
+    }
   };
 
-  const handleUpdatePasswordPress = () => {
+  const handleUpdatePasswordPress = async () => {
     setNewPasswordError('');
     setConfirmPasswordError('');
 
@@ -5552,7 +5819,36 @@ export default function AppIndex() {
     }
     if (hasError) return;
 
-    changeAuthScreen('password-updated');
+    try {
+      const res = await fetch(resolveApiUrl('/auth/delivery-partner/forgot-password/reset'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          resetToken,
+          newPassword,
+          confirmPassword,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        if (res.status === 400 && (errData.message || '').includes('token expired')) {
+          Alert.alert(
+            'Session Expired',
+            'Your password reset session has expired. Please request a new OTP.',
+            [{ text: 'OK', onPress: () => changeAuthScreen('forgot-password') }]
+          );
+          return;
+        }
+        setNewPasswordError(errData.message || 'Failed to update password.');
+        return;
+      }
+      setResetToken('');
+      changeAuthScreen('password-updated');
+    } catch (err) {
+      setNewPasswordError('Network error. Please check your connection.');
+    }
   };
 
   // RENDER MAIN LOGIN SCREEN
@@ -5564,7 +5860,11 @@ export default function AppIndex() {
             {/* Logo container */}
             <View style={styles.logoCircleContainer}>
               <View style={styles.logoCircle}>
-                <Text style={[styles.logoTextOrange, { fontSize: 22, textAlign: 'center' }]} numberOfLines={2}>{appName}</Text>
+                <Image 
+                  source={require('../../assets/delivery-partner-logo.png')}
+                  style={styles.logoImage}
+                  resizeMode="contain"
+                />
               </View>
             </View>
 
@@ -5710,7 +6010,7 @@ export default function AppIndex() {
                 Resend OTP in <Text style={{ fontWeight: '800' }}>{otpResendCountdown}s</Text>
               </Text>
             ) : (
-              <TouchableOpacity activeOpacity={0.7} onPress={startOtpCountdownTimer}>
+              <TouchableOpacity activeOpacity={0.7} onPress={handleResendOtp}>
                 <Text style={[styles.otpResendText, styles.otpResendLink]}>Resend OTP</Text>
               </TouchableOpacity>
             )}
@@ -8131,6 +8431,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
+  },
+  logoImage: {
+    width: '70%',
+    height: '70%',
   },
   logoTextOrange: {
     fontSize: 13,

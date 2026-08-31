@@ -19,6 +19,8 @@ import { DeliveryAssignment, DeliveryAssignmentStatus } from './delivery-assignm
 import { DeliveryPartnerOnlineSession } from './delivery-partner-online-session.entity';
 import { User } from '../users/user.entity';
 import { Order } from '../orders/order.entity';
+import { PasswordResetOtp } from '../users/password-reset-otp.entity';
+import { PasswordResetSession } from '../users/password-reset-session.entity';
 import { UserRole } from '../users/user-role.enum';
 import { OrderStatus } from '../orders/enums/order-status.enum';
 import { PaymentsService } from '../payments/payments.service';
@@ -37,6 +39,7 @@ import { DeliveryPartnerLoginDto } from './dto/delivery-partner-login.dto';
 import { UpdateActiveDeliveryLocationDto } from './dto/update-active-delivery-location.dto';
 import { decryptPin } from '../orders/orders.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
@@ -49,6 +52,10 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(PasswordResetOtp)
+    private readonly otpRepository: Repository<PasswordResetOtp>,
+    @InjectRepository(PasswordResetSession)
+    private readonly sessionRepository: Repository<PasswordResetSession>,
     private readonly dataSource: DataSource,
     private readonly paymentsService: PaymentsService,
     private readonly bankEncryptionService: BankEncryptionService,
@@ -208,6 +215,28 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  isPartnerEligibleForAuth(user: User, partner: DeliveryPartner): boolean {
+    if (!user || user.role !== UserRole.DELIVERY_PARTNER) {
+      return false;
+    }
+    if (!partner) {
+      return false;
+    }
+    if (partner.isActive !== true) {
+      return false;
+    }
+    const canonicalStatus = partner.accountStatus || (partner.isVerified ? DeliveryPartnerAccountStatus.APPROVED : DeliveryPartnerAccountStatus.PENDING);
+    const allowedStatuses = [
+      DeliveryPartnerAccountStatus.APPROVED,
+      DeliveryPartnerAccountStatus.PENDING,
+      DeliveryPartnerAccountStatus.ACTION_REQUIRED,
+    ];
+    if (!allowedStatuses.includes(canonicalStatus)) {
+      return false;
+    }
+    return true;
+  }
+
   async login(dto: DeliveryPartnerLoginDto) {
     const trimmed = dto.identifier.trim();
     let user = null;
@@ -238,7 +267,7 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
     const partner = await this.partnerRepository.findOne({
       where: { userId: user.id }
     });
-    if (!partner) {
+    if (!partner || !this.isPartnerEligibleForAuth(user, partner)) {
       throw new UnauthorizedException('Invalid email/mobile or password.');
     }
 
@@ -2806,5 +2835,313 @@ export class DeliveryPartnersService implements OnModuleInit, OnModuleDestroy {
 
     await this.notificationsService.sendPartnerPush(partner.id, title, bodyText, data);
     return { success: true, message: `Test push sent to Partner #${partner.id}` };
+  }
+
+  async forgotPasswordRequestOtp(dto: any) {
+    const trimmed = (dto.identifier || '').trim();
+    let user = null;
+    if (trimmed.includes('@')) {
+      const normalizedEmail = trimmed.toLowerCase();
+      user = await this.userRepository.findOne({
+        where: { email: normalizedEmail }
+      });
+    } else {
+      const normalizedMobile = trimmed.replace(/^\+91\s*/, '').replace(/^91\s*/, '').replace(/[\s-]/g, '');
+      if (/^\d{10}$/.test(normalizedMobile)) {
+        user = await this.userRepository.findOne({
+          where: { mobileNumber: normalizedMobile }
+        });
+      }
+    }
+
+    let eligible = false;
+    if (user) {
+      const partner = await this.partnerRepository.findOne({
+        where: { userId: user.id }
+      });
+      if (partner && this.isPartnerEligibleForAuth(user, partner)) {
+        eligible = true;
+      }
+    }
+
+    if (!eligible) {
+      console.log(`[Forgot Password] Request OTP ignored: user is not an eligible active delivery partner (identifier: ${dto.identifier}).`);
+      return { success: true, message: 'If this mobile number is registered, an OTP has been sent.' };
+    }
+
+    // Safety rule for production
+    if (process.env.NODE_ENV === 'production' && process.env.OTP_DEV_MODE === 'true') {
+      throw new Error('Safety violation: OTP_DEV_MODE cannot be enabled in production.');
+    }
+
+    return await this.dataSource.transaction(async (manager) => {
+      // Lock the parent User row to serialize concurrent OTP requests for the same user
+      await manager.getRepository(User).findOne({
+        where: { id: user.id },
+        lock: { mode: 'pessimistic_write' }
+      });
+
+      const otpRepo = manager.getRepository(PasswordResetOtp);
+      const purpose = 'DELIVERY_PARTNER_PASSWORD_RESET';
+
+      const existing = await otpRepo.findOne({
+        where: { userId: user.id, purpose, isUsed: false },
+        lock: { mode: 'pessimistic_write' }
+      });
+
+      if (existing) {
+        const now = new Date();
+        const cooldownMs = 30000;
+        if (existing.lastSentAt && (now.getTime() - existing.lastSentAt.getTime() < cooldownMs)) {
+          console.log(`[Forgot Password] Resend OTP request throttled for user ID ${user.id} due to 30-second cooldown.`);
+          return { success: true, message: 'If this mobile number is registered, an OTP has been sent.' };
+        }
+        // Invalidate old OTP
+        existing.isUsed = true;
+        await otpRepo.save(existing);
+      }
+
+      const crypto = require('crypto');
+      const otpCode = crypto.randomInt(100000, 1000000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+      const pepper = process.env.OTP_PEPPER || 'quickbite_otp_pepper_2026';
+      const otpHash = crypto.createHmac('sha256', pepper).update(`${otpCode}:${user.id}:${purpose}`).digest('hex');
+
+      const newOtp = otpRepo.create({
+        userId: user.id,
+        purpose,
+        otpHash,
+        expiresAt,
+        lastSentAt: new Date(),
+        isUsed: false,
+        attemptCount: 0
+      });
+      await otpRepo.save(newOtp);
+
+      if (process.env.OTP_DEV_MODE === 'true') {
+        const mobile = user.mobileNumber || '';
+        const masked = mobile.length > 4 ? '******' + mobile.slice(-4) : mobile;
+        console.log(`[DEV OTP] Password-reset OTP generated for user ID ${user.id} (masked mobile ${masked}): ${otpCode}`);
+      }
+
+      return { success: true, message: 'If this mobile number is registered, an OTP has been sent.' };
+    });
+  }
+
+  async forgotPasswordVerifyOtp(dto: any) {
+    const trimmed = (dto.identifier || '').trim();
+    let user = null;
+    if (trimmed.includes('@')) {
+      const normalizedEmail = trimmed.toLowerCase();
+      user = await this.userRepository.findOne({
+        where: { email: normalizedEmail }
+      });
+    } else {
+      const normalizedMobile = trimmed.replace(/^\+91\s*/, '').replace(/^91\s*/, '').replace(/[\s-]/g, '');
+      if (/^\d{10}$/.test(normalizedMobile)) {
+        user = await this.userRepository.findOne({
+          where: { mobileNumber: normalizedMobile }
+        });
+      }
+    }
+
+    const partner = user ? await this.partnerRepository.findOne({ where: { userId: user.id } }) : null;
+    if (!user || !partner || !this.isPartnerEligibleForAuth(user, partner)) {
+      throw new BadRequestException('Invalid OTP. Please try again.');
+    }
+
+    let errorToThrow = null;
+    let result = null;
+
+    await this.dataSource.transaction(async (manager) => {
+      const otpRepo = manager.getRepository(PasswordResetOtp);
+      const purpose = 'DELIVERY_PARTNER_PASSWORD_RESET';
+
+      const activeOtp = await otpRepo.findOne({
+        where: { userId: user.id, purpose, isUsed: false },
+        lock: { mode: 'pessimistic_write' }
+      });
+
+      if (!activeOtp) {
+        errorToThrow = new BadRequestException('Invalid OTP. Please try again.');
+        return;
+      }
+
+      if (new Date() > activeOtp.expiresAt) {
+        activeOtp.isUsed = true;
+        await otpRepo.save(activeOtp);
+        errorToThrow = new BadRequestException('OTP expired. Please request a new one.');
+        return;
+      }
+
+      if (activeOtp.attemptCount >= 5) {
+        activeOtp.isUsed = true;
+        await otpRepo.save(activeOtp);
+        errorToThrow = new BadRequestException('Too many incorrect attempts. Request a new OTP.');
+        return;
+      }
+
+      const crypto = require('crypto');
+      const pepper = process.env.OTP_PEPPER || 'quickbite_otp_pepper_2026';
+      const computedHash = crypto.createHmac('sha256', pepper).update(`${dto.otp}:${user.id}:${purpose}`).digest('hex');
+
+      if (activeOtp.otpHash !== computedHash) {
+        activeOtp.attemptCount += 1;
+        if (activeOtp.attemptCount >= 5) {
+          activeOtp.isUsed = true;
+        }
+        await otpRepo.save(activeOtp);
+        if (activeOtp.attemptCount >= 5) {
+          errorToThrow = new BadRequestException('Too many incorrect attempts. Request a new OTP.');
+        } else {
+          errorToThrow = new BadRequestException('Invalid OTP. Please try again.');
+        }
+        return;
+      }
+
+      // Mark OTP as used
+      activeOtp.isUsed = true;
+      await otpRepo.save(activeOtp);
+
+      // Create reset session
+      const sessionRepo = manager.getRepository(PasswordResetSession);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes session
+      const session = sessionRepo.create({
+        userId: user.id,
+        purpose,
+        expiresAt,
+        usedAt: null
+      });
+      const savedSession = await sessionRepo.save(session);
+
+      // Generate JWT resetToken
+      const jwtPayload = {
+        userId: user.id,
+        purpose,
+        jti: savedSession.id
+      };
+      const resetToken = this.jwtService.sign(jwtPayload, { expiresIn: '10m' });
+
+      result = {
+        success: true,
+        resetToken
+      };
+    });
+
+    if (errorToThrow) {
+      throw errorToThrow;
+    }
+    return result;
+  }
+
+  async forgotPasswordReset(dto: any) {
+    if (!dto.newPassword || !dto.confirmPassword) {
+      throw new BadRequestException('Passwords cannot be empty');
+    }
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
+    }
+    if (dto.newPassword.length < 8) {
+      throw new BadRequestException('Minimum 8 characters required');
+    }
+
+    let decoded = null;
+    try {
+      decoded = this.jwtService.verify(dto.resetToken);
+    } catch (err) {
+      throw new BadRequestException('Reset token expired or invalid. Please restart the Forgot Password flow.');
+    }
+
+    if (!decoded || decoded.purpose !== 'DELIVERY_PARTNER_PASSWORD_RESET' || !decoded.jti || !decoded.userId) {
+      throw new BadRequestException('Reset token invalid. Please restart the Forgot Password flow.');
+    }
+
+    return await this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+
+      // Atomically mark the reset session as used only if it's currently unused and not expired
+      const updateResult = await manager
+        .createQueryBuilder()
+        .update(PasswordResetSession)
+        .set({ usedAt: new Date() })
+        .where('id = :id', { id: decoded.jti })
+        .andWhere('userId = :userId', { userId: decoded.userId })
+        .andWhere('purpose = :purpose', { purpose: 'DELIVERY_PARTNER_PASSWORD_RESET' })
+        .andWhere('usedAt IS NULL')
+        .andWhere('expiresAt > :now', { now: new Date() })
+        .execute();
+
+      if (updateResult.affected === 0) {
+        throw new BadRequestException('Reset token invalid, expired, or already used. Replay attacks are not allowed.');
+      }
+
+      const user = await userRepo.findOne({ where: { id: decoded.userId } });
+      const partner = user ? await manager.getRepository(DeliveryPartner).findOne({ where: { userId: user.id } }) : null;
+      if (!user || !partner || !this.isPartnerEligibleForAuth(user, partner)) {
+        throw new BadRequestException('User is not eligible for password reset.');
+      }
+
+      const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+      user.password = hashedPassword;
+      await userRepo.save(user);
+
+      return {
+        success: true,
+        message: 'Password reset successfully.'
+      };
+    });
+  }
+
+  async changePassword(userId: number, dto: ChangePasswordDto) {
+    if (!dto.currentPassword || !dto.newPassword || !dto.confirmNewPassword) {
+      throw new BadRequestException('Passwords cannot be empty');
+    }
+    if (dto.newPassword !== dto.confirmNewPassword) {
+      throw new BadRequestException('Passwords do not match.');
+    }
+    if (dto.newPassword.length < 8) {
+      throw new BadRequestException('Minimum 8 characters required');
+    }
+
+    return await this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      
+      // Lock the user row to prevent concurrent updates
+      const user = await userRepo.findOne({
+        where: { id: userId },
+        lock: { mode: 'pessimistic_write' }
+      });
+      if (!user) {
+        throw new NotFoundException('User not found.');
+      }
+
+      const partner = await manager.getRepository(DeliveryPartner).findOne({ where: { userId } });
+      if (!partner || !this.isPartnerEligibleForAuth(user, partner)) {
+        throw new ForbiddenException('User is not eligible to change password.');
+      }
+
+      // Verify current password using bcrypt.compare
+      const isCurrentPasswordCorrect = await bcrypt.compare(dto.currentPassword, user.password);
+      if (!isCurrentPasswordCorrect) {
+        throw new BadRequestException('Current password is incorrect.');
+      }
+
+      // Reject if new password is same as current password
+      const isSamePassword = await bcrypt.compare(dto.newPassword, user.password);
+      if (isSamePassword) {
+        throw new BadRequestException('New password must be different from the current password.');
+      }
+
+      // Hash and save new password
+      const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+      user.password = hashedPassword;
+      await userRepo.save(user);
+
+      return {
+        success: true,
+        message: 'Password changed successfully.'
+      };
+    });
   }
 }

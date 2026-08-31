@@ -18,7 +18,7 @@ export const qbEvents = {
   }
 };
 
-const getFriendlyApiError = async (error, response) => {
+const getFriendlyApiError = async (error, response, urlStr = '') => {
   if (error) {
     console.error("[API Technical Error]", error);
   }
@@ -47,8 +47,14 @@ const getFriendlyApiError = async (error, response) => {
     } catch (e) {}
   }
 
+  const isAuthEndpoint = urlStr.includes('/users/login') || urlStr.includes('/users/register') || urlStr.includes('/delivery-partners/login');
+
   if (status === 401) {
-    message = "Session expired. Please log in again.";
+    if (isAuthEndpoint) {
+      // For auth endpoints, keep the original parsed message (e.g. "Invalid email/mobile or password.")
+    } else {
+      message = "Session expired. Please log in again.";
+    }
   } else if (status === 403) {
     message = "You don't have permission to access this.";
   } else if (status === 404) {
@@ -91,7 +97,7 @@ const qbFetch = async (url, options = {}) => {
     try {
       const res = await window.fetch(url, options);
       if (!res.ok) {
-        const err = await getFriendlyApiError(null, res);
+        const err = await getFriendlyApiError(null, res, urlStr);
         const isAuthEndpoint = urlStr.includes('/users/login') || urlStr.includes('/users/register');
         if (res.status === 401 && !isAuthEndpoint) {
           qbEvents.emit("UNAUTHORIZED", null);
@@ -100,7 +106,12 @@ const qbFetch = async (url, options = {}) => {
       }
       return res;
     } catch (error) {
-      const err = await getFriendlyApiError(error, null);
+      // If the error was already processed and thrown by the if (!res.ok) block,
+      // it will have status and message. We should just rethrow it instead of re-wrapping.
+      if (error && typeof error.status === 'number' && typeof error.message === 'string') {
+        throw error;
+      }
+      const err = await getFriendlyApiError(error, null, urlStr);
       throw err;
     }
   };

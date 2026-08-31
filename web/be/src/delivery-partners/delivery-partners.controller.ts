@@ -37,6 +37,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { DeliveryPartnerLoginDto } from './dto/delivery-partner-login.dto';
 import { UpdateOnlineStatusDto } from './dto/update-online-status.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../users/jwt-auth.guard';
 import { RolesGuard } from '../users/roles.guard';
 import { Roles } from '../users/roles.decorator';
@@ -108,6 +109,15 @@ export class DeliveryPartnersController {
       throw new ForbiddenException('Forbidden resource');
     }
     return this.partnersService.updateProfile(req.user.userId, dto);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/change-password')
+  changePassword(@Body() dto: ChangePasswordDto, @Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.partnersService.changePassword(req.user.userId, dto);
   }
 
   @Roles(UserRole.DELIVERY_PARTNER)

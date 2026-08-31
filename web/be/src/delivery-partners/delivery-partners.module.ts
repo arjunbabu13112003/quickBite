@@ -7,8 +7,11 @@ import { DeliveryAssignment } from './delivery-assignment.entity';
 import { DeliveryPartnerOnlineSession } from './delivery-partner-online-session.entity';
 import { User } from '../users/user.entity';
 import { Order } from '../orders/order.entity';
+import { PasswordResetOtp } from '../users/password-reset-otp.entity';
+import { PasswordResetSession } from '../users/password-reset-session.entity';
 import { DeliveryPartnersService } from './delivery-partners.service';
 import { DeliveryPartnersController, DeliveryPartnersLoginController } from './delivery-partners.controller';
+import { DeliveryPartnerForgotPasswordController } from './delivery-partner-forgot-password.controller';
 import { PaymentsModule } from '../payments/payments.module';
 import { BankEncryptionService } from './bank-encryption.service';
 
@@ -25,12 +28,14 @@ import { NotificationsModule } from '../notifications/notifications.module';
       DeliveryPartnerOnlineSession,
       User,
       Order,
+      PasswordResetOtp,
+      PasswordResetSession,
     ]),
     PaymentsModule,
     UsersModule,
     NotificationsModule,
   ],
-  controllers: [DeliveryPartnersController, DeliveryPartnersLoginController],
+  controllers: [DeliveryPartnersController, DeliveryPartnersLoginController, DeliveryPartnerForgotPasswordController],
   providers: [DeliveryPartnersService, BankEncryptionService],
   exports: [DeliveryPartnersService, BankEncryptionService],
 })
