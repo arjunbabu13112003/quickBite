@@ -30,7 +30,7 @@ const NAVIGATION_ITEMS = [
   { id: 'settings', name: 'Settings', icon: Settings, path: '/super-admin/settings' },
 ];
 
-const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders', 'offers', 'branding', 'push-campaigns'];
+const IMPLEMENTED_ITEMS = ['dashboard', 'hotels', 'hotel-admins', 'food-categories', 'delivery-partners', 'orders', 'payments', 'offers', 'branding', 'push-campaigns'];
 
 export default function SuperAdminSidebar({ currentUser, currentTab, onNavigate, onLogout }) {
   const handleItemClick = (e, item) => {

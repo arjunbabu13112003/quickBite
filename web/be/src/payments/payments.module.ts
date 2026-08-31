@@ -20,8 +20,11 @@ import { PartnerWalletAdjustment } from './entities/partner-wallet-adjustment.en
 import { PartnerSettlement } from './entities/partner-settlement.entity';
 import { PartnerSettlementItem } from './entities/partner-settlement-item.entity';
 import { PartnerCodTransaction } from './entities/partner-cod-transaction.entity';
+import { PartnerCodRemittance } from './entities/partner-cod-remittance.entity';
+import { PartnerPayoutAccount } from './entities/partner-payout-account.entity';
 import { RazorpayGateway } from './gateways/razorpay.gateway';
 import { OffersModule } from '../offers/offers.module';
+import { BankEncryptionService } from '../delivery-partners/bank-encryption.service';
 
 @Module({
   imports: [
@@ -44,11 +47,13 @@ import { OffersModule } from '../offers/offers.module';
       PartnerSettlement,
       PartnerSettlementItem,
       PartnerCodTransaction,
+      PartnerCodRemittance,
+      PartnerPayoutAccount,
     ]),
   ],
   controllers: [PaymentsController, PaymentsWebhookController],
-  providers: [PaymentsService, RazorpayGateway],
-  exports: [PaymentsService, RazorpayGateway],
+  providers: [PaymentsService, RazorpayGateway, BankEncryptionService],
+  exports: [PaymentsService, RazorpayGateway, BankEncryptionService],
 })
 export class PaymentsModule {}
 

@@ -1272,4 +1272,114 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  getPartnerWallets: async (search) => {
+    const url = new URL(`${API_BASE_URL}/payments/admin/partner-wallets`);
+    if (search) url.searchParams.append('search', search);
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getPartnerWallet: async (partnerId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/delivery-partners/${partnerId}/wallet`, {
+      method: 'GET',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getPartnerEarnings: async (partnerId, page = 1, limit = 10) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/delivery-partners/${partnerId}/earnings?page=${page}&limit=${limit}`, {
+      method: 'GET',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getPartnerSettlements: async (partnerId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/delivery-partners/${partnerId}/settlements`, {
+      method: 'GET',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getSettlementPreview: async (partnerId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/delivery-partners/${partnerId}/settlements/preview`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  createSettlement: async (partnerId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/delivery-partners/${partnerId}/settlements`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getSettlementDetails: async (settlementId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/partner-settlements/${settlementId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  startSettlementProcessing: async (settlementId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/partner-settlements/${settlementId}/processing`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  markSettlementPaid: async (settlementId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/partner-settlements/${settlementId}/paid`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  markSettlementFailed: async (settlementId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/partner-settlements/${settlementId}/failed`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  cancelSettlement: async (settlementId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/partner-settlements/${settlementId}/cancelled`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  getPartnerCodRemittances: async (partnerId) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/delivery-partners/${partnerId}/cod-remittances`, {
+      method: 'GET',
+      headers: { ...getAuthHeaders() },
+    });
+    return handleResponse(res);
+  },
+
+  recordPartnerCodRemittance: async (partnerId, data) => {
+    const res = await fetch(`${API_BASE_URL}/payments/admin/delivery-partners/${partnerId}/cod-remittances`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
 };

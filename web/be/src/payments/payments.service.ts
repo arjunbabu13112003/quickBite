@@ -19,6 +19,7 @@ import { PaymentWebhookEvent } from './entities/payment-webhook-event.entity';
 import { Order } from '../orders/order.entity';
 import { Hotel } from '../hotels/hotel.entity';
 import { DeliveryPartner } from '../delivery-partners/delivery-partner.entity';
+import { User } from '../users/user.entity';
 import { DeliveryAssignment } from '../delivery-partners/delivery-assignment.entity';
 import { Cart } from '../cart/cart.entity';
 import { CartItem } from '../cart/cart-item.entity';
@@ -39,6 +40,9 @@ import { PartnerWalletAdjustment, PartnerWalletAdjustmentDirection, PartnerWalle
 import { PartnerSettlement, PartnerSettlementStatus, PartnerSettlementPaymentMethod } from './entities/partner-settlement.entity';
 import { PartnerSettlementItem, PartnerSettlementItemType } from './entities/partner-settlement-item.entity';
 import { PartnerCodTransaction, PartnerCodTransactionType } from './entities/partner-cod-transaction.entity';
+import { PartnerCodRemittance } from './entities/partner-cod-remittance.entity';
+import { PartnerPayoutAccount, PayoutAccountType, PayoutAccountStatus } from './entities/partner-payout-account.entity';
+import { BankEncryptionService } from '../delivery-partners/bank-encryption.service';
 import { rupeesStringToPaise, paiseToRupeesString, parseRateToBasisPoints } from './utils/money';
 
 @Injectable()
@@ -66,10 +70,13 @@ export class PaymentsService {
     private readonly partnerRepository: Repository<DeliveryPartner>,
     @InjectRepository(PaymentWebhookEvent)
     private readonly webhookEventRepository: Repository<PaymentWebhookEvent>,
+    @InjectRepository(PartnerPayoutAccount)
+    private readonly payoutAccountRepository: Repository<PartnerPayoutAccount>,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly razorpayGateway: RazorpayGateway,
     private readonly offersService: OffersService,
+    private readonly bankEncryptionService: BankEncryptionService,
   ) {}
 
   getPaymentConfig() {
@@ -1380,6 +1387,11 @@ export class PaymentsService {
   async getWalletSummary(partnerId: number): Promise<any> {
     await this.releasePendingEarnings(partnerId);
 
+    const partner = await this.dataSource.getRepository(DeliveryPartner).findOne({
+      where: { id: partnerId },
+      relations: ['user']
+    });
+
     const earnings = await this.dataSource.getRepository(PartnerEarning).find({
       where: { deliveryPartnerId: partnerId }
     });
@@ -1390,6 +1402,10 @@ export class PaymentsService {
 
     const codTxs = await this.dataSource.getRepository(PartnerCodTransaction).find({
       where: { deliveryPartnerId: partnerId }
+    });
+
+    const codRemittances = await this.dataSource.getRepository(PartnerCodRemittance).find({
+      where: { deliveryPartnerId: partnerId, status: 'RECORDED' }
     });
 
     let pendingPaise = 0;
@@ -1436,22 +1452,30 @@ export class PaymentsService {
       }
     });
 
-    let codOutstandingPaise = 0;
+    let totalCodCollectedPaise = 0;
+    let totalCodRemittedPaise = 0;
+
     codTxs.forEach((tx) => {
       const amtPaise = rupeesStringToPaise(tx.amount);
       if (tx.type === PartnerCodTransactionType.COLLECTED || tx.type === PartnerCodTransactionType.ADJUSTMENT_DEBIT) {
-        codOutstandingPaise += amtPaise;
+        totalCodCollectedPaise += amtPaise;
       } else if (tx.type === PartnerCodTransactionType.REMITTED || tx.type === PartnerCodTransactionType.ADJUSTMENT_CREDIT) {
-        codOutstandingPaise -= amtPaise;
+        totalCodRemittedPaise += amtPaise;
       }
     });
+
+    codRemittances.forEach((rem) => {
+      const amtPaise = rupeesStringToPaise(rem.amount);
+      totalCodRemittedPaise += amtPaise;
+    });
+
+    const codOutstandingPaise = totalCodCollectedPaise - totalCodRemittedPaise;
 
     const pendingBalance = paiseToRupeesString(pendingPaise);
     const availableBalance = paiseToRupeesString(availableEarningsPaise + availableAdjustmentsPaise);
     const reservedBalance = paiseToRupeesString(reservedEarningsPaise + reservedAdjustmentsPaise);
     const totalSettled = paiseToRupeesString(settledEarningsPaise + settledAdjustmentsPaise);
     const totalEarnings = paiseToRupeesString(totalEarningsPaise + totalAdjustmentsPaise);
-    const codOutstanding = paiseToRupeesString(codOutstandingPaise);
 
     return {
       pendingBalance,
@@ -1459,7 +1483,12 @@ export class PaymentsService {
       reservedBalance,
       totalSettled,
       totalEarnings,
-      codOutstanding,
+      codOutstanding: paiseToRupeesString(codOutstandingPaise),
+      totalCodCollected: paiseToRupeesString(totalCodCollectedPaise),
+      totalCodRemitted: paiseToRupeesString(totalCodRemittedPaise),
+      name: partner?.user?.name || '',
+      mobileNumber: partner?.user?.mobileNumber || partner?.phoneNumber || '',
+      accountStatus: partner?.accountStatus || '',
     };
   }
 
@@ -1760,10 +1789,24 @@ export class PaymentsService {
     }));
   }
 
-  async getPartnerWallets(): Promise<any[]> {
-    const partners = await this.dataSource.getRepository(DeliveryPartner).find({
-      relations: ['user']
-    });
+  async getPartnerWallets(search?: string): Promise<any[]> {
+    const queryBuilder = this.dataSource.getRepository(DeliveryPartner)
+      .createQueryBuilder('partner')
+      .leftJoinAndSelect('partner.user', 'user');
+
+    if (search) {
+      const cleanSearch = search.trim();
+      const isId = /^\d+$/.test(cleanSearch);
+      if (isId) {
+        queryBuilder.where('partner.id = :id', { id: parseInt(cleanSearch, 10) });
+      } else {
+        queryBuilder.where('LOWER(user.name) LIKE :search OR user.mobileNumber LIKE :search OR partner.phoneNumber LIKE :search', {
+          search: `%${cleanSearch.toLowerCase()}%`
+        });
+      }
+    }
+
+    const partners = await queryBuilder.getMany();
     const summaries = [];
     for (const p of partners) {
       const summary = await this.getWalletSummary(p.id);
@@ -1775,6 +1818,480 @@ export class PaymentsService {
       });
     }
     return summaries;
+  }
+
+  async getEarningsByPartnerId(partnerId: number, page: number, limit: number): Promise<any> {
+    const earningRepo = this.dataSource.getRepository(PartnerEarning);
+    const [items, total] = await earningRepo.findAndCount({
+      where: { deliveryPartnerId: partnerId },
+      order: { earnedAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+      relations: ['order'],
+    });
+
+    return {
+      items: items.map(e => ({
+        orderId: e.orderId,
+        orderNumber: e.order?.orderNumber || '',
+        deliveredAt: e.order?.deliveredAt || e.earnedAt,
+        baseDeliveryFee: paiseToRupeesString(rupeesStringToPaise(e.baseDeliveryFee)),
+        distanceFee: paiseToRupeesString(rupeesStringToPaise(e.distanceFee)),
+        incentive: paiseToRupeesString(rupeesStringToPaise(e.incentiveAmount)),
+        tip: paiseToRupeesString(rupeesStringToPaise(e.tipAmount)),
+        adjustment: paiseToRupeesString(rupeesStringToPaise(e.adjustmentAmount)),
+        grossEarning: paiseToRupeesString(rupeesStringToPaise(e.grossEarning)),
+        status: e.status,
+        availableAt: e.availableAt,
+      })),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async getSettlementsByPartnerId(partnerId: number): Promise<any> {
+    const settlements = await this.dataSource.getRepository(PartnerSettlement).find({
+      where: { deliveryPartnerId: partnerId },
+      order: { requestedAt: 'DESC' },
+    });
+
+    return settlements.map(s => ({
+      settlementId: s.id,
+      amount: paiseToRupeesString(rupeesStringToPaise(s.netAmount)),
+      status: s.status,
+      createdAt: s.createdAt,
+      paidAt: s.paidAt,
+      paymentMethod: s.paymentMethod,
+      reference: s.externalReference || null,
+    }));
+  }
+
+  async getSettlementDetails(settlementId: number): Promise<any> {
+    const settlement = await this.dataSource.getRepository(PartnerSettlement).findOne({
+      where: { id: settlementId }
+    });
+    if (!settlement) {
+      throw new NotFoundException('Settlement not found');
+    }
+
+    const items = await this.dataSource.getRepository(PartnerSettlementItem).find({
+      where: { settlementId },
+      relations: ['partnerEarning', 'partnerEarning.order', 'walletAdjustment']
+    });
+
+    return {
+      id: settlement.id,
+      deliveryPartnerId: settlement.deliveryPartnerId,
+      grossEarningsAmount: paiseToRupeesString(rupeesStringToPaise(settlement.grossEarningsAmount)),
+      creditAdjustmentsAmount: paiseToRupeesString(rupeesStringToPaise(settlement.creditAdjustmentsAmount)),
+      debitAdjustmentsAmount: paiseToRupeesString(rupeesStringToPaise(settlement.debitAdjustmentsAmount)),
+      netAmount: paiseToRupeesString(rupeesStringToPaise(settlement.netAmount)),
+      status: settlement.status,
+      paymentMethod: settlement.paymentMethod,
+      externalReference: settlement.externalReference || null,
+      failureReason: settlement.failureReason || null,
+      requestedAt: settlement.requestedAt,
+      processedAt: settlement.processedAt,
+      paidAt: settlement.paidAt,
+      createdAt: settlement.createdAt,
+      items: items.map(item => ({
+        id: item.id,
+        itemType: item.itemType,
+        amountSnapshot: paiseToRupeesString(rupeesStringToPaise(item.amountSnapshot)),
+        orderNumber: item.partnerEarning?.order?.orderNumber || null,
+        adjustmentReason: item.walletAdjustment?.reason || null
+      }))
+    };
+  }
+
+  async getCodRemittances(partnerId: number): Promise<any[]> {
+    const list = await this.dataSource.getRepository(PartnerCodRemittance).find({
+      where: { deliveryPartnerId: partnerId },
+      relations: ['recordedByUser'],
+      order: { createdAt: 'DESC' }
+    });
+
+    return list.map(rem => ({
+      id: rem.id,
+      amount: rem.amount,
+      status: rem.status,
+      paymentMethod: rem.paymentMethod,
+      reference: rem.reference,
+      notes: rem.notes,
+      recordedBy: rem.recordedByUser?.name || `Admin #${rem.recordedByUserId}`,
+      createdAt: rem.createdAt
+    }));
+  }
+
+  async recordCodRemittance(
+    partnerId: number,
+    amount: string,
+    paymentMethod: string,
+    reference: string,
+    notes: string,
+    recordedByUserId: number
+  ): Promise<any> {
+    const reqAmountPaise = rupeesStringToPaise(amount);
+    if (reqAmountPaise <= 0) {
+      throw new BadRequestException('Remittance amount must be greater than zero.');
+    }
+
+    return await this.dataSource.transaction(async (manager) => {
+      const partner = await manager.findOne(DeliveryPartner, {
+        where: { id: partnerId },
+        lock: { mode: 'pessimistic_write' }
+      });
+      if (!partner) {
+        throw new NotFoundException('Delivery partner not found');
+      }
+
+      const codTxs = await manager.find(PartnerCodTransaction, {
+        where: { deliveryPartnerId: partnerId }
+      });
+      const codRemittances = await manager.find(PartnerCodRemittance, {
+        where: { deliveryPartnerId: partnerId, status: 'RECORDED' }
+      });
+
+      let totalCollectedPaise = 0;
+      let totalRemittedPaise = 0;
+
+      codTxs.forEach((tx) => {
+        const amtPaise = rupeesStringToPaise(tx.amount);
+        if (tx.type === PartnerCodTransactionType.COLLECTED || tx.type === PartnerCodTransactionType.ADJUSTMENT_DEBIT) {
+          totalCollectedPaise += amtPaise;
+        } else if (tx.type === PartnerCodTransactionType.REMITTED || tx.type === PartnerCodTransactionType.ADJUSTMENT_CREDIT) {
+          totalRemittedPaise += amtPaise;
+        }
+      });
+
+      codRemittances.forEach((rem) => {
+        totalRemittedPaise += rupeesStringToPaise(rem.amount);
+      });
+
+      const currentOutstandingPaise = totalCollectedPaise - totalRemittedPaise;
+
+      if (reqAmountPaise > currentOutstandingPaise) {
+        throw new BadRequestException('Remittance amount cannot exceed COD outstanding balance.');
+      }
+
+      const remittance = manager.create(PartnerCodRemittance, {
+        deliveryPartnerId: partnerId,
+        amount: paiseToRupeesString(reqAmountPaise),
+        status: 'RECORDED',
+        paymentMethod,
+        reference: reference || null,
+        notes: notes || null,
+        recordedByUserId,
+      });
+
+      return await manager.save(PartnerCodRemittance, remittance);
+    });
+  }
+
+  // --- PARTNER BANK / UPI ACCOUNT SERVICE METHODS ---
+
+  async getPartnerPayoutAccounts(partnerId: number): Promise<any[]> {
+    const accounts = await this.payoutAccountRepository.find({
+      where: { deliveryPartnerId: partnerId },
+      order: { createdAt: 'DESC' },
+    });
+    return accounts.map(acc => this.mapPayoutAccountToResponse(acc));
+  }
+
+  async createPartnerPayoutAccount(partnerId: number, dto: any): Promise<any> {
+    const { accountType, bankName } = dto;
+
+    const partnerExists = await this.partnerRepository.findOne({ where: { id: partnerId } });
+    if (!partnerExists) {
+      throw new NotFoundException('Delivery partner not found');
+    }
+
+    let accountHolderName: string | undefined;
+    let accountNumberEncrypted: string | undefined;
+    let accountLast4: string | undefined;
+    let ifscCode: string | undefined;
+    let upiId: string | undefined;
+
+    if (accountType === PayoutAccountType.BANK) {
+      if (!dto.accountHolderName || !dto.accountNumber || !dto.confirmAccountNumber || !dto.ifscCode) {
+        throw new BadRequestException('Please enter valid bank account details.');
+      }
+      if (dto.accountNumber !== dto.confirmAccountNumber) {
+        throw new BadRequestException('Account numbers do not match.');
+      }
+      accountHolderName = dto.accountHolderName.trim();
+      const rawAccNum = dto.accountNumber.trim();
+      if (!/^\d{9,18}$/.test(rawAccNum)) {
+        throw new BadRequestException('Please enter valid bank account details.');
+      }
+      ifscCode = dto.ifscCode.trim().toUpperCase();
+      if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode)) {
+        throw new BadRequestException('Please enter valid bank account details.');
+      }
+
+      // Check duplicates
+      const existingAccounts = await this.payoutAccountRepository.find({
+        where: { deliveryPartnerId: partnerId, accountType: PayoutAccountType.BANK }
+      });
+      for (const existing of existingAccounts) {
+        if (existing.accountNumberEncrypted) {
+          try {
+            const decNum = this.bankEncryptionService.decrypt(existing.accountNumberEncrypted);
+            if (decNum === rawAccNum && existing.ifscCode === ifscCode) {
+              throw new ConflictException('This payout account is already registered.');
+            }
+          } catch (e) {
+            // Decryption failure
+          }
+        }
+      }
+
+      accountNumberEncrypted = this.bankEncryptionService.encrypt(rawAccNum);
+      accountLast4 = rawAccNum.slice(-4);
+    } else if (accountType === PayoutAccountType.UPI) {
+      if (!dto.upiId) {
+        throw new BadRequestException('UPI ID is required.');
+      }
+      upiId = dto.upiId.trim().toLowerCase();
+      if (!/^[\w.-]+@[\w.-]+$/.test(upiId)) {
+        throw new BadRequestException('Please enter a valid UPI ID.');
+      }
+
+      // Check duplicates
+      const duplicate = await this.payoutAccountRepository.findOne({
+        where: { deliveryPartnerId: partnerId, accountType: PayoutAccountType.UPI, upiId }
+      });
+      if (duplicate) {
+        throw new ConflictException('This payout account is already registered.');
+      }
+    } else {
+      throw new BadRequestException('Invalid account type.');
+    }
+
+    const newAccount = this.payoutAccountRepository.create({
+      deliveryPartnerId: partnerId,
+      accountType,
+      status: PayoutAccountStatus.PENDING_VERIFICATION,
+      accountHolderName,
+      accountNumberEncrypted,
+      accountLast4,
+      ifscCode,
+      bankName: bankName || null,
+      upiId,
+      isPrimary: false,
+    });
+
+    const saved = await this.payoutAccountRepository.save(newAccount);
+    return this.mapPayoutAccountToResponse(saved);
+  }
+
+  async updatePartnerPayoutAccount(partnerId: number, id: number, dto: any): Promise<any> {
+    const account = await this.payoutAccountRepository.findOne({ where: { id, deliveryPartnerId: partnerId } });
+    if (!account) {
+      throw new NotFoundException('Payout account not found.');
+    }
+
+    let isCriticalChange = false;
+
+    if (account.accountType === PayoutAccountType.BANK) {
+      if (dto.accountHolderName !== undefined) {
+        account.accountHolderName = dto.accountHolderName.trim();
+      }
+      if (dto.bankName !== undefined) {
+        account.bankName = dto.bankName || null;
+      }
+      if (dto.accountNumber !== undefined) {
+        if (!dto.confirmAccountNumber || dto.accountNumber !== dto.confirmAccountNumber) {
+          throw new BadRequestException('Account numbers do not match.');
+        }
+        const rawAccNum = dto.accountNumber.trim();
+        if (!/^\d{9,18}$/.test(rawAccNum)) {
+          throw new BadRequestException('Please enter valid bank account details.');
+        }
+        
+        let isSame = false;
+        if (account.accountNumberEncrypted) {
+          try {
+            const decNum = this.bankEncryptionService.decrypt(account.accountNumberEncrypted);
+            isSame = (decNum === rawAccNum);
+          } catch (e) {}
+        }
+
+        if (!isSame) {
+          account.accountNumberEncrypted = this.bankEncryptionService.encrypt(rawAccNum);
+          account.accountLast4 = rawAccNum.slice(-4);
+          isCriticalChange = true;
+        }
+      }
+      if (dto.ifscCode !== undefined) {
+        const normIfsc = dto.ifscCode.trim().toUpperCase();
+        if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(normIfsc)) {
+          throw new BadRequestException('Please enter valid bank account details.');
+        }
+        if (account.ifscCode !== normIfsc) {
+          account.ifscCode = normIfsc;
+          isCriticalChange = true;
+        }
+      }
+    } else if (account.accountType === PayoutAccountType.UPI) {
+      if (dto.upiId !== undefined) {
+        const normUpi = dto.upiId.trim().toLowerCase();
+        if (!/^[\w.-]+@[\w.-]+$/.test(normUpi)) {
+          throw new BadRequestException('Please enter a valid UPI ID.');
+        }
+        if (account.upiId !== normUpi) {
+          account.upiId = normUpi;
+          isCriticalChange = true;
+        }
+      }
+    }
+
+    if (isCriticalChange) {
+      account.status = PayoutAccountStatus.PENDING_VERIFICATION;
+      account.verifiedByUserId = undefined;
+      account.verifiedAt = undefined;
+      account.isPrimary = false;
+    }
+
+    const saved = await this.payoutAccountRepository.save(account);
+    return this.mapPayoutAccountToResponse(saved);
+  }
+
+  async setPrimaryPayoutAccount(partnerId: number, id: number): Promise<any> {
+    return await this.dataSource.transaction(async (manager) => {
+      const accounts = await manager.find(PartnerPayoutAccount, {
+        where: { deliveryPartnerId: partnerId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      const account = accounts.find(acc => acc.id === id);
+      if (!account) {
+        throw new NotFoundException('Payout account not found.');
+      }
+      if (account.status !== PayoutAccountStatus.VERIFIED) {
+        throw new BadRequestException('Only verified payout accounts can be set as primary.');
+      }
+
+      for (const acc of accounts) {
+        acc.isPrimary = false;
+      }
+
+      account.isPrimary = true;
+      await manager.save(PartnerPayoutAccount, accounts);
+      return this.mapPayoutAccountToResponse(account);
+    });
+  }
+
+  async disablePartnerPayoutAccount(partnerId: number, id: number): Promise<any> {
+    const account = await this.payoutAccountRepository.findOne({ where: { id, deliveryPartnerId: partnerId } });
+    if (!account) {
+      throw new NotFoundException('Payout account not found.');
+    }
+    account.status = PayoutAccountStatus.DISABLED;
+    account.isPrimary = false;
+    const saved = await this.payoutAccountRepository.save(account);
+    return this.mapPayoutAccountToResponse(saved);
+  }
+
+  // --- ADMIN PAYOUT ACCOUNT SERVICE METHODS ---
+
+  async getAdminPayoutAccounts(status?: PayoutAccountStatus): Promise<any[]> {
+    const whereClause = status ? { status } : {};
+    const accounts = await this.payoutAccountRepository.find({
+      where: whereClause,
+      order: { createdAt: 'DESC' },
+    });
+    return accounts.map(acc => this.mapPayoutAccountToResponse(acc));
+  }
+
+  async getPartnerPayoutAccountsForAdmin(partnerId: number): Promise<any[]> {
+    const accounts = await this.payoutAccountRepository.find({
+      where: { deliveryPartnerId: partnerId },
+      order: { createdAt: 'DESC' },
+    });
+    return accounts.map(acc => this.mapPayoutAccountToResponse(acc));
+  }
+
+  async verifyPayoutAccount(id: number, verifiedByUserId: number, note?: string): Promise<any> {
+    const account = await this.payoutAccountRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException('Payout account not found.');
+    }
+    if (account.status === PayoutAccountStatus.VERIFIED) {
+      throw new BadRequestException('This payout account is already verified.');
+    }
+    account.status = PayoutAccountStatus.VERIFIED;
+    account.verifiedByUserId = verifiedByUserId;
+    account.verifiedAt = new Date();
+    account.verificationNote = note || null;
+
+    const saved = await this.payoutAccountRepository.save(account);
+    return this.mapPayoutAccountToResponse(saved);
+  }
+
+  async rejectPayoutAccount(id: number, verifiedByUserId: number, note: string): Promise<any> {
+    const account = await this.payoutAccountRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException('Payout account not found.');
+    }
+    if (!note || !note.trim()) {
+      throw new BadRequestException('Rejection reason/note is required.');
+    }
+    account.status = PayoutAccountStatus.REJECTED;
+    account.verifiedByUserId = verifiedByUserId;
+    account.verifiedAt = new Date();
+    account.verificationNote = note.trim();
+    account.isPrimary = false;
+
+    const saved = await this.payoutAccountRepository.save(account);
+    return this.mapPayoutAccountToResponse(saved);
+  }
+
+  async disablePayoutAccountByAdmin(id: number): Promise<any> {
+    const account = await this.payoutAccountRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException('Payout account not found.');
+    }
+    account.status = PayoutAccountStatus.DISABLED;
+    account.isPrimary = false;
+    const saved = await this.payoutAccountRepository.save(account);
+    return this.mapPayoutAccountToResponse(saved);
+  }
+
+  async getVerifiedPrimaryPayoutAccount(partnerId: number): Promise<any | null> {
+    const account = await this.payoutAccountRepository.findOne({
+      where: { deliveryPartnerId: partnerId, isPrimary: true, status: PayoutAccountStatus.VERIFIED }
+    });
+    return account ? this.mapPayoutAccountToResponse(account) : null;
+  }
+
+  private mapPayoutAccountToResponse(acc: PartnerPayoutAccount): any {
+    return {
+      id: acc.id,
+      deliveryPartnerId: acc.deliveryPartnerId,
+      accountType: acc.accountType,
+      status: acc.status,
+      accountHolderName: acc.accountHolderName || null,
+      maskedAccountNumber: acc.accountLast4 ? `••••••${acc.accountLast4}` : null,
+      ifscCode: acc.ifscCode || null,
+      bankName: acc.bankName || null,
+      upiId: acc.upiId || null,
+      isPrimary: acc.isPrimary,
+      verificationNote: acc.verificationNote || null,
+      verifiedByUserId: acc.verifiedByUserId || null,
+      verifiedAt: acc.verifiedAt || null,
+      createdAt: acc.createdAt,
+      updatedAt: acc.updatedAt,
+    };
+  }
+
+  async getPartnerIdFromUserId(userId: number): Promise<number> {
+    const partner = await this.partnerRepository.findOne({ where: { userId } });
+    if (!partner) {
+      throw new NotFoundException('Delivery partner profile not found.');
+    }
+    return partner.id;
   }
 }
 

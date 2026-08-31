@@ -28,6 +28,8 @@ import BrandingAppIcons from './pages/super-admin/BrandingAppIcons';
 import Analytics from './pages/super-admin/Analytics';
 import PushCampaignsList from './pages/super-admin/PushCampaignsList';
 import CreatePushCampaign from './pages/super-admin/CreatePushCampaign';
+import PartnerWalletsList from './pages/super-admin/PartnerWalletsList';
+import PartnerWalletDetails from './pages/super-admin/PartnerWalletDetails';
 
 // Hotel Admin Pages
 import HotelAdminDashboard from './pages/hotel-admin/HotelAdminDashboard';
@@ -274,8 +276,9 @@ export default function App() {
     const isBrandingRoute = currentPath === '/super-admin/branding' || currentPath === '/super-admin/branding/app-icons';
     const isAnalyticsRoute = currentPath === '/super-admin/analytics';
     const isPushCampaignsRoute = currentPath === '/super-admin/push-campaigns' || currentPath.startsWith('/super-admin/push-campaigns/');
+    const isPaymentsRoute = currentPath === '/super-admin/payments' || currentPath.startsWith('/super-admin/payments/');
 
-    const currentTab = isBrandingRoute ? 'branding' : (isOffersRoute ? 'offers' : (isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : (isAnalyticsRoute ? 'analytics' : (isPushCampaignsRoute ? 'push-campaigns' : 'dashboard'))))))));
+    const currentTab = isBrandingRoute ? 'branding' : (isOffersRoute ? 'offers' : (isFoodCategoriesRoute ? 'food-categories' : (isOrdersRoute ? 'orders' : (isDeliveryPartnersRoute ? 'delivery-partners' : (isHotelAdminsRoute ? 'hotel-admins' : (isHotelRoute ? 'hotels' : (isAnalyticsRoute ? 'analytics' : (isPushCampaignsRoute ? 'push-campaigns' : (isPaymentsRoute ? 'payments' : 'dashboard')))))))));
 
     const renderSuperAdminContent = () => {
       if (currentPath === '/super-admin/push-campaigns') {
@@ -375,6 +378,16 @@ export default function App() {
           if (parts.length === 5 && parts[4] === 'edit') {
             return <EditHotel id={id} onNavigate={navigateTo} />;
           }
+        }
+      }
+      if (currentPath === '/super-admin/payments') {
+        return <PartnerWalletsList onNavigate={navigateTo} />;
+      }
+      if (currentPath.startsWith('/super-admin/payments/')) {
+        const parts = currentPath.split('/');
+        const id = parseInt(parts[3], 10);
+        if (!isNaN(id)) {
+          return <PartnerWalletDetails partnerId={id} onNavigate={navigateTo} />;
         }
       }
       if (currentPath === '/super-admin/analytics') {

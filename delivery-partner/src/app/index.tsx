@@ -342,6 +342,18 @@ export default function AppIndex() {
   const [editEmail, setEditEmail] = useState('');
   const [personalUpdateError, setPersonalUpdateError] = useState('');
   const [isUpdatingPersonal, setIsUpdatingPersonal] = useState(false);
+  const [payoutAccounts, setPayoutAccounts] = useState<any[]>([]);
+  const [payoutLoading, setPayoutLoading] = useState(false);
+  const [isAddPayoutModalOpen, setIsAddPayoutModalOpen] = useState(false);
+  const [addPayoutType, setAddPayoutType] = useState<'BANK' | 'UPI'>('BANK');
+  const [addHolderName, setAddHolderName] = useState('');
+  const [addAccountNumber, setAddAccountNumber] = useState('');
+  const [addConfirmAccountNumber, setAddConfirmAccountNumber] = useState('');
+  const [addIfsc, setAddIfsc] = useState('');
+  const [addBankName, setAddBankName] = useState('');
+  const [addUpiId, setAddUpiId] = useState('');
+  const [payoutActionLoading, setPayoutActionLoading] = useState(false);
+  const [payoutActionError, setPayoutActionError] = useState<string | null>(null);
 
   const [changePasswordCurrent, setChangePasswordCurrent] = useState('');
   const [changePasswordNew, setChangePasswordNew] = useState('');
@@ -1939,6 +1951,19 @@ export default function AppIndex() {
     }
   }, [clearUniqueError, logUniqueError]);
 
+  const fetchPayoutAccounts = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setPayoutLoading(true);
+    try {
+      const data = await api.getPayoutAccounts();
+      setPayoutAccounts(data || []);
+    } catch (err: any) {
+      console.warn('Failed to fetch payout accounts:', err);
+    } finally {
+      setPayoutLoading(false);
+    }
+  }, [isAuthenticated]);
+
   const fetchAvailableOrders = useCallback(async () => {
     try {
       const data = await api.getAvailableOrders();
@@ -2067,6 +2092,13 @@ export default function AppIndex() {
       }
     }
   }, [isAuthenticated, activeTab, fetchCompletedOrders, fetchNotifications]);
+
+  // Fetch payout accounts when subscreen changes to bank
+  useEffect(() => {
+    if (isAuthenticated && activeProfileSubScreen === 'bank') {
+      fetchPayoutAccounts();
+    }
+  }, [isAuthenticated, activeProfileSubScreen, fetchPayoutAccounts]);
 
   // Handle Android back button when viewing active order or success screen
   useEffect(() => {
@@ -5235,6 +5267,205 @@ export default function AppIndex() {
     );
   };
 
+  const renderAddPayoutModal = () => {
+    if (!isAddPayoutModalOpen) return null;
+
+    const handleSubmit = async () => {
+      setPayoutActionError(null);
+      
+      const payload: any = {
+        accountType: addPayoutType,
+      };
+
+      if (addPayoutType === 'BANK') {
+        if (!addHolderName.trim() || !addAccountNumber.trim() || !addConfirmAccountNumber.trim() || !addIfsc.trim()) {
+          setPayoutActionError('Please fill in all bank account fields.');
+          return;
+        }
+        if (addAccountNumber.trim() !== addConfirmAccountNumber.trim()) {
+          setPayoutActionError('Account numbers do not match.');
+          return;
+        }
+        if (!/^\d{9,18}$/.test(addAccountNumber.trim())) {
+          setPayoutActionError('Account number must be between 9 and 18 digits.');
+          return;
+        }
+        if (!/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(addIfsc.trim())) {
+          setPayoutActionError('Invalid IFSC code format (e.g. HDFC0001234).');
+          return;
+        }
+        payload.accountHolderName = addHolderName.trim();
+        payload.accountNumber = addAccountNumber.trim();
+        payload.confirmAccountNumber = addConfirmAccountNumber.trim();
+        payload.ifscCode = addIfsc.trim().toUpperCase();
+        if (addBankName.trim()) {
+          payload.bankName = addBankName.trim();
+        }
+      } else {
+        if (!addUpiId.trim()) {
+          setPayoutActionError('UPI ID is required.');
+          return;
+        }
+        if (!/^[\w.-]+@[\w.-]+$/.test(addUpiId.trim())) {
+          setPayoutActionError('Invalid UPI ID format (e.g. name@upi).');
+          return;
+        }
+        payload.upiId = addUpiId.trim().toLowerCase();
+      }
+
+      try {
+        setPayoutActionLoading(true);
+        await api.createPayoutAccount(payload);
+        setIsAddPayoutModalOpen(false);
+        await fetchPayoutAccounts();
+      } catch (err: any) {
+        setPayoutActionError(err.message || 'Failed to create payout account.');
+      } finally {
+        setPayoutActionLoading(false);
+      }
+    };
+
+    return (
+      <Modal
+        visible={isAddPayoutModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsAddPayoutModalOpen(false)}
+      >
+        <TouchableOpacity 
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
+          activeOpacity={1}
+          onPress={() => {
+            if (!payoutActionLoading) setIsAddPayoutModalOpen(false);
+          }}
+        >
+          <TouchableOpacity 
+            activeOpacity={1}
+            style={{ width: '90%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, gap: 14, borderWidth: 1, borderColor: '#E2E8F0' }}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={{ fontSize: 16, fontWeight: '900', color: '#38220F' }}>Add Payout Account</Text>
+              <TouchableOpacity onPress={() => setIsAddPayoutModalOpen(false)} disabled={payoutActionLoading}>
+                <Ionicons name="close" size={20} color="#8A7A6E" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Error Message */}
+            {payoutActionError && (
+              <View style={{ backgroundColor: '#FEF2F2', padding: 10, borderRadius: 6, marginBottom: 4 }}>
+                <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '600' }}>{payoutActionError}</Text>
+              </View>
+            )}
+
+            {/* Type selector */}
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 6 }}>
+              <TouchableOpacity 
+                onPress={() => setAddPayoutType('BANK')}
+                style={{ flex: 1, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: addPayoutType === 'BANK' ? '#F97316' : '#E2E8F0', backgroundColor: addPayoutType === 'BANK' ? '#FFF7ED' : '#FFFFFF', alignItems: 'center' }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '800', color: addPayoutType === 'BANK' ? '#F97316' : '#8A7A6E' }}>Bank Account</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => setAddPayoutType('UPI')}
+                style={{ flex: 1, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: addPayoutType === 'UPI' ? '#F97316' : '#E2E8F0', backgroundColor: addPayoutType === 'UPI' ? '#FFF7ED' : '#FFFFFF', alignItems: 'center' }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '800', color: addPayoutType === 'UPI' ? '#F97316' : '#8A7A6E' }}>UPI ID</Text>
+              </TouchableOpacity>
+            </View>
+
+            {addPayoutType === 'BANK' ? (
+              <View style={{ gap: 10 }}>
+                {/* Account Holder Name */}
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#8A7A6E' }}>Account Holder Name</Text>
+                  <TextInput
+                    value={addHolderName}
+                    onChangeText={setAddHolderName}
+                    placeholder="Enter name as in bank record"
+                    placeholderTextColor="#94A3B8"
+                    style={{ borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 10, fontSize: 13, color: '#0F172A' }}
+                  />
+                </View>
+                {/* Account Number */}
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#8A7A6E' }}>Account Number</Text>
+                  <TextInput
+                    value={addAccountNumber}
+                    onChangeText={setAddAccountNumber}
+                    secureTextEntry
+                    keyboardType="numeric"
+                    placeholder="Enter account number"
+                    placeholderTextColor="#94A3B8"
+                    style={{ borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 10, fontSize: 13, color: '#0F172A' }}
+                  />
+                </View>
+                {/* Confirm Account Number */}
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#8A7A6E' }}>Confirm Account Number</Text>
+                  <TextInput
+                    value={addConfirmAccountNumber}
+                    onChangeText={setAddConfirmAccountNumber}
+                    keyboardType="numeric"
+                    placeholder="Re-enter account number"
+                    placeholderTextColor="#94A3B8"
+                    style={{ borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 10, fontSize: 13, color: '#0F172A' }}
+                  />
+                </View>
+                {/* IFSC Code */}
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#8A7A6E' }}>IFSC Code</Text>
+                  <TextInput
+                    value={addIfsc}
+                    onChangeText={setAddIfsc}
+                    autoCapitalize="characters"
+                    placeholder="Enter 11-digit IFSC code"
+                    placeholderTextColor="#94A3B8"
+                    style={{ borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 10, fontSize: 13, color: '#0F172A' }}
+                  />
+                </View>
+                {/* Bank Name */}
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#8A7A6E' }}>Bank Name (Optional)</Text>
+                  <TextInput
+                    value={addBankName}
+                    onChangeText={setAddBankName}
+                    placeholder="Enter bank name"
+                    placeholderTextColor="#94A3B8"
+                    style={{ borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 10, fontSize: 13, color: '#0F172A' }}
+                  />
+                </View>
+              </View>
+            ) : (
+              <View style={{ gap: 4 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#8A7A6E' }}>UPI ID</Text>
+                <TextInput
+                  value={addUpiId}
+                  onChangeText={setAddUpiId}
+                  autoCapitalize="none"
+                  placeholder="Enter UPI ID (e.g. name@okaxis)"
+                  placeholderTextColor="#94A3B8"
+                  style={{ borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 10, fontSize: 13, color: '#0F172A' }}
+                />
+              </View>
+            )}
+
+            <TouchableOpacity 
+              onPress={handleSubmit}
+              disabled={payoutActionLoading}
+              style={{ backgroundColor: '#F97316', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10, opacity: payoutActionLoading ? 0.7 : 1 }}
+            >
+              {payoutActionLoading ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>Submit Details</Text>
+              )}
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+    );
+  };
+
   const renderBankDetailsScreen = () => {
     const bgCol = '#FAF9F6';
     const cardBg = '#FFFFFF';
@@ -5242,7 +5473,29 @@ export default function AppIndex() {
     const textTitle = '#38220F';
     const textSub = '#8A7A6E';
 
-    const bank = currentPartner?.bank;
+    const handleSetPrimary = async (accId: number) => {
+      try {
+        setPayoutActionLoading(true);
+        await api.setPrimaryPayoutAccount(accId);
+        await fetchPayoutAccounts();
+      } catch (err: any) {
+        alert(err.message || 'Failed to set primary payout account.');
+      } finally {
+        setPayoutActionLoading(false);
+      }
+    };
+
+    const handleDisable = async (accId: number) => {
+      try {
+        setPayoutActionLoading(true);
+        await api.disablePayoutAccount(accId);
+        await fetchPayoutAccounts();
+      } catch (err: any) {
+        alert(err.message || 'Failed to disable payout account.');
+      } finally {
+        setPayoutActionLoading(false);
+      }
+    };
 
     return (
       <View style={{ flex: 1, backgroundColor: bgCol }}>
@@ -5253,77 +5506,133 @@ export default function AppIndex() {
             style={styles.subHeaderBackBtn}
           >
             <Ionicons name="arrow-back" size={20} color={textTitle} />
-            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Bank Details</Text>
+            <Text style={[styles.subHeaderBackText, { color: textTitle }]}>Payout Accounts</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
-          {/* Top Bank Identity Card */}
-          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder, flexDirection: 'row', alignItems: 'center' }]}>
-            <View style={styles.zoneIconContainer}>
-              <Ionicons name="business" size={24} color="#F97316" />
-            </View>
-            <View style={{ flex: 1, marginLeft: 16 }}>
-              <Text style={{ fontSize: 16, fontWeight: '900', color: textTitle }}>Bank Account</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6, alignSelf: 'flex-start', marginTop: 4 }}>
-                <Ionicons name="checkmark-circle" size={10} color="#059669" style={{ marginRight: 3 }} />
-                <Text style={{ fontSize: 8, fontWeight: '900', color: '#059669' }}>Verified</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Bank Fields Card */}
-          <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View>
-                <Text style={[styles.detailLabel, { color: textSub }]}>Account Holder</Text>
-                <Text style={[styles.detailValue, { color: textTitle }]}>{bank?.accountHolderName || 'Not provided'}</Text>
-              </View>
-              <Ionicons name="person" size={20} color="#8A7A6E" />
-            </View>
-
-            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View>
-                <Text style={[styles.detailLabel, { color: textSub }]}>Account Number</Text>
-                <Text style={[styles.detailValue, { color: textTitle }]}>{bank?.maskedAccountNumber || 'Not provided'}</Text>
-              </View>
-              <Ionicons name="card" size={20} color="#8A7A6E" />
-            </View>
-
-            <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View>
-                <Text style={[styles.detailLabel, { color: textSub }]}>IFSC Code</Text>
-                <Text style={[styles.detailValue, { color: textTitle }]}>{bank?.ifscCode || 'Not provided'}</Text>
-              </View>
-              <Ionicons name="code-working" size={20} color="#8A7A6E" />
-            </View>
-
-            {bank?.upiId ? (
-              <>
-                <View style={{ borderBottomWidth: 1, borderBottomColor: cardBorder, marginVertical: 12 }} />
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View>
-                    <Text style={[styles.detailLabel, { color: textSub }]}>UPI ID</Text>
-                    <Text style={[styles.detailValue, { color: textTitle }]}>{bank.upiId}</Text>
-                  </View>
-                  <Ionicons name="send" size={20} color="#8A7A6E" />
-                </View>
-              </>
-            ) : null}
-          </View>
-
-          {/* Info notice box */}
-          <View style={[styles.infoNoticeBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
-            <Ionicons name="lock-closed" size={20} color="#F97316" style={{ marginRight: 10, marginTop: 2 }} />
-            <Text style={[styles.infoNoticeText, { color: '#78350F', flex: 1 }]}>
-              Your bank details are securely stored and used for partner payouts. To update these details, please contact partner support.
+        <ScrollView contentContainerStyle={{ paddingBottom: Math.max(32, insets.bottom + 16), padding: 16 }}>
+          {/* Top Info Banner */}
+          <View style={[styles.infoNoticeBox, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', marginBottom: 16, marginHorizontal: 0 }]}>
+            <Ionicons name="information-circle-outline" size={20} color="#2563EB" style={{ marginRight: 10, marginTop: 2 }} />
+            <Text style={[styles.infoNoticeText, { color: '#1E3A8A', flex: 1 }]}>
+              Manage bank accounts or UPI IDs for receiving payouts. Only verified accounts can be set as primary.
             </Text>
           </View>
+
+          {payoutLoading ? (
+            <ActivityIndicator size="large" color="#F97316" style={{ marginVertical: 40 }} />
+          ) : payoutAccounts.length > 0 ? (
+            <View style={{ gap: 12 }}>
+              {payoutAccounts.map((acc) => {
+                const isBank = acc.accountType === 'BANK';
+                let statusBg = '#FFF7ED';
+                let statusText = '#EA580C';
+                let statusLabel = 'PENDING';
+
+                if (acc.status === 'VERIFIED') {
+                  statusBg = '#ECFDF5';
+                  statusText = '#059669';
+                  statusLabel = 'VERIFIED';
+                } else if (acc.status === 'REJECTED') {
+                  statusBg = '#FEF2F2';
+                  statusText = '#DC2626';
+                  statusLabel = 'REJECTED';
+                } else if (acc.status === 'DISABLED') {
+                  statusBg = '#F1F5F9';
+                  statusText = '#64748B';
+                  statusLabel = 'DISABLED';
+                }
+
+                return (
+                  <View key={acc.id} style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder, padding: 16, gap: 12, marginHorizontal: 0 }]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name={isBank ? 'business' : 'qr-code'} size={18} color={textTitle} />
+                        <Text style={{ fontSize: 14, fontWeight: '900', color: textTitle }}>
+                          {isBank ? 'Bank Account' : 'UPI ID'}
+                        </Text>
+                        {acc.isPrimary && (
+                          <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                            <Text style={{ fontSize: 8, fontWeight: '900', color: '#4F46E5' }}>PRIMARY</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ backgroundColor: statusBg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '900', color: statusText }}>{statusLabel}</Text>
+                      </View>
+                    </View>
+
+                    {isBank ? (
+                      <View style={{ gap: 4 }}>
+                        <Text style={{ fontSize: 12, color: textSub }}>Account Holder: <Text style={{ color: textTitle, fontWeight: '700' }}>{acc.accountHolderName}</Text></Text>
+                        <Text style={{ fontSize: 12, color: textSub }}>Account Number: <Text style={{ color: textTitle, fontWeight: '700' }}>{acc.maskedAccountNumber}</Text></Text>
+                        <Text style={{ fontSize: 12, color: textSub }}>IFSC Code: <Text style={{ color: textTitle, fontWeight: '700' }}>{acc.ifscCode}</Text></Text>
+                        {acc.bankName ? <Text style={{ fontSize: 12, color: textSub }}>Bank Name: <Text style={{ color: textTitle, fontWeight: '700' }}>{acc.bankName}</Text></Text> : null}
+                      </View>
+                    ) : (
+                      <View style={{ gap: 4 }}>
+                        <Text style={{ fontSize: 12, color: textSub }}>UPI ID: <Text style={{ color: textTitle, fontWeight: '700' }}>{acc.upiId}</Text></Text>
+                      </View>
+                    )}
+
+                    {acc.verificationNote ? (
+                      <View style={{ backgroundColor: '#F8FAFC', padding: 8, borderRadius: 6, marginTop: 4 }}>
+                        <Text style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Note: {acc.verificationNote}</Text>
+                      </View>
+                    ) : null}
+
+                    {acc.status !== 'DISABLED' && (
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
+                        {acc.status === 'VERIFIED' && !acc.isPrimary && (
+                          <TouchableOpacity 
+                            onPress={() => handleSetPrimary(acc.id)} 
+                            disabled={payoutActionLoading} 
+                            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#4F46E5', backgroundColor: '#FFFFFF' }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#4F46E5' }}>Make Primary</Text>
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity 
+                          onPress={() => handleDisable(acc.id)} 
+                          disabled={payoutActionLoading} 
+                          style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#EF4444', backgroundColor: '#FFFFFF' }}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#EF4444' }}>Disable</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={[styles.detailCard, { backgroundColor: cardBg, borderColor: cardBorder, padding: 24, alignItems: 'center', marginHorizontal: 0 }]}>
+              <Ionicons name="card-outline" size={40} color={textSub} style={{ marginBottom: 12 }} />
+              <Text style={{ fontSize: 14, fontWeight: '800', color: textTitle, marginBottom: 4 }}>No Payout Accounts</Text>
+              <Text style={{ fontSize: 12, color: textSub, textAlign: 'center' }}>You have not added any payout accounts yet.</Text>
+            </View>
+          )}
+
+          {/* Add Payout Account Button */}
+          {!payoutLoading && (
+            <TouchableOpacity 
+              onPress={() => {
+                setAddHolderName('');
+                setAddAccountNumber('');
+                setAddConfirmAccountNumber('');
+                setAddIfsc('');
+                setAddBankName('');
+                setAddUpiId('');
+                setPayoutActionError(null);
+                setIsAddPayoutModalOpen(true);
+              }}
+              style={[styles.saveBtn, { marginHorizontal: 0, marginTop: 20 }]}
+            >
+              <Text style={styles.saveBtnText}>+ Add Payout Account</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
+        {renderAddPayoutModal()}
       </View>
     );
   };

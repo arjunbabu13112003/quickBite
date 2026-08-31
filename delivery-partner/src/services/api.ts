@@ -301,6 +301,116 @@ const apiMethods = {
     );
   },
 
+  getPayoutAccounts: async (): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/payout-accounts'), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        return await res.json();
+      },
+      () => api.getPayoutAccounts(),
+      false
+    );
+  },
+
+  createPayoutAccount: async (dto: any): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl('/delivery-partners/me/payout-accounts'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(dto),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'Failed to create payout account.');
+        }
+        return await res.json();
+      },
+      () => api.createPayoutAccount(dto),
+      false
+    );
+  },
+
+  updatePayoutAccount: async (id: number, dto: any): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl(`/delivery-partners/me/payout-accounts/${id}`), {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(dto),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'Failed to update payout account.');
+        }
+        return await res.json();
+      },
+      () => api.updatePayoutAccount(id, dto),
+      false
+    );
+  },
+
+  setPrimaryPayoutAccount: async (id: number): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl(`/delivery-partners/me/payout-accounts/${id}/set-primary`), {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'Failed to set primary payout account.');
+        }
+        return await res.json();
+      },
+      () => api.setPrimaryPayoutAccount(id),
+      false
+    );
+  },
+
+  disablePayoutAccount: async (id: number): Promise<any> => {
+    return requestWithHandling(
+      async () => {
+        const token = await getAuthToken();
+        if (!token) throw new Error('No token found');
+        const res = await fetch(resolveApiUrl(`/delivery-partners/me/payout-accounts/${id}/disable`), {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'Failed to disable payout account.');
+        }
+        return await res.json();
+      },
+      () => api.disablePayoutAccount(id),
+      false
+    );
+  },
+
   getIncomingAssignment: async (): Promise<any> => {
     return requestWithHandling(
       async () => {

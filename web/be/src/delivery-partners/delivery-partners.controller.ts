@@ -43,6 +43,8 @@ import { JwtAuthGuard } from '../users/jwt-auth.guard';
 import { RolesGuard } from '../users/roles.guard';
 import { Roles } from '../users/roles.decorator';
 import { UserRole } from '../users/user-role.enum';
+import { CreatePayoutAccountDto } from '../payments/dto/create-payout-account.dto';
+import { UpdatePayoutAccountDto } from '../payments/dto/update-payout-account.dto';
 
 const SECURE_UPLOAD_DIR = join(process.cwd(), 'secure_uploads', 'delivery-partners', 'documents');
 
@@ -523,7 +525,68 @@ export class DeliveryPartnersController {
     return this.partnersService.getPartnerDetailsForAdmin(id);
   }
 
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Get('delivery-partners/me/payout-accounts')
+  async getMyPayoutAccounts(@Request() req) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const partnerId = await this.paymentsService.getPartnerIdFromUserId(req.user.userId);
+    return this.paymentsService.getPartnerPayoutAccounts(partnerId);
+  }
 
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/payout-accounts')
+  async createMyPayoutAccount(
+    @Request() req,
+    @Body() dto: CreatePayoutAccountDto,
+  ) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const partnerId = await this.paymentsService.getPartnerIdFromUserId(req.user.userId);
+    return this.paymentsService.createPartnerPayoutAccount(partnerId, dto);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Patch('delivery-partners/me/payout-accounts/:id')
+  async updateMyPayoutAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+    @Body() dto: UpdatePayoutAccountDto,
+  ) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const partnerId = await this.paymentsService.getPartnerIdFromUserId(req.user.userId);
+    return this.paymentsService.updatePartnerPayoutAccount(partnerId, id, dto);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/payout-accounts/:id/set-primary')
+  async setMyPrimaryPayoutAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const partnerId = await this.paymentsService.getPartnerIdFromUserId(req.user.userId);
+    return this.paymentsService.setPrimaryPayoutAccount(partnerId, id);
+  }
+
+  @Roles(UserRole.DELIVERY_PARTNER)
+  @Post('delivery-partners/me/payout-accounts/:id/disable')
+  async disableMyPayoutAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ) {
+    if (req.user?.role !== UserRole.DELIVERY_PARTNER) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const partnerId = await this.paymentsService.getPartnerIdFromUserId(req.user.userId);
+    return this.paymentsService.disablePartnerPayoutAccount(partnerId, id);
+  }
 }
 
 @Controller('delivery-partners')

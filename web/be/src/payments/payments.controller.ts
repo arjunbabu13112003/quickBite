@@ -21,6 +21,8 @@ import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { VerifyRazorpayPaymentDto } from './dto/verify-razorpay-payment.dto';
 import { PartnerWalletAdjustmentDirection } from './entities/partner-wallet-adjustment.entity';
 import { PartnerSettlementStatus } from './entities/partner-settlement.entity';
+import { PayoutAccountStatus } from './entities/partner-payout-account.entity';
+import { VerifyPayoutAccountDto } from './dto/verify-payout-account.dto';
 
 @Controller('payments')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -193,14 +195,39 @@ export class PaymentsController {
 
   @Roles(UserRole.SUPER_ADMIN)
   @Get('admin/partner-wallets')
-  async getAdminPartnerWallets() {
-    return this.paymentsService.getPartnerWallets();
+  async getAdminPartnerWallets(@Query('search') search?: string) {
+    return this.paymentsService.getPartnerWallets(search);
   }
 
   @Roles(UserRole.SUPER_ADMIN)
   @Get('admin/delivery-partners/:partnerId/wallet')
   async getAdminPartnerWallet(@Param('partnerId', ParseIntPipe) partnerId: number) {
     return this.paymentsService.getWalletSummary(partnerId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/delivery-partners/:partnerId/earnings')
+  async getAdminPartnerEarnings(
+    @Param('partnerId', ParseIntPipe) partnerId: number,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+  ) {
+    if (page < 1 || limit < 1) {
+      return { items: [], total: 0, page, limit };
+    }
+    return this.paymentsService.getEarningsByPartnerId(partnerId, page, limit);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/delivery-partners/:partnerId/settlements')
+  async getAdminPartnerSettlements(@Param('partnerId', ParseIntPipe) partnerId: number) {
+    return this.paymentsService.getSettlementsByPartnerId(partnerId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/partner-settlements/:settlementId')
+  async getAdminSettlementDetails(@Param('settlementId', ParseIntPipe) settlementId: number) {
+    return this.paymentsService.getSettlementDetails(settlementId);
   }
 
   @Roles(UserRole.SUPER_ADMIN)
@@ -234,6 +261,12 @@ export class PaymentsController {
   }
 
   @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/partner-settlements/:settlementId/cancelled')
+  async cancelAdminSettlement(@Param('settlementId', ParseIntPipe) settlementId: number) {
+    return this.paymentsService.updateSettlementStatus(settlementId, PartnerSettlementStatus.CANCELLED);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
   @Post('admin/delivery-partners/:partnerId/wallet-adjustments')
   async createAdminWalletAdjustment(
     @Param('partnerId', ParseIntPipe) partnerId: number,
@@ -243,5 +276,69 @@ export class PaymentsController {
     @Request() req,
   ) {
     return this.paymentsService.createWalletAdjustment(partnerId, amount, direction, reason, req.user.userId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/delivery-partners/:partnerId/cod-remittances')
+  async getAdminPartnerCodRemittances(@Param('partnerId', ParseIntPipe) partnerId: number) {
+    return this.paymentsService.getCodRemittances(partnerId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/delivery-partners/:partnerId/cod-remittances')
+  async recordAdminPartnerCodRemittance(
+    @Param('partnerId', ParseIntPipe) partnerId: number,
+    @Body('amount') amount: string,
+    @Body('paymentMethod') paymentMethod: string,
+    @Body('reference') reference: string,
+    @Body('notes') notes: string,
+    @Request() req,
+  ) {
+    return this.paymentsService.recordCodRemittance(
+      partnerId,
+      amount,
+      paymentMethod,
+      reference,
+      notes,
+      req.user.userId,
+    );
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/payout-accounts')
+  async getAdminPayoutAccounts(@Query('status') status?: PayoutAccountStatus) {
+    return this.paymentsService.getAdminPayoutAccounts(status);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('admin/delivery-partners/:partnerId/payout-accounts')
+  async getAdminPartnerPayoutAccounts(@Param('partnerId', ParseIntPipe) partnerId: number) {
+    return this.paymentsService.getPartnerPayoutAccountsForAdmin(partnerId);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/payout-accounts/:id/verify')
+  async verifyPayoutAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: VerifyPayoutAccountDto,
+    @Request() req,
+  ) {
+    return this.paymentsService.verifyPayoutAccount(id, req.user.userId, dto.verificationNote);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/payout-accounts/:id/reject')
+  async rejectPayoutAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('verificationNote') note: string,
+    @Request() req,
+  ) {
+    return this.paymentsService.rejectPayoutAccount(id, req.user.userId, note);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('admin/payout-accounts/:id/disable')
+  async disablePayoutAccountByAdmin(@Param('id', ParseIntPipe) id: number) {
+    return this.paymentsService.disablePayoutAccountByAdmin(id);
   }
 }
